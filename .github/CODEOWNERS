@@ -1,0 +1,23 @@
+# Reviewers are requested automatically for these paths.
+# TODO: once teammates share their GitHub usernames, uncomment the lines below and fill them in.
+
+*                         @NotArnav03
+/docs/                    @NotArnav03
+/.claude/                 @NotArnav03
+/.githooks/               @NotArnav03
+/packages/db/             @NotArnav03
+/packages/paypal-mock/    @NotArnav03
+/tools/                   @NotArnav03
+
+# /packages/contracts/              @NotArnav03 <ishan> <aditya> <ayush> <om>
+# /packages/policy/                 <ishan>
+# /packages/evals/                  <ishan>
+# /apps/api/src/modules/agent/      <ishan>
+# /packages/widget/                 <aditya>
+# /apps/portal/                     <aditya>
+# /apps/judge/                      <aditya>
+# /apps/demo-store/                 <aditya>
+# /apps/dashboard/                  <ayush>
+# /packages/ui/                     <ayush>
+# /apps/api/src/modules/recovery/   <om>
+# /apps/api/src/modules/insights/   <om>

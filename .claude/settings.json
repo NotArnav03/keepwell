@@ -1,0 +1,60 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(gh pr merge *)",
+      "Bash(gh repo delete *)",
+      "Bash(gh repo edit *)",
+      "Bash(gh api *branches*protection*)",
+      "PowerShell(gh pr merge *)",
+      "PowerShell(gh repo delete *)",
+      "PowerShell(gh repo edit *)",
+      "PowerShell(gh api *branches*protection*)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Read(**/.env.production)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.demo)"
+    ],
+    "ask": [
+      "Bash(git reset --hard*)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git branch --delete --force *)",
+      "Bash(git stash drop*)",
+      "Bash(git stash clear*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore .*)",
+      "Bash(git rebase *)",
+      "Bash(git push --force-with-lease*)",
+      "Bash(git push origin --delete *)",
+      "Bash(rm -rf *)",
+      "PowerShell(git reset --hard*)",
+      "PowerShell(git clean *)",
+      "PowerShell(git branch -D *)",
+      "PowerShell(git stash drop*)",
+      "PowerShell(git stash clear*)",
+      "PowerShell(git checkout -- *)",
+      "PowerShell(git restore .*)",
+      "PowerShell(git rebase *)",
+      "PowerShell(git push --force-with-lease*)",
+      "PowerShell(git push origin --delete *)",
+      "PowerShell(Remove-Item * -Recurse*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking git safety rules"
+          }
+        ]
+      }
+    ]
+  }
+}

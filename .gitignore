@@ -1,0 +1,30 @@
+# Secrets: never commit (CLAUDE.md §1.5)
+.env
+.env.*
+!.env.example
+
+# Private pre-build research (competitor analysis); kept out of the public repo
+research/
+
+# Personal Claude Code overrides (the shared .claude/settings.json IS committed)
+.claude/settings.local.json
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.turbo/
+coverage/
+*.tsbuildinfo
+
+# Test and tool output
+playwright-report/
+test-results/
+*.log
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/*
+!.vscode/extensions.json
+.idea/

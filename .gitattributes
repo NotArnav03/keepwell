@@ -1,0 +1,5 @@
+# LF everywhere, so Windows, macOS and Linux teammates produce identical files
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
