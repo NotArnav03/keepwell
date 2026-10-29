@@ -8,13 +8,13 @@ When a subscriber goes to cancel, Keepwell has one short, honest conversation. I
 
 ## Team
 
-| Member | Workstream | Owns |
-|---|---|---|
-| Arnav | M1 Rails | PayPal gateway, webhooks, action engine, reconciler, audit log, infra, judge pool |
-| Ishan | M2 Brain | Policy engine, agent runtime, claims checker, eval harness |
-| Aditya | M3 Surfaces | Widget, sessions API, portal, Pantry Plan demo store, Judge Mode, MCP servers |
-| Ayush | M4 Cockpit | Merchant dashboard, Bryntum timeline, policy editor, onboarding, video |
-| Om | M5 Growth | Failed-payment recovery, win-back, notifications, insights + copilot, write-up |
+| Member | GitHub | Workstream | Owns |
+|---|---|---|---|
+| Arnav | @NotArnav03 | M1 Rails | PayPal gateway, webhooks, action engine, reconciler, audit log, infra, judge pool |
+| Ishan | @IshanGite | M2 Brain | Policy engine, agent runtime, claims checker, eval harness |
+| Aditya | @inslot2525-ctrl | M3 Surfaces | Widget, sessions API, portal, Pantry Plan demo store, Judge Mode, MCP servers |
+| Ayush | @Ayush32-creator | M4 Cockpit | Merchant dashboard, Bryntum timeline, policy editor, onboarding, video |
+| Om | @OMEExZORO | M5 Growth | Failed-payment recovery, win-back, notifications, insights + copilot, write-up |
 
 Work items are GitHub Issues labelled `owner:<name>`, grouped into milestones.
 

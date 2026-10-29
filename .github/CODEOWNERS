@@ -1,23 +1,35 @@
-# Reviewers are requested automatically for these paths.
-# TODO: once teammates share their GitHub usernames, uncomment the lines below and fill them in.
+# Reviewers are requested automatically for these paths. Later lines win.
+# Arnav @NotArnav03 · Ishan @IshanGite · Aditya @inslot2525-ctrl · Ayush @Ayush32-creator · Om @OMEExZORO
 
-*                         @NotArnav03
-/docs/                    @NotArnav03
-/.claude/                 @NotArnav03
-/.githooks/               @NotArnav03
-/packages/db/             @NotArnav03
-/packages/paypal-mock/    @NotArnav03
-/tools/                   @NotArnav03
+*                                 @NotArnav03
+/docs/                            @NotArnav03
+/.claude/                         @NotArnav03
+/.githooks/                       @NotArnav03
+/packages/db/                     @NotArnav03
+/packages/paypal-mock/            @NotArnav03
+/tools/                           @NotArnav03
 
-# /packages/contracts/              @NotArnav03 <ishan> <aditya> <ayush> <om>
-# /packages/policy/                 <ishan>
-# /packages/evals/                  <ishan>
-# /apps/api/src/modules/agent/      <ishan>
-# /packages/widget/                 <aditya>
-# /apps/portal/                     <aditya>
-# /apps/judge/                      <aditya>
-# /apps/demo-store/                 <aditya>
-# /apps/dashboard/                  <ayush>
-# /packages/ui/                     <ayush>
-# /apps/api/src/modules/recovery/   <om>
-# /apps/api/src/modules/insights/   <om>
+/packages/contracts/              @NotArnav03 @IshanGite @inslot2525-ctrl @Ayush32-creator @OMEExZORO
+
+/packages/policy/                 @IshanGite
+/packages/evals/                  @IshanGite
+/apps/api/src/modules/agent/      @IshanGite
+/apps/api/src/modules/policy/     @IshanGite
+
+/packages/widget/                 @inslot2525-ctrl
+/apps/portal/                     @inslot2525-ctrl
+/apps/judge/                      @inslot2525-ctrl
+/apps/demo-store/                 @inslot2525-ctrl
+/apps/api/src/modules/sessions/   @inslot2525-ctrl
+/apps/api/src/modules/portal/     @inslot2525-ctrl
+/apps/api/src/modules/mcp/        @inslot2525-ctrl
+/apps/api/src/modules/demo/       @inslot2525-ctrl
+
+/apps/dashboard/                  @Ayush32-creator
+/packages/ui/                     @Ayush32-creator
+/apps/api/src/modules/merchant/   @Ayush32-creator
+
+/apps/api/src/modules/recovery/   @OMEExZORO
+/apps/api/src/modules/winback/    @OMEExZORO
+/apps/api/src/modules/notify/     @OMEExZORO
+/apps/api/src/modules/insights/   @OMEExZORO
