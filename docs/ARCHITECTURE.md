@@ -258,6 +258,8 @@ stateDiagram-v2
   APPLIED --> CONFIRMED: GET or webhook diff shows target state
   APPLIED --> FAILED: not confirmed within 15 min (alert)
   PENDING --> SUPERSEDED: cancel requested for same subscription
+  RETRY_WAIT --> SUPERSEDED: cancel requested
+  AWAITING_BUYER --> SUPERSEDED: cancel requested
   FAILED --> [*]
   CONFIRMED --> [*]
   ABANDONED --> [*]
@@ -266,7 +268,7 @@ stateDiagram-v2
 
 Rules:
 - **One Action executes at a time per subscription.** Enforced with a Postgres advisory lock keyed on the subscription id. This prevents races such as a pause and a cancel at the same moment.
-- **Cancel pre-empts everything.** A cancel request supersedes pending Actions for that subscription.
+- **Cancel pre-empts everything.** A cancel request supersedes that subscription's Actions in PENDING, RETRY_WAIT or AWAITING_BUYER. One that is EXECUTING holds the lock and finishes first. The transitions live in `ACTION_TRANSITIONS` in `packages/contracts`.
 - **Retry budget:** about 8 attempts over about an hour (backoff 30 s → 15 min), then FAILED.
 - **A FAILED cancel is never silent.** It alerts the merchant (dashboard banner + email), and the subscriber is told and shown PayPal's autopay page as a guaranteed path.
 - **Composite offers are sagas**, for example "pause 2 months":
