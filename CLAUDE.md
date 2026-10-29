@@ -27,13 +27,14 @@ Keepwell is a five-person entry for the PayPal AI Hackathon: an honest AI retent
 2. **Don't commit or print secrets.** `.env` files are never committed and never read into the conversation. Credentials stay out of code, tests, fixtures, logs, docs, commit messages and PR text. Use `.env.example` to learn the variable names.
 3. **Sandbox only.** Only `api-m.sandbox.paypal.com` and sandbox credentials. Never live PayPal (`api-m.paypal.com`).
 4. **Don't rewrite `main`'s history.** No force pushes to `main`. Force-pushing your own feature branch is fine, using `--force-with-lease`.
-5. **Freeze dates (IST):**
+5. **Never close, delete or push to someone else's PR or branch.** Deleting a remote branch closes every PR based on it, which is how Om's #66 got closed. So merge with `gh pr merge <n> --squash` and **no `--delete-branch`**. Before any branch goes away, run `gh pr list --base <branch>` and retarget each PR with `gh pr edit <m> --base main`.
+6. **Freeze dates (IST):**
    - **Feature freeze 8 Nov 23:59.** After it, only bug fixes and polish.
    - **Submission 12 Nov 20:00.** After it, **no code changes** to the submitted project. Ops only: restarts and pool refills.
 
 ## 1a. Allowed, with care
 
-- **Merging PRs** (`gh pr merge --squash --delete-branch`) is fine once the checks pass and the user has said to merge. For anything non-trivial, get a teammate's review first.
+- **Merging PRs** (`gh pr merge <n> --squash`) is fine once the checks pass and the user has said to merge. GitHub deletes the merged branch itself (repo setting). For anything non-trivial, get a teammate's review first.
 - **Contract changes** (`packages/contracts`): label the PR `contract-change` and tag the owners who consume that contract. One of them approves.
 - **Infra** (Render, Neon, GitHub repo settings, deploys): only when the user explicitly asks. Arnav (M1) owns it.
 - **Destructive commands** (`git reset --hard`, `git clean`, `git branch -D`, dropping tables, deleting files you didn't create): check with the user first. Claude Code will prompt for these.
