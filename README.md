@@ -36,6 +36,7 @@ git config core.hooksPath .githooks          # blocks pushes to main
 corepack enable pnpm                         # pnpm version comes from package.json
 pnpm install
 cp .env.example .env                         # fill in yourself; PAYPAL_USE_MOCK=true works offline
+                                             # DATABASE_URL_UNPOOLED: your Neon branch's direct string (from Arnav)
 git switch -c <your-name>/<topic> origin/main
 ```
 

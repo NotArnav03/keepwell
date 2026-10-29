@@ -21,7 +21,8 @@ services:
         value: info
       - key: PAYPAL_API_BASE
         value: https://api-m.sandbox.paypal.com
-      - key: DATABASE_URL
+      # Neon `staging` branch, DIRECT connection string (host without -pooler).
+      - key: DATABASE_URL_UNPOOLED
         sync: false
       - key: PAYPAL_CLIENT_ID
         sync: false
