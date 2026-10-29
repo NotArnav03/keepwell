@@ -14,6 +14,17 @@ Conventions:
 
 ## 1. Domain types
 
+**As implemented in `packages/contracts/src/platform/` (v1, owner M1).** The zod there is the source of truth; differences from the sketch below:
+- Times are `IsoDateTime` (UTC, `Z` suffix). Raw PayPal shapes (`PayPalSubscription`, loose, only the fields we read) also accept offsets.
+- `SubscriptionSnapshot` adds `priceOverride: Money | null` (a discount's `fixed_price`).
+- `ActionCreateInput` is a union on `type` with **strict params per type** (`ActionParams`: `suspend`/`activate`/`cancel {reason ≤128}`, `revise {planId}`, `patch_price {fixedPrice | null}`, `refund {transactionId, amount}`, `capture_outstanding {amount}`, `create_plan {productId, name, price, interval}`). Only `create_plan` has `subscriptionId: null`. Optional `idempotencyKey`: the same key for the same merchant returns the existing Action.
+- `Action` adds `idempotencyKey` and `simulated`. `ACTION_TRANSITIONS` / `canTransition` hold the state machine (§6.4), shared by the engine and the fake.
+- `AuditEntry.kind` is dotted lower-case (`offer.presented`); `seq` starts at 1 per merchant with `prevHash = GENESIS_HASH`. `AuditAppendInput` defaults `simulated` to false. `AuditVerifyResult` is the `/m/audit/verify` body.
+- `canonicalJson()` is the one serialiser for anything hashed (audit chain, consent `offerHash`).
+- `ErrorEnvelope` is the API error body. `PayPalGatewayError` (`kind`: not_found, unauthorized, rate_limited, unavailable, invalid_request, unprocessable; `.retryable`) is the only error the gateway throws.
+- Events and jobs: `platformEventPayloads` (§2) feed the `domainEventPayloads` registry, which each workstream extends; `platformJobs` (§3) give each queue a payload schema and an `idempotencyKey(payload, now)` for pg-boss `singletonKey`.
+- Fakes in `@keepwell/contracts/fakes`: `FakeActionEngine`, `FakeAudit`, `FakeDomainEvents`, `FakePayPalGateway`, `uuidv7`.
+
 ```ts
 // ---------- shared ----------
 export const Money = z.object({ value: z.string().regex(/^\d+\.\d{2}$/), currency: z.string().length(3) });
@@ -324,21 +335,23 @@ These are TypeScript interfaces, so modules can be mocked before they exist.
 
 ```ts
 // M1 → everyone
+// As implemented in packages/contracts/src/platform/interfaces.ts
 interface PayPalGateway {
   getSubscription(merchantId: string, paypalSubscriptionId: string): Promise<PayPalSubscription>;
   listSubscriptions(merchantId: string, q: { statusUpdatedAfter?: string; planIds?: string[]; page?: number }): Promise<Page<PayPalSubscription>>;
-  // mutations are NOT exposed here; use ActionEngine
+  // mutations are NOT exposed here; use ActionEngine. Errors: PayPalGatewayError.
 }
 interface ActionEngine {
-  create(input: { merchantId: string; subscriptionId: string | null; type: ActionType; params: object; origin: ActionOrigin }, tx?: Tx): Promise<Action>;
-  get(actionId: string): Promise<Action>;
-  scheduleResume(subscriptionId: string, dueAt: string, tx?: Tx): Promise<void>;
+  create(input: ActionCreateInput, tx?: Tx): Promise<Action>;          // typed params per type, optional idempotencyKey
+  get(merchantId: string, actionId: string): Promise<Action | null>;   // merchant-scoped
+  scheduleResume(input: { merchantId; subscriptionId; dueAt }, tx?: Tx): Promise<string>; // scheduled resume id
 }
 interface Audit {
-  append(entry: Omit<AuditEntry, "seq" | "hash" | "prevHash" | "at">, tx?: Tx): Promise<AuditEntry>;
+  append(entry: AuditAppendInput, tx?: Tx): Promise<AuditEntry>;      // log sets seq, at, prevHash, hash
 }
 interface DomainEvents {
-  emit<T extends DomainEventType>(type: T, payload: DomainEventPayload<T>, tx?: Tx): Promise<void>;
+  // merchantId lives on the envelope, so payloads don't repeat it
+  emit<T extends DomainEventType>(event: { type: T; merchantId: string; payload: DomainEventPayload<T>; simulated?: boolean }, tx?: Tx): Promise<void>;
   on<T extends DomainEventType>(type: T, handlerName: string, fn: (e: DomainEvent<T>) => Promise<void>): void;
 }
 
