@@ -1,0 +1,49 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(gh repo delete *)",
+      "PowerShell(gh repo delete *)",
+      "Read(**/.env)",
+      "Read(**/.env.local)",
+      "Read(**/.env.*.local)",
+      "Read(**/.env.production)",
+      "Read(**/.env.staging)",
+      "Read(**/.env.demo)"
+    ],
+    "ask": [
+      "Bash(git reset --hard*)",
+      "Bash(git clean *)",
+      "Bash(git branch -D *)",
+      "Bash(git stash drop*)",
+      "Bash(git stash clear*)",
+      "Bash(git checkout -- *)",
+      "Bash(git restore .*)",
+      "Bash(rm -rf *)",
+      "PowerShell(git reset --hard*)",
+      "PowerShell(git clean *)",
+      "PowerShell(git branch -D *)",
+      "PowerShell(git stash drop*)",
+      "PowerShell(git stash clear*)",
+      "PowerShell(git checkout -- *)",
+      "PowerShell(git restore .*)",
+      "PowerShell(Remove-Item * -Recurse*)",
+      "Bash(gh repo edit *)",
+      "PowerShell(gh repo edit *)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/guard-git.mjs\"",
+            "timeout": 10,
+            "statusMessage": "Checking git safety rules"
+          }
+        ]
+      }
+    ]
+  }
+}

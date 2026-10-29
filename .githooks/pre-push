@@ -1,0 +1,22 @@
+#!/bin/sh
+# Blocks pushes that update or delete main/master on any remote (see CLAUDE.md §1).
+# Creating main on an empty remote (first push of the repo) is allowed once.
+# Enable per clone: git config core.hooksPath .githooks
+# GitHub branch protection on main is the real enforcement; this catches mistakes early.
+
+zero=0000000000000000000000000000000000000000
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  case "$remote_ref" in
+    refs/heads/main|refs/heads/master)
+      if [ "$remote_sha" = "$zero" ]; then
+        continue # creating the branch on an empty remote
+      fi
+      branch=${remote_ref#refs/heads/}
+      echo "pre-push: pushing to '$branch' is not allowed. Push your feature branch (<your-name>/<topic>) and open a PR." >&2
+      exit 1
+      ;;
+  esac
+done
+
+exit 0
