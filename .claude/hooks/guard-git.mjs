@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // PreToolUse guard for Bash and PowerShell commands (see CLAUDE.md §1).
-// Blocks only what could touch main/master directly: pushes that would update it, --mirror/--all
-// pushes, `git push --no-verify` (it skips the pre-push guard), and commits while on main/master.
-// Force pushes to feature branches and `gh pr merge` are allowed.
+// Blocks what could touch main/master directly (pushes that would update it, --mirror/--all pushes,
+// `git push --no-verify`, commits while on main/master) and remote branch deletion, which closes
+// every PR based on that branch (it closed Om's #66 once). Force pushes to feature branches and
+// `gh pr merge` without --delete-branch are allowed.
 // Fails open on internal errors: the git pre-push hook and GitHub branch protection are the
 // next layers, and a crashing guard must not block unrelated shell commands.
 
@@ -76,6 +77,10 @@ function currentBranch(cwd) {
 const isGit = (t) => /(^|[\\/])git(\.exe)?$/i.test(t);
 const stripRef = (r) => r.replace(/^refs\/heads\//, "");
 
+const BRANCH_DELETE_HELP =
+  "Deleting a remote branch closes every PR based on it. Run `gh pr list --base <branch>`, retarget " +
+  "each with `gh pr edit <n> --base main`, then let GitHub's auto-delete remove it or ask the user";
+
 // Short-flag cluster like -uf: true if `flag` appears before any value-taking flag.
 function clusterHas(token, flag, valueFlags) {
   if (!/^-[a-zA-Z]{2,}$/.test(token)) return token === `-${flag}`;
@@ -92,6 +97,7 @@ function checkPush(args, branch) {
     const a = args[i];
     if (a === "--no-verify") deny("`git push --no-verify` skips the pre-push guard");
     if (a === "--mirror" || a === "--all") deny(`\`git push ${a}\` would push main`);
+    if (a === "--delete" || clusterHas(a, "d", ["o"])) deny(BRANCH_DELETE_HELP);
     if (a === "-o" || a === "--push-option" || a === "--repo" || a === "--receive-pack" || a === "--exec") {
       i++;
       continue;
@@ -108,6 +114,7 @@ function checkPush(args, branch) {
     return;
   }
   for (const spec of refspecs) {
+    if (spec.startsWith(":")) deny(BRANCH_DELETE_HELP);
     const dstRaw = spec.includes(":") ? spec.slice(spec.indexOf(":") + 1) : spec;
     const dst = stripRef(dstRaw === "HEAD" ? (branch ?? "") : dstRaw);
     if (PROTECTED.has(dst))
@@ -134,6 +141,23 @@ function checkSegment(tokens, cwd) {
     const target = tokens[i + 1];
     return target ? resolve(cwd, target) : cwd;
   }
+
+  if (head === "gh" && tokens[i + 1] === "pr" && tokens[i + 2] === "merge") {
+    if (
+      tokens
+        .slice(i + 3)
+        .some((t) => t === "--delete-branch" || t === "-d" || t.startsWith("--delete-branch="))
+    )
+      deny(`Merge without --delete-branch. ${BRANCH_DELETE_HELP}`);
+  }
+  if (
+    head === "gh" &&
+    tokens[i + 1] === "api" &&
+    tokens.some((t) => /^(-X|--method)$/.test(t)) &&
+    tokens.some((t) => /^DELETE$/i.test(t)) &&
+    tokens.some((t) => /git\/refs\/heads\//.test(t))
+  )
+    deny(BRANCH_DELETE_HELP);
 
   if (!isGit(head)) return cwd;
 
