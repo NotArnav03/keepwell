@@ -1,0 +1,6 @@
+dist
+coverage
+.turbo
+pnpm-lock.yaml
+# Docs are hand-formatted; tables and wrapping stay as written.
+*.md

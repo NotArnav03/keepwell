@@ -123,6 +123,10 @@ These come from the ten design laws (ARCHITECTURE.md §2). Breaking one fails re
 
 ```bash
 git config core.hooksPath .githooks   # installs the pre-push guard for humans and tools alike
+corepack enable pnpm                  # or see README "Getting started" if this fails on Windows
+pnpm install
 ```
+
+`pnpm check` runs typecheck, lint, test and the format check: run it before pushing.
 
 Copy `.env.example` to `.env` and fill it in yourself. Claude never sees the values.

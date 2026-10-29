@@ -102,25 +102,31 @@ function checkPush(args, branch) {
   const refspecs = positional.slice(1); // first positional is the remote
   if (refspecs.length === 0) {
     if (branch && PROTECTED.has(branch))
-      deny(`You are on '${branch}'; pushing would update ${branch}. Create a branch: git switch -c <your-name>/<topic>`);
+      deny(
+        `You are on '${branch}'; pushing would update ${branch}. Create a branch: git switch -c <your-name>/<topic>`,
+      );
     return;
   }
   for (const spec of refspecs) {
     const dstRaw = spec.includes(":") ? spec.slice(spec.indexOf(":") + 1) : spec;
-    const dst = stripRef(dstRaw === "HEAD" ? branch ?? "" : dstRaw);
-    if (PROTECTED.has(dst)) deny(`Pushing to '${dst}' is not allowed; push your feature branch and open a PR`);
+    const dst = stripRef(dstRaw === "HEAD" ? (branch ?? "") : dstRaw);
+    if (PROTECTED.has(dst))
+      deny(`Pushing to '${dst}' is not allowed; push your feature branch and open a PR`);
   }
 }
 
 function checkCommitLike(sub, args, branch) {
   if (branch && PROTECTED.has(branch))
-    deny(`\`git ${sub}\` on '${branch}' is not allowed; local ${branch} is read-only. Create a branch: git switch -c <your-name>/<topic>`);
+    deny(
+      `\`git ${sub}\` on '${branch}' is not allowed; local ${branch} is read-only. Create a branch: git switch -c <your-name>/<topic>`,
+    );
 }
 
 function checkSegment(tokens, cwd) {
   // Skip env assignments (FOO=1 git push) and wrappers.
   let i = 0;
-  while (i < tokens.length && (/^\w+=/.test(tokens[i]) || tokens[i] === "env" || tokens[i] === "command")) i++;
+  while (i < tokens.length && (/^\w+=/.test(tokens[i]) || tokens[i] === "env" || tokens[i] === "command"))
+    i++;
   const head = tokens[i];
   if (!head) return cwd;
 

@@ -1,0 +1,33 @@
+# Render Blueprint for the staging API. Arnav (M1) applies it by hand in the Render dashboard.
+# Secrets use `sync: false`, so Render asks for them; they never live in this file.
+services:
+  - type: web
+    name: keepwell-api-staging
+    runtime: node
+    plan: starter
+    region: oregon
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/api
+    startCommand: node apps/api/dist/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: staging
+      - key: LOG_LEVEL
+        value: info
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com
+      - key: DATABASE_URL
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_WEBHOOK_ID
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
