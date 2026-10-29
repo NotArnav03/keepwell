@@ -18,25 +18,27 @@ Keepwell is a five-person entry for the PayPal AI Hackathon: an honest AI retent
 | Om | M5 Growth | `om/` | recovery, win-back, notifications, insights, copilot, insight-to-action |
 
 - Work out whose session this is from the branch prefix. If you can't tell (for example on a fresh clone), ask the user which member they are before editing.
-- Stay inside that workstream's packages and modules (ownership is listed in ARCHITECTURE.md §5).
-- If a change is needed in another member's package, stop and tell the user. Don't make it quietly.
+- Mostly work inside that workstream's packages and modules (ownership is listed in ARCHITECTURE.md §5).
+- Small fixes in someone else's package are fine if the task needs them. Say so in the PR and tag the owner.
 
-## 1. Hard rules (never break these)
+## 1. Hard rules (only a few, but don't break them)
 
-1. **Never commit, merge or push to `main`** (or `master`). Push only your own feature branch (`<your-name>/<topic>`).
-2. **Never force-push.** The one exception: `--force-with-lease` on your own feature branch after a rebase, and only after telling the user.
-3. **Never skip hooks or checks**: no `--no-verify`, no disabling CI steps, no `.skip`/`.only` left in tests.
-4. **Never merge pull requests** (`gh pr merge`). A human merges after review.
-5. **Never commit or print secrets.** `.env` files are never committed and never read into the conversation. Credentials never go into code, tests, fixtures, logs, docs, commit messages or PR text. Use `.env.example` to learn the variable names.
-6. **Sandbox only.** Only `api-m.sandbox.paypal.com` and sandbox credentials. Never live PayPal (`api-m.paypal.com`).
-7. **No infrastructure changes.** Don't deploy, and don't change Render, Neon, DNS, GitHub repo settings, branch protection or the `prod-demo` environment. That's M1's job, done by hand.
-8. **Ask before anything destructive**: `git reset --hard`, `git clean`, `git branch -D`, `git stash drop/clear`, `git checkout -- .`, `git restore .`, deleting files you didn't create, dropping database tables. Never rewrite history that has been pushed.
-9. **`packages/contracts` changes** need a PR labelled `contract-change` and two owners' approval (CONTRACTS.md). Never change a contract silently to make your code compile.
-10. **Freeze dates (IST):**
-    - **Feature freeze 8 Nov 23:59.** After it, only bug fixes and polish.
-    - **Submission 12 Nov 20:00.** After it, **no code changes** to the submitted project. Ops only: restarts and pool refills.
+1. **Don't push straight to `main`.** Work on `<your-name>/<topic>` branches and get changes into `main` through a PR. GitHub branch protection enforces this too.
+2. **Don't commit or print secrets.** `.env` files are never committed and never read into the conversation. Credentials stay out of code, tests, fixtures, logs, docs, commit messages and PR text. Use `.env.example` to learn the variable names.
+3. **Sandbox only.** Only `api-m.sandbox.paypal.com` and sandbox credentials. Never live PayPal (`api-m.paypal.com`).
+4. **Don't rewrite `main`'s history.** No force pushes to `main`. Force-pushing your own feature branch is fine, using `--force-with-lease`.
+5. **Freeze dates (IST):**
+   - **Feature freeze 8 Nov 23:59.** After it, only bug fixes and polish.
+   - **Submission 12 Nov 20:00.** After it, **no code changes** to the submitted project. Ops only: restarts and pool refills.
 
-The hook in `.claude/hooks/guard-git.mjs` enforces the git rules, and `.claude/settings.json` adds deny and ask rules. If one of them blocks you, tell the user. Never try to get around it with other commands, env vars or scripts.
+## 1a. Allowed, with care
+
+- **Merging PRs** (`gh pr merge --squash --delete-branch`) is fine once the checks pass and the user has said to merge. For anything non-trivial, get a teammate's review first.
+- **Contract changes** (`packages/contracts`): label the PR `contract-change` and tag the owners who consume that contract. One of them approves.
+- **Infra** (Render, Neon, GitHub repo settings, deploys): only when the user explicitly asks. Arnav (M1) owns it.
+- **Destructive commands** (`git reset --hard`, `git clean`, `git branch -D`, dropping tables, deleting files you didn't create): check with the user first. Claude Code will prompt for these.
+
+`.claude/hooks/guard-git.mjs` blocks pushes to `main`, and `.claude/settings.json` asks before destructive commands. If one of them blocks you, tell the user rather than working around it.
 
 ## 2. Git workflow
 
@@ -59,7 +61,7 @@ gh pr create --base main --fill             # then complete the PR template
   - **Contract changes:** yes/no
   - **Risk and rollback**
 - Rebase on `origin/main` before asking for review. CODEOWNERS decides the reviewer. Link the GitHub Issue (`Closes #12`); every work item is an issue labelled `owner:<name>`.
-- Local `main` is read-only. Only `git pull` on it, never commit.
+- Don't commit on local `main`; just `git pull` it.
 
 ## 3. Architecture rules that show up in code
 
@@ -86,7 +88,7 @@ These come from the ten design laws (ARCHITECTURE.md §2). Breaking one fails re
   - `package.json` scripts must run on all three, so write Node scripts rather than bash-only ones.
   - Use LF line endings.
   - Don't hard-code paths.
-- **Dependencies:** ask the user before adding one. Prefer the libraries already chosen in ARCHITECTURE.md §5. Pin exact versions. Avoid unknown packages with install scripts.
+- **Dependencies:** well-known packages are fine to add; list them in the PR. Prefer the libraries already chosen in ARCHITECTURE.md §5, pin exact versions, and check with the user before adding obscure packages with install scripts.
 - Keep new modules close to the shapes in CONTRACTS.md §5 (interfaces first, so others can fake them).
 
 ## 5. Tests and "done"
@@ -114,8 +116,8 @@ These come from the ten design laws (ARCHITECTURE.md §2). Breaking one fails re
 
 ## 8. When in doubt
 
-- Ask the user rather than guess when a task is ambiguous, touches another workstream, or would change a contract or a design law.
-- If you find a problem outside your task, mention it. Don't fix it on the side.
+- Use judgement on small things. Ask the user when a task is truly ambiguous or would change a design law.
+- If you find a problem outside your task, mention it. Fix it in the same PR if it's small and related.
 
 ## One-time setup per clone
 

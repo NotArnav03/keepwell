@@ -34,7 +34,7 @@ git config core.hooksPath .githooks          # blocks pushes to main
 git switch -c <your-name>/<topic> origin/main
 ```
 
-Nothing gets pushed to `main` directly: branch → PR → review → a human merges. Arnav scaffolds the toolchain (pnpm, Turborepo, CI) in the first issue of the "Contracts frozen" milestone.
+Nothing gets pushed to `main` directly: branch → PR → checks pass → merge (squash). Arnav scaffolds the toolchain (pnpm, Turborepo, CI) in the first issue of the "Contracts frozen" milestone.
 
 ## Key dates (IST)
 

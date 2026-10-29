@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // PreToolUse guard for Bash and PowerShell commands (see CLAUDE.md §1).
-// Blocks: pushes that would update main/master, force pushes (except --force-with-lease to a
-// non-protected branch), --mirror/--all pushes, --no-verify, commits/merges while on main/master,
-// and `gh pr merge`. Everything else passes through untouched.
+// Blocks only what could touch main/master directly: pushes that would update it, --mirror/--all
+// pushes, `git push --no-verify` (it skips the pre-push guard), and commits while on main/master.
+// Force pushes to feature branches and `gh pr merge` are allowed.
 // Fails open on internal errors: the git pre-push hook and GitHub branch protection are the
 // next layers, and a crashing guard must not block unrelated shell commands.
 
@@ -92,8 +92,6 @@ function checkPush(args, branch) {
     const a = args[i];
     if (a === "--no-verify") deny("`git push --no-verify` skips the pre-push guard");
     if (a === "--mirror" || a === "--all") deny(`\`git push ${a}\` would push main`);
-    if (a === "--force" || a === "--force-if-includes" || clusterHas(a, "f", ["o"]))
-      deny("Force push is not allowed; use --force-with-lease on your own branch, after telling the user");
     if (a === "-o" || a === "--push-option" || a === "--repo" || a === "--receive-pack" || a === "--exec") {
       i++;
       continue;
@@ -108,7 +106,6 @@ function checkPush(args, branch) {
     return;
   }
   for (const spec of refspecs) {
-    if (spec.startsWith("+")) deny(`Refspec '${spec}' is a force push`);
     const dstRaw = spec.includes(":") ? spec.slice(spec.indexOf(":") + 1) : spec;
     const dst = stripRef(dstRaw === "HEAD" ? branch ?? "" : dstRaw);
     if (PROTECTED.has(dst)) deny(`Pushing to '${dst}' is not allowed; push your feature branch and open a PR`);
@@ -116,8 +113,6 @@ function checkPush(args, branch) {
 }
 
 function checkCommitLike(sub, args, branch) {
-  if (sub === "commit" && args.some((a) => a === "--no-verify" || clusterHas(a, "n", ["m", "F", "c", "C", "t"])))
-    deny("`git commit --no-verify` skips hooks");
   if (branch && PROTECTED.has(branch))
     deny(`\`git ${sub}\` on '${branch}' is not allowed; local ${branch} is read-only. Create a branch: git switch -c <your-name>/<topic>`);
 }
@@ -133,9 +128,6 @@ function checkSegment(tokens, cwd) {
     const target = tokens[i + 1];
     return target ? resolve(cwd, target) : cwd;
   }
-
-  if (head === "gh" && tokens[i + 1] === "pr" && tokens[i + 2] === "merge")
-    deny("Merging pull requests is for humans after review");
 
   if (!isGit(head)) return cwd;
 
@@ -159,7 +151,7 @@ function checkSegment(tokens, cwd) {
 
   const branch = currentBranch(gitCwd);
   if (sub === "push") checkPush(args, branch);
-  if (["commit", "merge", "cherry-pick", "revert", "am"].includes(sub)) checkCommitLike(sub, args, branch);
+  if (["commit", "cherry-pick", "revert", "am"].includes(sub)) checkCommitLike(sub, args, branch);
   return cwd;
 }
 

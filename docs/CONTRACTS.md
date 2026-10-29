@@ -2,7 +2,7 @@
 
 These are the seams between the five workstreams. They become `packages/contracts` (zod) on day 1. **Build against these and you never wait for another team member.**
 
-Change rule: a PR labelled `contract-change` that two owners approve, with the consumers' owners tagged. Additive changes (new optional field, new event) are cheap. Renames and removals need everyone's OK.
+Change rule: a PR labelled `contract-change`, with the consumers' owners tagged and one of them approving. Additive changes (new optional field, new event) are cheap. Renames and removals need everyone's OK.
 
 Conventions:
 - IDs: UUIDv7 strings for our rows. PayPal IDs are kept as PayPal gives them (`I-…` subscriptions, `P-…` plans).
