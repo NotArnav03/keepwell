@@ -27,14 +27,29 @@ Work items are GitHub Issues labelled `owner:<name>`, grouped into milestones.
 
 ## Getting started
 
+Needs Node 22.12+ (24 recommended, see `.node-version`).
+
 ```bash
 git clone https://github.com/NotArnav03/keepwell.git
 cd keepwell
 git config core.hooksPath .githooks          # blocks pushes to main
+corepack enable pnpm                         # pnpm version comes from package.json
+pnpm install
+cp .env.example .env                         # fill in yourself; PAYPAL_USE_MOCK=true works offline
 git switch -c <your-name>/<topic> origin/main
 ```
 
-Nothing gets pushed to `main` directly: branch → PR → checks pass → merge (squash). Arnav scaffolds the toolchain (pnpm, Turborepo, CI) in the first issue of the "Contracts frozen" milestone.
+If `corepack enable` fails with EPERM on Windows, run `corepack enable pnpm --install-directory "$HOME/.local/bin"` (any folder on your PATH works) or `npm i -g pnpm@10.34.7`.
+
+| Command | What it does |
+|---|---|
+| `pnpm dev:api` | API on http://localhost:3000 with reload (`/healthz`, `/readyz`) |
+| `pnpm typecheck` / `pnpm lint` / `pnpm test` | Every package, through Turborepo (cached) |
+| `pnpm check` | All three plus the Prettier check: what CI runs |
+| `pnpm format` | Fix formatting |
+| `pnpm --filter @keepwell/<pkg> <script>` | One package only |
+
+Nothing gets pushed to `main` directly: branch → PR → checks pass → merge (squash).
 
 ## Key dates (IST)
 
