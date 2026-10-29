@@ -9,3 +9,6 @@ export * from "./platform/events.js";
 export * from "./platform/jobs.js";
 export * from "./platform/http.js";
 export type * from "./platform/interfaces.js";
+export * from "./brain/offers.js";
+export * from "./brain/policy.js";
+export * from "./brain/agent.js";

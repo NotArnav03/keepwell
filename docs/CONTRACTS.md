@@ -25,6 +25,17 @@ Conventions:
 - Events and jobs: `platformEventPayloads` (§2) feed the `domainEventPayloads` registry, which each workstream extends; `platformJobs` (§3) give each queue a payload schema and an `idempotencyKey(payload, now)` for pg-boss `singletonKey`.
 - Fakes in `@keepwell/contracts/fakes`: `FakeActionEngine`, `FakeAudit`, `FakeDomainEvents`, `FakePayPalGateway`, `uuidv7`.
 
+**As implemented in `packages/contracts/src/brain/` (v1, owner M2).** Differences from the sketch below:
+- `Offer` has the five kinds; `OfferKind` keeps `"none"` only for rankings and exclusions. Pause `cycles` is 1–12, discount `percent` is 1–100, all dates are `IsoDateTime`.
+- `OfferMenu.defaultByReason` must have an entry for **every** reason (null = no offer), so L1 never has a gap. `PolicyDocument.reasonPreferences` may leave reasons out (the engine has a default ranking).
+- `PolicyDocument` limits are bounded (`version ≥ 1`, `maxCycles ≥ 1`, percents 1–100, counts ≥ 0).
+- New `PolicyContext` (input to `computeMenu`/`evaluate`): `now`, `channel`, `reason`, `cancelIntent`, `offersPresentedThisSession`, `subscription: SubscriptionSnapshot`, `history: SubscriberHistory` (saves and pauses in 365 days, last pause end, refunds in 30 days) and `plans: PlanInfo[]`. Time is passed in so the engine stays pure.
+- `Channel` lives here until it moves to `shared.ts`.
+- New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`.
+- `AgentStreamEvent` is the part of `SessionStreamEvent` the agent emits (`agent.delta`, `agent.done`, `offer.presented`, `reason.chips`, `fallback.changed`); `shownTextHash` is sha256 hex. M3's `SessionStreamEvent` = this union + `action.update`, `session.closed`, `error`.
+- `brainEventPayloads` (`session.offer_presented`, `policy.published`) are registered in `domainEventPayloads`; `brainJobs` has `llm.budget_reset` keyed by UTC day.
+- `FakeAgent` in `@keepwell/contracts/fakes`: one 1-cycle pause menu, scripted streamed reply, no-means-no on "cancel", one offer per session, card text from the offer.
+
 ```ts
 // ---------- shared ----------
 export const Money = z.object({ value: z.string().regex(/^\d+\.\d{2}$/), currency: z.string().length(3) });
@@ -356,6 +367,7 @@ interface DomainEvents {
 }
 
 // M2 → M3, M4, evals
+// As implemented in packages/contracts/src/brain/agent.ts (stream: AgentStreamEvent)
 interface Agent {
   start(session: SessionContext): Promise<{ menu: OfferMenu; fallbackLevel: FallbackLevel }>;
   respond(session: SessionContext, text: string, stream: (e: SessionStreamEvent) => void): Promise<void>;
