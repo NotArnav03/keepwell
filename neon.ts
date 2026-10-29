@@ -1,20 +1,16 @@
 import { defineConfig } from "@neon/config/v1";
 
+// Branches that must live until judging ends (21 Dec): staging, prod-demo's source and one per member.
+const LONG_LIVED = new Set(["staging", "arnav", "ishan", "aditya", "ayush", "om"]);
+
 export default defineConfig({
-  // Declare your Neon services here
   auth: false,
-  // Branch policy: per-branch tuning
   branch: (branch) => {
-    if (branch.isDefault) {
-      // Default branch: no overrides, uses project defaults
-      return {};
-    }
+    if (branch.isDefault || LONG_LIVED.has(branch.name)) return {};
     if (!branch.exists) {
-      // New non-default branches: auto-expire
-      // Run `neon checkout <name>` to create a new branch with these settings
+      // Throwaway branches (`neon checkout <name>`, e.g. to test a migration) expire on their own.
       return { ttl: "7d" };
     }
-    // Existing branch: no changes
     return {};
   },
 });
