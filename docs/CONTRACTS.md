@@ -182,6 +182,15 @@ export const InsightAction = z.object({
 });
 ```
 
+**As implemented in `packages/contracts/src/growth/` (v1, owner M5).** The zod there is the source of truth; differences from the sketch above:
+- Times are `z.iso.datetime()` (UTC, `Z` suffix).
+- `InsightRecord` adds `replyId` (set for `winback_reply`, `sessionId` set for `session`, enforced). `quote` is also limited to 20 words.
+- `InsightAction` adds `merchantId`, `createdAt`, `decidedAt`. `InsightActionProposal` gives typed `params` per kind (`CreatePlanParams`, `UpdatePolicyParams`, `SendWinbackBatchParams`); copilot output is validated against it.
+- **Notifications:** `TemplateId` = `dunning.update_payment_method | dunning.account_restricted | dunning.sending_limit | dunning.generic | dunning.reactivate | winback.ask`. `NotificationContent` is a union on `template`, each with a facts-only `payload` (amount, dates, links; the LLM never supplies these). `NotificationRequest` is the `Notifier.enqueue` input; `Notification` is the outbox row (`status: queued | sending | sent | failed | suppressed`, `suppressedBecause: frequency_cap | unsubscribed | superseded`, `simulated`). `OutboxResponse` is the `GET /m/outbox` Demo Inbox body.
+- **Dunning:** `DunningCase` with `playbook: update_payment_method | account_restricted | sending_limit | wait_for_retry | generic` and `state: open | recovered | suspended | closed`. `reasonCode` stays a free string so unknown PayPal codes still open a generic case.
+- M5 job payloads (`growthJobPayloads`) and the payloads of `notification.sent` / `insight_action.proposed` (`growthEventPayloads`).
+- `FakeNotifier` is exported from `@keepwell/contracts/fakes`.
+
 ---
 
 ## 2. Internal domain events
@@ -354,7 +363,8 @@ declare function evaluate(policy: PolicyDocument, ctx: PolicyContext, offerId: s
 
 // M5 → M4
 interface Notifier {
-  enqueue(n: { merchantId: string; to: string; template: TemplateId; payload: object; dueAt?: string }, tx?: Tx): Promise<string>;
+  // NotificationRequest = { merchantId, subscriptionId | null, to, content: { template, payload }, dueAt?, simulated? }
+  enqueue(n: NotificationRequest, tx?: Tx): Promise<string>;
 }
 ```
 
