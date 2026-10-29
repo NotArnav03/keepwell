@@ -73,6 +73,7 @@ These come from the ten design laws (ARCHITECTURE.md §2). Breaking one fails re
 - **LLM calls go only through the agent module's client** (budget guard, logging, fallbacks). Don't import `@anthropic-ai/sdk` anywhere else. Models: `claude-sonnet-5-5` (conversation, copilot) and `claude-haiku-5-5` (classify, tag, check).
 - **Offer terms render from `Offer` objects.** Model text never contains prices, dates or durations that the claims checker hasn't verified.
 - **The AI picks from the policy's menu, and the policy re-checks the pick.** Subscriber consent is a button click, never parsed from text.
+- **Neon is Postgres only.** The repo keeps just the `neon-postgres` and `neon-postgres-branches` skills, on purpose. Their text says to install the parent `neon` skill first: don't. Also don't add Neon Auth, Functions, AI Gateway, Realtime or Object Storage; the architecture already covers each. The API connects with `pg` over the **direct** URL (`DATABASE_URL_UNPOOLED`).
 - **Webhooks are hints.** Re-GET the subscription and diff it. Never trust the event body as state.
 - **Every side effect writes an audit entry.** Every database query is scoped by `merchant_id` through the scoped helper.
 - **Simulated anything** (simulated events, time-machine shifts) is flagged `simulated: true` and shown as `SIMULATED` in the UI.
