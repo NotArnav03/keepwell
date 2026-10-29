@@ -13,8 +13,9 @@
     "test": "turbo run test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "turbo run typecheck lint test && prettier --check .",
-    "dev:api": "pnpm --filter @keepwell/api dev"
+    "check": "turbo run typecheck lint test && pnpm test:hooks && prettier --check .",
+    "dev:api": "pnpm --filter @keepwell/api dev",
+    "test:hooks": "node --test .claude/hooks/guard-git.test.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

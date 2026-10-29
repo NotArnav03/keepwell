@@ -25,6 +25,38 @@ function deny(reason) {
   process.exit(0);
 }
 
+// Heredoc bodies (bash `<<EOF … EOF`) and PowerShell here-strings (`@' … '@`) are data, not
+// commands: a PR description that shows `git push` must not be checked as a push. The line that
+// opens them is kept, so `git commit -F - <<EOF` is still checked.
+function stripHeredocs(cmd) {
+  const out = [];
+  const pending = []; // heredoc terminators still to find, in order
+  let hereStringEnd = null;
+  for (const line of cmd.split("\n")) {
+    if (hereStringEnd) {
+      if (line.startsWith(hereStringEnd)) {
+        hereStringEnd = null;
+        out.push(line.slice(2));
+      }
+      continue;
+    }
+    if (pending.length > 0) {
+      const { delim, stripTabs } = pending[0];
+      if ((stripTabs ? line.replace(/^\t+/, "") : line) === delim) pending.shift();
+      continue;
+    }
+    // `<<<` is a bash here-string (one word, on this line), not a heredoc.
+    for (const m of line.matchAll(/(?<!<)<<(?!<)(-?)\s*(?:'([^']+)'|"([^"]+)"|\\?([A-Za-z_][\w.-]*))/g)) {
+      pending.push({ delim: m[2] ?? m[3] ?? m[4], stripTabs: m[1] === "-" });
+    }
+    const opener = line.match(/@(['"])\s*$/);
+    if (opener) hereStringEnd = `${opener[1]}@`;
+    // The opener's lone quote would otherwise leave the rest of the command "inside quotes".
+    out.push(opener ? line.slice(0, opener.index) + "HERESTRING" : line);
+  }
+  return out.join("\n");
+}
+
 // Split a command line into segments on shell separators, ignoring separators inside quotes.
 function splitSegments(cmd) {
   const segments = [];
@@ -193,7 +225,7 @@ try {
   if (typeof command !== "string" || !/\b(git|gh)\b/.test(command)) process.exit(0);
 
   let cwd = input.cwd || process.cwd();
-  for (const segment of splitSegments(command)) cwd = checkSegment(tokenize(segment), cwd);
+  for (const segment of splitSegments(stripHeredocs(command))) cwd = checkSegment(tokenize(segment), cwd);
   process.exit(0);
 } catch (err) {
   process.stderr.write(`guard-git: internal error, allowing command: ${err?.message ?? err}\n`);
