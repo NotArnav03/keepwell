@@ -114,7 +114,7 @@ flowchart LR
 | Errors | Sentry free tier | Free | |
 | Uptime + status page | Render health checks + a free uptime monitor | Free | |
 | LLM | Anthropic API, Claude Haiku 5.5 | $5 prepaid credit, already paid, auto-reload off | When the credit runs out, calls fail and sessions drop to L1; Cancel never depends on it. `LLM_DAILY_BUDGET_USD` (#26) spreads it over the weeks until judging ends. Claude Pro subscriptions don't cover API usage. |
-| CI | GitHub Actions | Free | Unlimited once the repo is public. While it is private, the account's monthly minutes apply (2,000 on the free plan, Windows billed double), and CI uses about 240 a day. Running out costs nothing but stops CI, which blocks merges. The keep-awake ping (4,300 minutes a month) must only run once the repo is public. |
+| CI | GitHub Actions | Free | The repo is public (since 31 Oct), so Actions minutes are unlimited. While private it used about 240 a day against a 2,000-minute monthly allowance. |
 
 **Before relying on any of these, check the current free-tier limits on each vendor's pricing page.** For example, Render's free Postgres has had an expiry, which is why Neon is chosen. Judging runs **1–15 December**, so everything must stay up until at least 21 December.
 
