@@ -16,7 +16,7 @@ export const OfferKind = z.enum([
 export type OfferKind = z.infer<typeof OfferKind>;
 
 /** Stable within one menu; the agent's tool call and the accept route refer to offers by this id. */
-const OfferId = z.string().min(1).max(64);
+export const OfferId = z.string().min(1).max(64);
 
 export const PauseOffer = z.object({
   id: OfferId,

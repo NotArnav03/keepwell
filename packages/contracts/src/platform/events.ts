@@ -3,6 +3,7 @@ import { Id, IsoDateTime, Money } from "../shared.js";
 import { ActionError, ActionState, ActionType } from "./actions.js";
 import { SubscriptionSnapshot, SubscriptionStatus } from "./subscriptions.js";
 import { brainEventPayloads } from "../brain/agent.js";
+import { surfacesEventPayloads } from "../surfaces/sessions.js";
 
 // Domain events (CONTRACTS.md §2). Producers own their payloads; consumers ignore unknown fields.
 
@@ -47,6 +48,7 @@ export const platformEventPayloads = {
 export const domainEventPayloads = {
   ...platformEventPayloads,
   ...brainEventPayloads,
+  ...surfacesEventPayloads,
 } as const;
 
 export type DomainEventType = keyof typeof domainEventPayloads;
