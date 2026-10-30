@@ -456,7 +456,9 @@ Judge Mode page: test credentials, three one-click scenarios (pause, downgrade, 
 
 ## 7. Data model (Postgres, Drizzle)
 
-All tables carry `merchant_id` (multi-tenant) and `created_at`. Money is stored as `{value: numeric(12,2) as string, currency: char(3)}`, never as floats.
+All tables carry `merchant_id` (multi-tenant) and `created_at`. Money is stored as `{value: numeric(12,2) as string, currency: char(3)}`, never as floats. Ids are UUIDv7 from Postgres 18's `uuidv7()`.
+
+**Tenant isolation is enforced by Postgres** (#7): every tenant table has row-level security matching `merchant_id` against a per-transaction setting, and the app queries as `keepwell_app`, a role that can't bypass it (Neon's owner role can). Code reaches the database only through `db.forMerchant(id, tx => …)` or, for cross-tenant jobs, `db.acrossMerchants(tx => …)`; a query outside them sees no rows. `audit_log` and `policies` are append-only: no UPDATE/DELETE grant for the app role, plus a trigger that refuses them for every role. Two additions to the table below: `session_events` (the SSE replay log, keyed by session and seq) and `llm_usage` is deployment-wide (no `merchant_id`).
 
 | Table | Key columns | Owner |
 |---|---|---|
@@ -559,7 +561,7 @@ Classifier times out after 8 s → the session switches to L1 → reason chips a
 
 - **Secrets:** only in Render environment variables and local `.env` files (git-ignored; `.env.example` committed). Merchant PayPal secrets are encrypted at rest with AES-256-GCM under a master key from the environment. CI runs a secret scanner (gitleaks) on every PR.
 - **Authentication:** merchant sessions use httpOnly, Secure, SameSite=Lax cookies; argon2id passwords; CSRF token on mutations. Subscriber access is per 6.7. MCP uses delegation tokens and merchant API keys (stored hashed).
-- **Authorisation:** every query is scoped by `merchant_id` (a helper makes unscoped queries impossible to write by accident). Subscriber tokens are bound to exactly one subscription.
+- **Authorisation:** every query is scoped by `merchant_id` through Postgres row-level security (§7), so an unscoped query returns nothing instead of another merchant's data. Subscriber tokens are bound to exactly one subscription.
 - **Web:** strict CSP on our apps; the widget communicates only with our API origin; `postMessage` origin checks for the PayPal popup; CORS allow-list per merchant domain.
 - **Rate limits:** per IP and per token on session creation, messages and magic links.
 - **Privacy:** the LLM never receives emails, PayPal IDs or payment details, only first name (optional), plan, tenure and the conversation. Messages are stored with emails and phone numbers redacted. Webhook bodies and snapshots are sandbox data.
