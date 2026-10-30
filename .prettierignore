@@ -6,3 +6,4 @@ pnpm-lock.yaml
 # Docs are hand-formatted; tables and wrapping stay as written.
 *.md
 packages/widget/dev/v1.js*
+apps/demo-store/dist

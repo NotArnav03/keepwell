@@ -48,6 +48,7 @@ Conventions:
 - `SessionsApi` is the sessions API without HTTP; the routes, the subscriber MCP server and `FakeSessionsApi` share it. `SubscriberPrincipal` is what a credential resolves to.
 - `surfacesEventPayloads`: `session.started`, `session.offer_accepted` (the whole `offer` instead of `offerId`, plus `actionIds`), `session.offer_declined`, `session.closed` (`reason` is a `ReasonCategory`).
 - `FakeSessionsApi`, `PANTRY_PLAN` and `pantryPlanSubscription` are in `@keepwell/contracts/fakes`. `pnpm dev:fake-sessions` serves the fake over HTTP for building the widget.
+- `surfaces/identity.ts`: `WidgetTokenClaims` (`{ mid, sid: PayPal subscription id, iat, exp, nonce }`, HS256, at most `WIDGET_TOKEN_TTL_SECONDS` = 600) and the demo store bodies (`DemoStoreVerifyRequest/Response`, `DemoStoreTokenRequest/Response`).
 
 ```ts
 // ---------- shared ----------
@@ -342,7 +343,8 @@ export const SessionStreamEvent = z.discriminatedUnion("type", [
 | `POST /demo/time-machine/resume/:subscriptionId` | DEMO | Run the scheduled resume now (real `activate`) |
 | `POST /demo/time-machine/dunning/:subscriptionId` | DEMO | Send scheduled dunning now |
 | `POST /demo/simulate/payment-failed/:subscriptionId` | DEMO | Inject a **SIMULATED** failure (only if spike Q5 fails) |
-| `POST /demo-store/token` | – | Pantry Plan's "backend": signs a widget token for a logged-in demo shopper |
+| `POST /demo-store/subscriptions` | – | Pantry Plan's "backend": `{ paypalSubscriptionId }` → GETs it from PayPal; only ACTIVE/APPROVED on a Pantry Plan plan → `{ status, planName, shopperToken }` |
+| `POST /demo-store/token` | – | Pantry Plan's "backend": `{ shopperToken }` → `{ token, expiresAt }`, a 10-minute widget token for that shopper's subscription |
 
 ### Agent surfaces (owner M3)
 

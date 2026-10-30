@@ -17,6 +17,7 @@
     "dev:api": "pnpm --filter @keepwell/api dev",
     "dev:fake-sessions": "turbo run build --filter=@keepwell/contracts && pnpm --filter @keepwell/api dev:fake-sessions",
     "dev:widget": "pnpm --filter @keepwell/widget dev",
+    "dev:store": "pnpm --filter @keepwell/demo-store dev",
     "test:hooks": "node --test .claude/hooks/guard-git.test.mjs"
   },
   "devDependencies": {

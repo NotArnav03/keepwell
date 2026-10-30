@@ -13,3 +13,4 @@ export * from "./brain/offers.js";
 export * from "./brain/policy.js";
 export * from "./brain/agent.js";
 export * from "./surfaces/sessions.js";
+export * from "./surfaces/identity.js";

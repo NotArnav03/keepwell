@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pantry Plan · Weekly meal plans</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="site">
+      <a class="brand" href="index.html">Pantry Plan</a>
+      <nav><a href="account.html">My account</a></nav>
+    </header>
+    <main>
+      <h1>Cook more, waste less.</h1>
+      <p class="lead">
+        A weekly meal plan and shopping list built from what's already in your pantry. Cancel any time.
+      </p>
+      <p class="fake-badge">
+        FAKE PAYPAL: local development mode, no PayPal involved. Configure a sandbox client id for the real
+        flow.
+      </p>
+      <section id="plans" class="plans" aria-label="Plans"></section>
+      <p id="status" role="status" aria-live="polite"></p>
+    </main>
+    <footer>
+      Pantry Plan is a fictional store for the Keepwell demo. Payments run in the PayPal sandbox; no real
+      money moves.
+    </footer>
+    <script src="store.js"></script>
+  </body>
+</html>

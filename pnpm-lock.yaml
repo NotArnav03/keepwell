@@ -69,7 +69,14 @@ importers:
 
   apps/dashboard: {}
 
-  apps/demo-store: {}
+  apps/demo-store:
+    devDependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
 
   apps/judge: {}
 

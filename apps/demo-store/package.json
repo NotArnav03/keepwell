@@ -3,16 +3,15 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
-  },
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "node --env-file-if-exists=../../.env scripts/build.mjs",
+    "dev": "node --env-file-if-exists=../../.env scripts/build.mjs --serve",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@keepwell/contracts": "workspace:*",
+    "esbuild": "0.28.2"
   }
 }

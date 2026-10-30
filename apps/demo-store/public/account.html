@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pantry Plan · My account</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="site">
+      <a class="brand" href="index.html">Pantry Plan</a>
+      <nav><a href="index.html">Plans</a></nav>
+    </header>
+    <main>
+      <h1>My account</h1>
+      <section id="signed-in" hidden>
+        <dl class="details">
+          <dt>Plan</dt>
+          <dd id="plan-name"></dd>
+          <dt>Status</dt>
+          <dd id="plan-status"></dd>
+          <dt>PayPal subscription</dt>
+          <dd id="subscription-id"></dd>
+        </dl>
+        <p class="actions">
+          <!-- Without the Keepwell widget, this is the honest fallback: PayPal's own cancel page. -->
+          <a
+            class="button secondary"
+            href="https://www.sandbox.paypal.com/myaccount/autopay/"
+            data-keepwell-cancel
+            >Cancel subscription</a
+          >
+          <button id="sign-out" type="button" class="link">Sign out</button>
+        </p>
+      </section>
+      <section id="signed-out" hidden>
+        <p>You don't have a Pantry Plan subscription in this browser yet.</p>
+        <p><a class="button" href="index.html">See the plans</a></p>
+      </section>
+    </main>
+    <footer>Pantry Plan is a fictional store for the Keepwell demo.</footer>
+    <script src="account.js"></script>
+  </body>
+</html>

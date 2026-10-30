@@ -20,6 +20,7 @@ import {
   type SessionsApi,
   type SubscriberPrincipal,
 } from "@keepwell/contracts";
+import { allowCors } from "./cors.js";
 
 // HTTP and SSE for /v1/sessions/* (CONTRACTS.md §4). The session logic sits behind SessionsApi,
 // so the real module (#32) and FakeSessionsApi plug in here unchanged.
@@ -46,14 +47,10 @@ const ClientError = z.object({ statusCode: z.number().int().min(400).max(499), m
 export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, options, done) => {
   const { sessions, authenticate } = options;
 
-  app.addHook("onRequest", (request, reply, next) => {
-    const { origin } = request.headers;
-    if (origin !== undefined && options.allowOrigin(origin)) {
-      reply.header("access-control-allow-origin", origin);
-      reply.header("access-control-expose-headers", "x-request-id");
-      reply.header("vary", "Origin");
-    }
-    next();
+  allowCors(app, {
+    allowOrigin: options.allowOrigin,
+    paths: ["/sessions", "/sessions/*"],
+    headers: "authorization, content-type, last-event-id",
   });
 
   app.setErrorHandler((error: unknown, request, reply) => {
@@ -67,16 +64,6 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
     request.log.error({ err: error }, "sessions route failed");
     return sendError(request, reply, 500, "internal", "Something went wrong on our side");
   });
-
-  const preflight = (_request: FastifyRequest, reply: FastifyReply) =>
-    reply
-      .code(204)
-      .header("access-control-allow-methods", "GET, POST")
-      .header("access-control-allow-headers", "authorization, content-type, last-event-id")
-      .header("access-control-max-age", "600")
-      .send();
-  app.options("/sessions", preflight);
-  app.options("/sessions/*", preflight);
 
   app.post("/sessions", { bodyLimit: BODY_LIMIT }, async (request, reply) => {
     const principal = await authenticate(request);
