@@ -105,7 +105,7 @@ flowchart LR
 
 | Piece | Where | Tier | Why |
 |---|---|---|---|
-| `apps/api`: API, webhooks, workers, SSE, MCP | Render Web Service | **Starter (paid, ~$7/month)** | Must be always on. Free instances sleep, which delays webhooks and makes judges wait. |
+| `apps/api`: API, webhooks, workers, SSE, MCP | Render Web Service | Free | Sleeps after 15 idle minutes. `.github/workflows/keep-awake.yml` pings prod-demo every 10 minutes. The free 750 hours a month cover one always-on service, so staging may sleep. |
 | `apps/dashboard`, `apps/portal`, `apps/judge` | Render Static Sites | Free | |
 | `apps/demo-store` (Pantry Plan) | Render Static Site, **separate origin** | Free | Proves the widget works on a third-party site |
 | `packages/widget` bundle | Render Static Site (acts as CDN) | Free | Loads even if the API is down (law 1) |
@@ -113,12 +113,16 @@ flowchart LR
 | Email | Resend free tier | Free | Plus an in-app "demo inbox" so judges can see emails without receiving them |
 | Errors | Sentry free tier | Free | |
 | Uptime + status page | Render health checks + a free uptime monitor | Free | |
-| LLM | Anthropic API | Pay as you go | **Set a hard monthly spend limit in the Anthropic Console.** Claude Pro subscriptions don't cover API usage. |
-| CI | GitHub Actions (public repo) | Free | |
+| LLM | Anthropic API, Claude Haiku 5.5 | $5 prepaid credit, already paid, auto-reload off | When the credit runs out, calls fail and sessions drop to L1; Cancel never depends on it. `LLM_DAILY_BUDGET_USD` (#26) spreads it over the weeks until judging ends. Claude Pro subscriptions don't cover API usage. |
+| CI | GitHub Actions | Free | The repo is public (since 31 Oct), so Actions minutes are unlimited. While private it used about 240 a day against a 2,000-minute monthly allowance. |
 
 **Before relying on any of these, check the current free-tier limits on each vendor's pricing page.** For example, Render's free Postgres has had an expiry, which is why Neon is chosen. Judging runs **1–15 December**, so everything must stay up until at least 21 December.
 
-**Expected total: roughly $15–20 for Render plus a capped Anthropic budget.** Choose the cap after measuring a full eval run in week 1.
+**Budget: ₹0 of new spending (decided 30 Oct).** Everything runs on free tiers, plus the $5 Anthropic credit already paid. What that costs us, and how each cost is handled:
+- **Cold starts.** A sleeping instance takes up to a minute to answer its first request. The keep-awake ping covers prod-demo during judging, and PayPal retries a webhook that times out.
+- **Scheduled work waits while asleep.** The due-work sweep (§6.3) runs on wake and catches up resumes, dunning sends and win-backs. That only matters for staging.
+- **Limited AI budget.** Unit tests and most eval runs use the fake LLM. Full evals are run deliberately and sparingly. Running the evals' simulated subscriber and LLM judge on a free model, with only the agent on Haiku, would stretch the credit further (M2's call).
+- **Neon free-tier limits** are shared by all branches. Check the usage page weekly, and let idle branches scale to zero.
 
 Environments:
 - `local`: each member's laptop, their own Neon branch, mock PayPal or sandbox.

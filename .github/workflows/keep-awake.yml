@@ -1,0 +1,33 @@
+name: Keep demo awake
+
+# Render's free plan sleeps a web service after 15 idle minutes, and the first request then waits
+# up to a minute while it wakes. Judges shouldn't see that, so this pings the hosted API every
+# 10 minutes. GitHub may delay scheduled runs, so a sleep can still happen now and then.
+#
+# The free plan has 750 instance-hours a month, enough for ONE always-on service. Set the repo
+# variable KEEPWELL_PING_URLS (Settings → Secrets and variables → Actions → Variables) to the
+# prod-demo health URL only, e.g. https://keepwell-api-demo.onrender.com/healthz. Staging may sleep.
+# With the variable unset, this does nothing. Only set it once the repo is public: on a private repo
+# each ping is billed as a full Actions minute, about 4,300 a month.
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    if: vars.KEEPWELL_PING_URLS != ''
+    timeout-minutes: 3
+    steps:
+      - name: Ping
+        env:
+          URLS: ${{ vars.KEEPWELL_PING_URLS }}
+        run: |
+          for url in $URLS; do
+            # A waking instance can take up to a minute; a failed ping is reported, not retried.
+            curl --silent --show-error --fail --max-time 90 --output /dev/null "$url" && echo "awake: $url" || echo "::warning::no answer from $url"
+          done
