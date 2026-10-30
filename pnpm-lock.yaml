@@ -91,7 +91,21 @@ importers:
 
   packages/evals: {}
 
-  packages/paypal-mock: {}
+  packages/paypal-mock:
+    dependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      fastify:
+        specifier: 5.12.7
+        version: 5.12.7
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
+    devDependencies:
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
 
   packages/policy:
     dependencies:
