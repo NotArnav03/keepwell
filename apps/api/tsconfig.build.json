@@ -1,4 +1,5 @@
 {
   "extends": "./tsconfig.json",
-  "exclude": ["src/**/*.test.ts"]
+  // The fake sessions server is a local dev tool and must never ship in the deploy.
+  "exclude": ["src/**/*.test.ts", "src/modules/sessions/fake-server.ts"]
 }
