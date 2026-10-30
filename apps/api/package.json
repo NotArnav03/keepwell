@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@keepwell/contracts": "workspace:*",
+    "@keepwell/policy": "workspace:*",
     "fastify": "5.12.7",
     "pg": "8.23.1",
     "zod": "4.6.7"

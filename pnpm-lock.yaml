@@ -47,6 +47,9 @@ importers:
       '@keepwell/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@keepwell/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       fastify:
         specifier: 5.12.7
         version: 5.12.7
