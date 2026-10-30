@@ -36,6 +36,22 @@ Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money
 - `effort: "low"`, one SDK retry, and the 8 s deadline as an `AbortSignal`.
 - The subscriber's words sit inside `<transcript>` / `<subscriber_messages>` tags, and both prompts treat them as data. Whatever they say, the model can only pick from the menu, and the policy re-checks that pick.
 
+## Budget guard
+
+`LlmBudget` (`budget.ts`) runs before every model call (#26):
+- **Daily cap:** today's spend (UTC) must be under `LLM_DAILY_BUDGET_USD`. Each day starts at zero, so there's nothing to reset.
+- **Session limits:** 20 s of model time and 60,000 tokens per session (§6.5).
+
+When either is reached, the call fails as `unavailable` and the session drops to L1. Cancel is unaffected.
+
+After every call, including a failed one (its time still counts), the tokens, cost and duration go to the `LlmUsageStore`. Cost is in whole nano-dollars, from the list prices in `budget.ts`; an unknown model throws rather than count as free.
+
+Two failure cases are handled on purpose:
+- **The store can't be read:** the call is refused (fail closed), because we can't prove there's budget left.
+- **Usage can't be recorded after a successful call:** the reply still goes out, and it's logged as an error.
+
+`createAgent` requires the daily cap and a store. M1 backs the store with an `llm_usage` table; `InMemoryLlmUsageStore` forgets spend on restart, so it's for dev and tests only.
+
 ## Tests
 
 `FakeLlmClient` scripts both calls (including invalid output, refusals and hanging until the deadline). `anthropic.test.ts` runs the real client against a fake `fetch`. Nothing calls the Anthropic API.
@@ -43,5 +59,5 @@ Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money
 ## Not yet (later issues)
 
 - The session's locale in `SessionContext` (from `CreateSessionRequest.locale`), so L1 replies are localised too.
-- The 20 s per-session model time, the token budget, the daily budget and rate limits (#26). They need state across calls.
+- Per-IP rate limits on the session routes (#26): they belong with the HTTP layer, e.g. `@fastify/rate-limit` on `/v1/sessions/*`.
 - Prompt tuning against the evals (#28, #30).
