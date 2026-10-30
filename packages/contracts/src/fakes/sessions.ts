@@ -473,15 +473,13 @@ export class FakeSessionsApi implements SessionsApi {
       idempotencyKey: `${id}:${offer.id}`,
     } as const;
     switch (offer.kind) {
-      case "pause": {
-        const suspend = await this.actions.create({
+      case "pause":
+        // The resume is scheduled once the suspend applies (onActionState), so a failed suspend leaves none.
+        return this.actions.create({
           ...base,
           type: "suspend",
           params: { reason: "Paused at the subscriber's request" },
         });
-        await this.actions.scheduleResume({ merchantId, subscriptionId, dueAt: offer.resumesOn });
-        return suspend;
-      }
       case "downgrade":
       case "switch_annual":
         return this.actions.create({ ...base, type: "revise", params: { planId: offer.toPlanId } });
@@ -528,6 +526,11 @@ export class FakeSessionsApi implements SessionsApi {
     if (outcome === undefined) return;
     if (action.state === "APPLIED") {
       entry.pending.delete(action.id);
+      const offer = entry.presented?.offer;
+      if (action.type === "suspend" && offer?.kind === "pause") {
+        const { merchantId, subscriptionId } = entry.session;
+        await this.actions.scheduleResume({ merchantId, subscriptionId, dueAt: offer.resumesOn });
+      }
       await this.close(entry, outcome);
     } else if (NOTHING_APPLIED.includes(action.state)) {
       // Nothing changed in PayPal, so the subscriber can still cancel or keep from here.

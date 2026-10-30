@@ -129,7 +129,7 @@ describe("FakeSessionsApi: Maya pauses", () => {
     expect(api.actions.actions).toMatchObject([
       { id: actionId, type: "suspend", state: "PENDING", origin: "session" },
     ]);
-    expect(api.actions.resumes).toMatchObject([{ subscriptionId: maya.id, dueAt: offer.resumesOn }]);
+    expect(api.actions.resumes).toEqual([]);
     expect(api.get(sessionId)).toMatchObject({ state: "awaiting_paypal" });
 
     const consent = api.events.ofType("session.offer_accepted")[0]?.payload.consent;
@@ -145,6 +145,7 @@ describe("FakeSessionsApi: Maya pauses", () => {
     await api.actions.transition(actionId, "APPLIED");
     const updates = streamed.flatMap((s) => (s.event.type === "action.update" ? [s.event.state] : []));
     expect(updates).toEqual(["PENDING", "EXECUTING", "APPLIED"]);
+    expect(api.actions.resumes).toMatchObject([{ subscriptionId: maya.id, dueAt: offer.resumesOn }]);
     expect(lastClosed(streamed)).toEqual({
       type: "session.closed",
       outcome: "saved_pause",
@@ -157,6 +158,20 @@ describe("FakeSessionsApi: Maya pauses", () => {
     await api.actions.transition(actionId, "CONFIRMED");
     expect(streamed.at(-1)?.event).toMatchObject({ type: "action.update", state: "CONFIRMED" });
     expect(api.audit.verify(PANTRY_PLAN.merchantId)).toMatchObject({ ok: true });
+  });
+
+  it("leaves no resume behind when the suspend fails", async () => {
+    const api = make();
+    const { sessionId, streamed } = await open(api);
+    await api.message(principal, sessionId, { text: "Away for a while" });
+    const { offer, shownTextHash } = presentedOffer(streamed);
+    const [actionId] = (await api.accept(principal, sessionId, offer.id, { shownTextHash }, meta)).actionIds;
+    if (actionId === undefined) throw new Error("expected an Action");
+
+    await api.actions.transition(actionId, "EXECUTING");
+    await api.actions.transition(actionId, "FAILED", { error: { code: "UNPROCESSABLE", message: "No" } });
+    expect(api.actions.resumes).toEqual([]);
+    expect(api.get(sessionId)).toMatchObject({ state: "open", outcome: null });
   });
 
   it("treats a double-click on Accept as one click", async () => {

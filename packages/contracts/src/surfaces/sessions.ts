@@ -250,7 +250,12 @@ export interface SessionsApi {
   /** Resolves once the message is accepted; the reply arrives on the stream. */
   message(principal: SubscriberPrincipal, sessionId: string, body: PostMessageRequest): Promise<void>;
   reason(principal: SubscriberPrincipal, sessionId: string, body: PostReasonRequest): Promise<void>;
-  /** Idempotent: a second click on the same offer returns the first click's Actions. */
+  /**
+   * Idempotent: a second click on the same offer returns the first click's Actions. Before any
+   * Action is created, re-run `evaluate(policy, freshContext, offerId, storedMenu)` with
+   * `offersPresentedThisSession: 0` (the offer being accepted is the one that was presented);
+   * a refusal is `offer_unavailable`. A pause's resume is scheduled only once its suspend applies.
+   */
   accept(
     principal: SubscriberPrincipal,
     sessionId: string,
