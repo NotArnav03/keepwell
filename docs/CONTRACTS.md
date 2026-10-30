@@ -34,6 +34,7 @@ Conventions:
 - New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`.
 - `AgentStreamEvent` is the part of `SessionStreamEvent` the agent emits (`agent.delta`, `agent.done`, `offer.presented`, `reason.chips`, `fallback.changed`); `shownTextHash` is sha256 hex. M3's `SessionStreamEvent` = this union + `action.update`, `session.closed`, `error`.
 - `brainEventPayloads` (`session.offer_presented`, `policy.published`) are registered in `domainEventPayloads`; `brainJobs` has `llm.budget_reset` keyed by UTC day.
+- `reasonPreferences[reason]` is an allowlist as well as a ranking: unlisted kinds are not offered for that reason, and `"none"` ends the list. Unranked reasons use `DEFAULT_REASON_PREFERENCES` from `packages/policy`.
 - `FakeAgent` in `@keepwell/contracts/fakes`: one 1-cycle pause menu, scripted streamed reply, no-means-no on "cancel", one offer per session, card text from the offer.
 
 ```ts

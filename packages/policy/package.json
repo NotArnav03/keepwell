@@ -13,6 +13,13 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --coverage"
+  },
+  "dependencies": {
+    "@keepwell/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "5.0.4",
+    "fast-check": "4.10.2"
   }
 }
