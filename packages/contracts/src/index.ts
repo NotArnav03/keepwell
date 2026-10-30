@@ -12,4 +12,5 @@ export type * from "./platform/interfaces.js";
 export * from "./brain/offers.js";
 export * from "./brain/policy.js";
 export * from "./brain/agent.js";
+export * from "./brain/policy-api.js";
 export * from "./surfaces/sessions.js";
