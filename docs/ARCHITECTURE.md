@@ -303,8 +303,8 @@ sequenceDiagram
   alt intent = cancel_now or abusive or no eligible offers
     API-->>S: respectful close + cancel button (no offer)
   else
-    API->>SO: reply with tool call: present_offer(menu_id) | ask_one_question | no_offer
-    SO-->>API: text + tool call
+    API->>SO: reply as structured output: present_offer(menu_id) | ask_one_question | no_offer
+    SO-->>API: action + text (JSON)
     API->>PO: evaluate(pick) (defence in depth)
     API->>CC: check(text, offer)
     CC-->>API: ok | violations → regenerate once → else template text
@@ -315,7 +315,7 @@ sequenceDiagram
 ```
 
 - **Models:** Claude Sonnet 5.5 (`claude-sonnet-5-5`) for conversation and the copilot; Claude Haiku 5.5 (`claude-haiku-5-5`) for classification, tagging, claims checking and recovery copy. System prompts and the policy summary use **prompt caching**.
-- **Structured outputs:** all model decisions arrive as tool calls validated with zod. Invalid output → one retry → deterministic fallback.
+- **Structured outputs:** all model decisions arrive as structured output (`output_config.format`, a JSON schema generated from zod) and are validated with zod again. Not tool calls: Sonnet 5.5 rejects a forced `tool_choice`. Invalid output → one retry → deterministic fallback.
 - **Hard limits per session:** 3 subscriber messages, 1 clarifying question, 1 offer, 20 s total model time, a token budget. When any is hit, the conversation closes politely with the cancel button.
 - **Rules in the system prompt *and* enforced in code:** no guilt, no urgency, no invented features, no promises beyond the offer card. "I want to cancel" means show cancel now (no-means-no). Reply in the subscriber's language.
 - **Prompt-injection stance:** the subscriber's text can only change what the model *picks from the menu*. The menu, the policy check and the card rendering are outside the model's reach.
