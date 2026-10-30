@@ -12,6 +12,7 @@ research/
 # Dependencies and build output
 node_modules/
 dist/
+dist-bundle/
 build/
 .turbo/
 coverage/
@@ -29,3 +30,6 @@ Thumbs.db
 !.vscode/extensions.json
 .idea/
 .neon
+
+# Widget dev server output (pnpm dev:widget)
+packages/widget/dev/v1.js*

@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Pantry Plan · Account (widget dev page)</title>
+    <style>
+      /* Deliberately loud merchant CSS: none of it may leak into the widget's Shadow DOM. */
+      body {
+        font-family: Georgia, serif;
+        max-width: 40rem;
+        margin: 3rem auto;
+        color: #3f2d1a;
+        background: #fdf8f0;
+      }
+      button,
+      a.button {
+        font-size: 1.1rem;
+        padding: 0.6rem 1rem;
+        background: #b45309;
+        color: white;
+        border: 0;
+        border-radius: 0;
+      }
+      p {
+        color: purple;
+      }
+      nav a {
+        margin-right: 0.6rem;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Pantry Plan</h1>
+    <p>Standard plan · $12/month. Local widget dev page, served on its own origin (port 5177).</p>
+    <nav>
+      Scenario:
+      <a href="?scenario=pause">pause</a><a href="?scenario=downgrade">downgrade</a
+      ><a href="?scenario=annual">annual</a><a href="?scenario=discount">discount</a
+      ><a href="?scenario=refund">refund</a><a href="?scenario=none">none</a
+      ><a href="?scenario=l1">l1 (AI down)</a><a href="?scenario=pause&api=http://localhost:9">API down</a>
+    </nav>
+    <p>
+      <!-- Without the widget, this link is the merchant's own cancel path. -->
+      <a class="button" href="https://www.sandbox.paypal.com/myaccount/autopay/" data-keepwell-cancel
+        >Cancel subscription</a
+      >
+    </p>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const tag = document.createElement("script");
+      tag.src = "/v1.js";
+      tag.dataset.api = params.get("api") ?? "http://localhost:3000";
+      tag.dataset.token = `fake:${params.get("scenario") ?? "pause"}`;
+      tag.dataset.support = "help@pantryplan.example";
+      document.body.append(tag);
+    </script>
+  </body>
+</html>

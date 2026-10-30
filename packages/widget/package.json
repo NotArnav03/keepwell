@@ -13,6 +13,16 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests && node scripts/bundle.mjs --check",
+    "bundle": "node scripts/bundle.mjs",
+    "dev": "node scripts/bundle.mjs --serve"
+  },
+  "dependencies": {
+    "@keepwell/contracts": "workspace:*",
+    "preact": "11.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "happy-dom": "21.0.4"
   }
 }
