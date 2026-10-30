@@ -9,10 +9,25 @@ The real `Agent` (CONTRACTS.md §5, ARCHITECTURE.md §6.5). `createAgent()` buil
 3. **Close without an offer** when `intent` is `cancel_now` (no-means-no), or the message is abusive or shows distress.
 4. **Menu.** `computeMenu` for the classified reason. An empty menu (inactive subscription, offer already shown, nothing fits) closes without asking Sonnet.
 5. **Reply** with Claude Sonnet 5.5: exactly one of `present_offer(menu id)`, `ask_one_question` (only as the agent's first turn) or `no_offer`, plus the message.
-6. **Re-check.** The pick goes through `evaluate`, and the text may not contain any figure (a digit, `$ € £ ₹ ¥` or `%`) until the claims checker (#25) replaces that rule. A rejected reply is regenerated once. Then: an allowed pick keeps its offer with template text, anything else gets the close template.
-7. **Record, then show.** `session.offer_presented` and an `offer.presented` audit entry (with `explain()`) are written before the card is streamed. The card text renders from the `Offer`, never from the model.
+6. **Re-check.** The pick goes through `evaluate`, and the text through the claims checker (`claims.ts`, below). A rejected reply is regenerated once. Then: an allowed pick keeps its offer with template text, anything else gets the close template.
+7. **Record, then show.** `session.offer_presented` and an `offer.presented` audit entry (with `explain()`) are written before the card is streamed. The card text renders from the `Offer`, never from the model, in the subscriber's language.
 
 Each message has 8 s in total. A timeout, an API error, a refusal or two invalid classifier outputs sends `fallback.changed: L1`, template text and the reason chips. `respondToReason` (L1) never calls a model: it takes the policy's default for that chip from the full menu and re-checks it with `evaluate`.
+
+## Claims checker
+
+The offer card carries every term, so the model's text carries none. `checkClaims(text, offer)` rejects:
+- **figures:** digits in any script, currency signs, `%`, and number words;
+- **dates and durations:** month and day names, "tomorrow", "months", "semanas", "महीने";
+- **promises:** "free", "guaranteed", "forever", "gratis", "मुफ़्त";
+- **pressure and guilt:** "last chance", "we'll miss you", "última oportunidad", "आखिरी मौका";
+- **talk of another offer:** "refund" next to a pause card, or any offer word when none is shown.
+
+It is deterministic, with no model call: every reply passes through it, so it costs nothing and gives the same answer every time. Words are matched whole, with Unicode-aware boundaries, after NFC normalisation. A few words are left out on purpose, such as "one", "may", "today" and the singular "day" ("have a good day"). The evals (#28) will show whether the lists need tuning.
+
+## Languages
+
+Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money, percentages and dates are formatted with `Intl`; money is formatted from its decimal string and never becomes a float. The classifier's `language` picks the locale, and anything else falls back to English. A reason-chip tap (L1) carries no text, so it uses English until `SessionContext` carries the session's locale.
 
 ## Model calls
 
@@ -27,6 +42,6 @@ Each message has 8 s in total. A timeout, an API error, a refusal or two invalid
 
 ## Not yet (later issues)
 
-- Multilingual templates and card text (#24, #25), and the real claims checker (#25).
+- The session's locale in `SessionContext` (from `CreateSessionRequest.locale`), so L1 replies are localised too.
 - The 20 s per-session model time, the token budget, the daily budget and rate limits (#26). They need state across calls.
 - Prompt tuning against the evals (#28, #30).
