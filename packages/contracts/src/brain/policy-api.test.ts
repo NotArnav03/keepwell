@@ -110,6 +110,7 @@ describe("policy API schemas", () => {
         },
       ],
       missingSubscriptionIds: [],
+      problems: [],
     });
   });
 

@@ -11,6 +11,10 @@ import { PolicyContext, PolicyDocument } from "./policy.js";
 export const PolicyDraft = PolicyDocument.omit({ version: true });
 export type PolicyDraft = z.infer<typeof PolicyDraft>;
 
+/** One problem with a draft that zod can't see, with the dotted path of the field to fix. */
+export const PolicyProblem = z.object({ path: z.string().min(1), message: z.string().min(1) });
+export type PolicyProblem = z.infer<typeof PolicyProblem>;
+
 const Version = z.number().int().min(1);
 const ChangeNote = z.string().trim().max(280);
 
@@ -83,6 +87,8 @@ export const PolicyDryRunResponse = z.object({
   samples: z.array(PolicyDryRunSample),
   /** Requested ids that aren't this merchant's subscriptions. */
   missingSubscriptionIds: z.array(Id),
+  /** What publishing this draft would reject (`invalid_policy`); empty means it can be published. */
+  problems: z.array(PolicyProblem),
 });
 export type PolicyDryRunResponse = z.infer<typeof PolicyDryRunResponse>;
 
@@ -115,7 +121,7 @@ export class PolicyError extends Error {
     readonly code: PolicyErrorCode,
     message: string,
     /** For invalid_policy: one entry per problem, each with the path into the document. */
-    readonly details?: { path: string; message: string }[],
+    readonly details?: PolicyProblem[],
   ) {
     super(message);
   }
