@@ -7,8 +7,11 @@ import { PolicyContext, PolicyDocument } from "./policy.js";
 // and POST /v1/m/policies/dry-run (CONTRACTS.md §4, owner M2). Consumers: the dashboard's policy
 // editor (M4, #53) and the sessions module, which loads the current policy (M3).
 
-/** A policy as the merchant edits it: everything but `version`, which publishing assigns. */
-export const PolicyDraft = PolicyDocument.omit({ version: true });
+/**
+ * A policy as the merchant edits it: everything but `version`, which publishing assigns. Strict, so
+ * a client that sends a `version` (or a misspelt field) hears about it instead of having it dropped.
+ */
+export const PolicyDraft = z.strictObject(PolicyDocument.omit({ version: true }).shape);
 export type PolicyDraft = z.infer<typeof PolicyDraft>;
 
 /** One problem with a draft that zod can't see, with the dotted path of the field to fix. */

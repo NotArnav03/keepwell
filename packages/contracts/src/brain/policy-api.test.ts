@@ -35,9 +35,10 @@ const publishInput = (baseVersion: number | null) => ({
 });
 
 describe("policy API schemas", () => {
-  it("a draft is a policy without its version", () => {
+  it("a draft is a policy without its version, and says so if one is sent", () => {
     expect(PolicyDraft.parse(draft)).toEqual(draft);
-    expect(PolicyDraft.parse(PANTRY_PLAN.policy)).not.toHaveProperty("version");
+    expect(PolicyDraft.safeParse(PANTRY_PLAN.policy).success).toBe(false);
+    expect(PolicyDraft.safeParse({ ...draft, tonee: "warm" }).success).toBe(false);
   });
 
   it("publish requests are strict and trim the change note", () => {
