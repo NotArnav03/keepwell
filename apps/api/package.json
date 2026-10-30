@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --env-file-if-exists=../../.env --watch --import tsx src/index.ts",
+    "dev:fake-sessions": "node --env-file-if-exists=../../.env --watch --import tsx src/modules/sessions/fake-server.ts",
     "start": "node dist/index.js",
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -12,6 +13,7 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
+    "@keepwell/contracts": "workspace:*",
     "fastify": "5.12.7",
     "pg": "8.23.1",
     "zod": "4.6.7"
