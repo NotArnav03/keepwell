@@ -2,7 +2,7 @@
 // No I/O, no clock reads, no randomness: it runs the same in the API, the dashboard's dry-run,
 // the evals and the MCP servers.
 export { computeMenu, rankedKinds } from "./menu.js";
-export { describeOffer, evaluate, explain } from "./evaluate.js";
+export { describeOffer, evaluate, evaluateAcceptance, explain, type PresentedOffer } from "./evaluate.js";
 export { pantryPlanPolicy } from "./defaults.js";
 export {
   DEFAULT_REASON_PREFERENCES,

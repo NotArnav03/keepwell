@@ -3,12 +3,17 @@
 The pure policy engine (ARCHITECTURE.md §6.6). The AI can only offer what `computeMenu` returns, and `evaluate` re-checks its pick before anything reaches PayPal. No I/O, no clock reads, no randomness, so the API, the dashboard's dry-run, the evals and the MCP servers all get the same answer.
 
 ```ts
-import { computeMenu, evaluate, explain } from "@keepwell/policy";
+import { computeMenu, evaluate, evaluateAcceptance, explain } from "@keepwell/policy";
 
 const menu = computeMenu(policy, ctx);                 // OfferMenu: concrete offers + why others are excluded
 const decision = evaluate(policy, ctx, offerId, menu); // PolicyDecision: allowed? which rule said no?
 explain(decision);                                     // lines for the audit log
+
+// At Accept: re-check what the card showed against fresh truth, never the stored decision.
+evaluateAcceptance(policy, freshCtx, { offer, policyVersion });
 ```
+
+**Accept re-checks.** A card can sit open for hours. `evaluateAcceptance` recomputes the menu from a freshly loaded context (with the reason the offer was shown for) and allows the offer only if the policy still offers it with the same terms under the same policy version. It treats the accepted offer as the session's one offer and the click as consent, so callers don't have to adjust `offersPresentedThisSession` or `cancelIntent`.
 
 ## What the menu contains
 
