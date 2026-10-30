@@ -27,6 +27,10 @@ export const ReasonCategory = z.enum([
 ]);
 export type ReasonCategory = z.infer<typeof ReasonCategory>;
 
+/** Where a subscriber reached us: the widget on the merchant's site, our portal, or their own AI agent. */
+export const Channel = z.enum(["widget", "portal", "subscriber_agent"]);
+export type Channel = z.infer<typeof Channel>;
+
 export const BillingInterval = z.object({
   unit: z.enum(["DAY", "WEEK", "MONTH", "YEAR"]),
   count: z.number().int().min(1),

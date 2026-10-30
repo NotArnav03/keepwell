@@ -44,6 +44,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       fastify:
         specifier: 5.12.7
         version: 5.12.7

@@ -45,6 +45,7 @@ If `corepack enable` fails with EPERM on Windows, run `corepack enable pnpm --in
 | Command | What it does |
 |---|---|
 | `pnpm dev:api` | API on http://localhost:3000 with reload (`/healthz`, `/readyz`) |
+| `pnpm dev:fake-sessions` | The sessions API on fakes, for building the widget (see `apps/api/src/modules/sessions/README.md`) |
 | `pnpm typecheck` / `pnpm lint` / `pnpm test` | Every package, through Turborepo (cached) |
 | `pnpm check` | All three plus the Prettier check: what CI runs |
 | `pnpm format` | Fix formatting |

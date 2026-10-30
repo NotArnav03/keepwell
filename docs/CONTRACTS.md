@@ -30,12 +30,24 @@ Conventions:
 - `OfferMenu.defaultByReason` must have an entry for **every** reason (null = no offer), so L1 never has a gap. `PolicyDocument.reasonPreferences` may leave reasons out (the engine has a default ranking).
 - `PolicyDocument` limits are bounded (`version ≥ 1`, `maxCycles ≥ 1`, percents 1–100, counts ≥ 0).
 - New `PolicyContext` (input to `computeMenu`/`evaluate`): `now`, `channel`, `reason`, `cancelIntent`, `offersPresentedThisSession`, `subscription: SubscriptionSnapshot`, `history: SubscriberHistory` (saves and pauses in 365 days, last pause end, refunds in 30 days) and `plans: PlanInfo[]`. Time is passed in so the engine stays pure.
-- `Channel` lives here until it moves to `shared.ts`.
+- `Channel` now lives in `shared.ts` (moved by M3 in #22).
 - New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`.
 - `AgentStreamEvent` is the part of `SessionStreamEvent` the agent emits (`agent.delta`, `agent.done`, `offer.presented`, `reason.chips`, `fallback.changed`); `shownTextHash` is sha256 hex. M3's `SessionStreamEvent` = this union + `action.update`, `session.closed`, `error`.
 - `brainEventPayloads` (`session.offer_presented`, `policy.published`) are registered in `domainEventPayloads`; `brainJobs` has `llm.budget_reset` keyed by UTC day.
 - `reasonPreferences[reason]` is an allowlist as well as a ranking: unlisted kinds are not offered for that reason, and `"none"` ends the list. Unranked reasons use `DEFAULT_REASON_PREFERENCES` from `packages/policy`.
 - `FakeAgent` in `@keepwell/contracts/fakes`: one 1-cycle pause menu, scripted streamed reply, no-means-no on "cancel", one offer per session, card text from the offer.
+
+**As implemented in `packages/contracts/src/surfaces/` (v1, owner M3).** Differences from the sketch below and §4:
+- `Channel` is in `shared.ts`. `Consent` hashes are `Sha256Hex`, with `offerHash = sha256(canonicalJson(offer))`; `ipPrefix` is the IP cut to /24 (IPv4) or /48 (IPv6).
+- New `Session`: the `sessions` row as the merchant API lists it. `reason` is `"unknown"` until known; `outcome` and `closedAt` are null until closed. A cancel after a save reopens the session, so the last outcome wins.
+- `SAVED_OUTCOME` maps each offer kind to its `saved_*` outcome. `summarizeSubscription(snapshot)` gives `SubscriptionSummary`, what the widget shows; its `price` is the discount override when one is active.
+- HTTP bodies: `CreateSessionRequest` takes only `widget | portal` (agents use MCP) plus an optional `locale`. `CreateSessionResponse` adds `merchant: { name, supportContact }`, and `streamUrl` is absolute (it may carry a read-only ticket, so never log it). `PostMessageRequest` is trimmed, 1–1000 chars. `PostReasonRequest` has no `"unknown"`. `AcceptOfferResponse.approveUrl` is null rather than absent; it usually arrives later as `action.update`. `CancelRequest.reason` is a `ReasonCategory`.
+- `SessionStreamEvent` = `AgentStreamEvent` + `action.update` (adds `actionType` and `error`) + `session.closed` + `error`. Each SSE frame is `id: <seq>` + `data: <JSON>`, with `seq` from 1 per session. `Last-Event-ID` (or `?after=<seq>`) replays what came after it. The stream ends after `session.closed`; reconnecting to a closed session with nothing new returns 204, which stops `EventSource` retrying.
+- New `POST /sessions/:id/keep` → 204: "Keep my subscription", closes as `kept_without_offer`.
+- Errors: `SessionErrorCode` and `SessionError` (which carries its HTTP status) fill the `ErrorEnvelope`.
+- `SessionsApi` is the sessions API without HTTP; the routes, the subscriber MCP server and `FakeSessionsApi` share it. `SubscriberPrincipal` is what a credential resolves to.
+- `surfacesEventPayloads`: `session.started`, `session.offer_accepted` (the whole `offer` instead of `offerId`, plus `actionIds`), `session.offer_declined`, `session.closed` (`reason` is a `ReasonCategory`).
+- `FakeSessionsApi`, `PANTRY_PLAN` and `pantryPlanSubscription` are in `@keepwell/contracts/fakes`. `pnpm dev:fake-sessions` serves the fake over HTTP for building the widget.
 
 ```ts
 // ---------- shared ----------
@@ -267,7 +279,8 @@ Auth types: **SUB** = subscriber token, **PORTAL** = portal session cookie, **DE
 | `POST /sessions/:id/reason` | SUB / PORTAL | `{ reason: ReasonCategory }` → `202` (L1 reason chips) |
 | `POST /sessions/:id/offers/:offerId/accept` | SUB / PORTAL | `{ shownTextHash }` → `{ actionIds[], approveUrl? }` |
 | `POST /sessions/:id/offers/:offerId/decline` | SUB / PORTAL | → `204` |
-| `POST /sessions/:id/cancel` | SUB / PORTAL | `{ reason? }` → `{ actionId }`. **Never touches the LLM.** |
+| `POST /sessions/:id/keep` | SUB / PORTAL | → `204` ("Keep my subscription": closes as `kept_without_offer`) |
+| `POST /sessions/:id/cancel` | SUB / PORTAL | `{ reason? }` → `{ actionId }`. **Never touches the LLM.** Works in every state, including after a save. |
 | `GET /revise/return` | – (signed `state` param) | PayPal return URL → HTML page that notifies the widget and closes |
 | `POST /portal/magic-link` | – (rate limited) | `{ merchantSlug, email }` → `202` always (no account enumeration) |
 | `GET /portal/verify` | – | `?token=` → sets PORTAL cookie, redirects |

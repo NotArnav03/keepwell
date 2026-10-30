@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { BillingInterval, IsoDateTime, Money, ReasonCategory } from "../shared.js";
+import { BillingInterval, Channel, IsoDateTime, Money, ReasonCategory } from "../shared.js";
 import { SubscriptionSnapshot } from "../platform/subscriptions.js";
 import { OfferKind } from "./offers.js";
 
@@ -52,9 +52,6 @@ export const PolicyDocument = z.object({
   supportContact: z.string().min(1),
 });
 export type PolicyDocument = z.infer<typeof PolicyDocument>;
-
-export const Channel = z.enum(["widget", "portal", "subscriber_agent"]);
-export type Channel = z.infer<typeof Channel>;
 
 /** A plan the merchant sells, so downgrade and annual offers can show a name and a real price. */
 export const PlanInfo = z.object({

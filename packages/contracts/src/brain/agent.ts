@@ -1,9 +1,9 @@
 import { z } from "zod";
-import { Id, IsoDateTime, ReasonCategory } from "../shared.js";
+import { Channel, Id, IsoDateTime, ReasonCategory } from "../shared.js";
 import { Sha256Hex } from "../platform/audit.js";
 import { SubscriptionSnapshot } from "../platform/subscriptions.js";
 import { Offer, OfferMenu } from "./offers.js";
-import { Channel, PlanInfo, PolicyDocument, SubscriberHistory } from "./policy.js";
+import { PlanInfo, PolicyDocument, SubscriberHistory } from "./policy.js";
 
 // The agent runtime's seam with the sessions module (M2 → M3, M4, evals). ARCHITECTURE.md §6.5.
 
