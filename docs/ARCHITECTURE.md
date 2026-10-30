@@ -292,7 +292,7 @@ sequenceDiagram
   participant API as Session API
   participant PO as Policy engine
   participant H as Claude Haiku (classifier)
-  participant SO as Claude Sonnet (conversation)
+  participant SO as Claude Haiku (conversation)
   participant CC as Claims checker
   S->>API: start session (signed subscriber token)
   API->>API: GET subscription (fresh truth) + history
@@ -314,8 +314,8 @@ sequenceDiagram
   API->>API: create Action(s)
 ```
 
-- **Models:** Claude Sonnet 5.5 (`claude-sonnet-5-5`) for conversation and the copilot; Claude Haiku 5.5 (`claude-haiku-5-5`) for classification, tagging, claims checking and recovery copy. System prompts and the policy summary use **prompt caching**.
-- **Structured outputs:** all model decisions arrive as structured output (`output_config.format`, a JSON schema generated from zod) and are validated with zod again. Not tool calls: Sonnet 5.5 rejects a forced `tool_choice`. Invalid output → one retry → deterministic fallback.
+- **Models:** Claude Haiku 5.5 (`claude-haiku-5-5`) for the agent's conversation (a few sentences picking from a fixed menu, re-checked in code, inside an 8 s budget: speed and cost matter more than depth), classification, tagging, claims checking and recovery copy; Claude Sonnet 5.5 (`claude-sonnet-5-5`) for the copilot. System prompts and the policy summary use **prompt caching**.
+- **Structured outputs:** all model decisions arrive as structured output (`output_config.format`, a JSON schema generated from zod) and are validated with zod again. Not tool calls: the schema is guaranteed, and newer models (Sonnet 5.5, Opus 5.5) reject a forced `tool_choice`. Invalid output → one retry → deterministic fallback.
 - **Hard limits per session:** 3 subscriber messages, 1 clarifying question, 1 offer, 20 s total model time, a token budget. When any is hit, the conversation closes politely with the cancel button.
 - **Rules in the system prompt *and* enforced in code:** no guilt, no urgency, no invented features, no promises beyond the offer card. "I want to cancel" means show cancel now (no-means-no). Reply in the subscriber's language.
 - **Prompt-injection stance:** the subscriber's text can only change what the model *picks from the menu*. The menu, the policy check and the card rendering are outside the model's reach.
