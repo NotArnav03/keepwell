@@ -116,6 +116,7 @@ export class AgentRuntime implements Agent {
           schema: Classification,
           maxTokens: 1024,
           signal,
+          sessionId: s.sessionId,
         }),
       );
       this.log.info({ ...log, classification }, "agent classified");
@@ -151,6 +152,7 @@ export class AgentRuntime implements Agent {
             schema: Reply,
             maxTokens: 2048,
             signal,
+            sessionId: s.sessionId,
           });
         } catch (err) {
           if (err instanceof LlmError && err.failure === "invalid_output" && attempt === 1) continue;

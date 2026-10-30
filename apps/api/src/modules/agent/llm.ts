@@ -14,6 +14,8 @@ export const MODEL_FOR: Record<LlmPurpose, string> = {
 
 export interface StructuredCall<S extends z.ZodType> {
   purpose: LlmPurpose;
+  /** For the per-session limits in the budget guard; null outside a session. */
+  sessionId: string | null;
   /** Identical bytes on every call, so it is served from the prompt cache. */
   system: string;
   /** Everything that varies: the menu, the transcript. */
