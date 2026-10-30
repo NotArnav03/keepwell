@@ -12,7 +12,7 @@ export type NanoUsd = number;
 const PRICES: Record<string, { input: number; output: number; cacheRead: number; cacheWrite: number }> = {
   // $0.10 / $0.50 per MTok (prompts up to 100K tokens; ours are a few thousand)
   "claude-haiku-5-5": { input: 100, output: 500, cacheRead: 10, cacheWrite: 125 },
-  // $2 / $10 per MTok
+  // $2 / $10 per MTok. Not used by the agent; kept for the copilot (M5), which shares this client.
   "claude-sonnet-5-5": { input: 2_000, output: 10_000, cacheRead: 200, cacheWrite: 2_500 },
 };
 

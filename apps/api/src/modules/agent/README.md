@@ -7,8 +7,8 @@ The real `Agent` (CONTRACTS.md §5, ARCHITECTURE.md §6.5). `createAgent()` buil
 1. **Limits.** A 4th message gets the limit text and no model call.
 2. **Classify** with Claude Haiku 5.5: `reason`, `intent`, `language`, `flags`.
 3. **Close without an offer** when `intent` is `cancel_now` (no-means-no), or the message is abusive or shows distress.
-4. **Menu.** `computeMenu` for the classified reason. An empty menu (inactive subscription, offer already shown, nothing fits) closes without asking Sonnet.
-5. **Reply** with Claude Sonnet 5.5: exactly one of `present_offer(menu id)`, `ask_one_question` (only as the agent's first turn) or `no_offer`, plus the message.
+4. **Menu.** `computeMenu` for the classified reason. An empty menu (inactive subscription, offer already shown, nothing fits) closes without a second model call.
+5. **Reply** with Claude Haiku 5.5: exactly one of `present_offer(menu id)`, `ask_one_question` (only as the agent's first turn) or `no_offer`, plus the message.
 6. **Re-check.** The pick goes through `evaluate`, and the text through the claims checker (`claims.ts`, below). A rejected reply is regenerated once. Then: an allowed pick keeps its offer with template text, anything else gets the close template.
 7. **Record, then show.** `session.offer_presented` and an `offer.presented` audit entry (with `explain()`) are written before the card is streamed. The card text renders from the `Offer`, never from the model, in the subscriber's language.
 
@@ -31,7 +31,8 @@ Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money
 
 ## Model calls
 
-- Only `anthropic.ts` imports `@anthropic-ai/sdk`. Decisions come back as **structured output** (`output_config.format`, a JSON schema from zod) and are validated with zod again. Sonnet 5.5 rejects forced `tool_choice`, so they aren't tool calls.
+- Only `anthropic.ts` imports `@anthropic-ai/sdk`. Decisions come back as **structured output** (`output_config.format`, a JSON schema from zod) and are validated with zod again. They aren't tool calls: the schema is guaranteed, and newer models reject a forced `tool_choice`.
+- Both calls use Claude Haiku 5.5. A reply is a few sentences picking from a fixed menu, the 8 s deadline covers two calls, and every pick and sentence is re-checked in code, so a faster, cheaper model fits. Sonnet would be about 20× the cost per reply.
 - The system prompts in `prompts.ts` never change between calls, so they're cached. Everything per session goes in the user message.
 - `effort: "low"`, one SDK retry, and the 8 s deadline as an `AbortSignal`.
 - The subscriber's words sit inside `<transcript>` / `<subscriber_messages>` tags, and both prompts treat them as data. Whatever they say, the model can only pick from the menu, and the policy re-checks that pick.

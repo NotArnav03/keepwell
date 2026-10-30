@@ -32,9 +32,10 @@ export class AnthropicLlmClient implements LlmClient {
     const model = MODEL_FOR[call.purpose];
     await this.assertBudget(call.sessionId);
 
-    // Sonnet 5.5 rejects forced tool_choice, so decisions come back as structured output instead
-    // of a tool call. The SDK's parse() would throw before we could tell a refusal from bad JSON,
-    // so this sends the schema only and validates below.
+    // Decisions come back as structured output, not a forced tool call: the schema is guaranteed,
+    // and newer models (Sonnet 5.5, Opus 5.5) reject a forced tool_choice anyway. The SDK's parse()
+    // would throw before we could tell a refusal from bad JSON, so this sends the schema only and
+    // validates below.
     const { type, schema } = zodOutputFormat(call.schema);
     const started = this.now();
     let message: Anthropic.Message;

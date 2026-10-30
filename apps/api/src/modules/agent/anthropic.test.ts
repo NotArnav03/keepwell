@@ -105,7 +105,7 @@ describe("AnthropicLlmClient", () => {
     const { llm, requests } = clientReturning([{ status: 200, body: message('{"answer":"yes"}') }]);
     await expect(llm.structured(call("converse"))).resolves.toEqual({ answer: "yes" });
     expect(requests[0]).toMatchObject({
-      model: "claude-sonnet-5-5",
+      model: "claude-haiku-5-5",
       max_tokens: 256,
       system: [{ type: "text", text: "SYSTEM", cache_control: { type: "ephemeral" } }],
       messages: [{ role: "user", content: "INPUT" }],
@@ -114,10 +114,12 @@ describe("AnthropicLlmClient", () => {
     expect(requests[0]).not.toHaveProperty("tool_choice");
   });
 
-  it("uses Haiku to classify", async () => {
-    const { llm, requests } = clientReturning([{ status: 200, body: message('{"answer":"no"}') }]);
+  it("uses Haiku for both the classifier and the conversation", async () => {
+    const ok = { status: 200, body: message('{"answer":"no"}') };
+    const { llm, requests } = clientReturning([ok, ok]);
     await llm.structured(call("classify"));
-    expect(requests[0]?.model).toBe("claude-haiku-5-5");
+    await llm.structured(call("converse"));
+    expect(requests.map((r) => r.model)).toEqual(["claude-haiku-5-5", "claude-haiku-5-5"]);
   });
 
   it.each([
@@ -158,13 +160,13 @@ describe("AnthropicLlmClient with the budget guard", () => {
         at: NOW.toISOString(),
         sessionId: SESSION,
         purpose: "converse",
-        model: "claude-sonnet-5-5",
+        model: "claude-haiku-5-5",
         inputTokens: 1000,
         outputTokens: 100,
         cacheReadTokens: 2000,
         cacheWriteTokens: 0,
-        // 1000 × 2000 + 100 × 10000 + 2000 × 200 nano-dollars
-        costNanoUsd: 3_400_000,
+        // 1000 × 100 + 100 × 500 + 2000 × 10 nano-dollars: $0.00017
+        costNanoUsd: 170_000,
         durationMs: 200,
       },
     ]);
@@ -172,11 +174,9 @@ describe("AnthropicLlmClient with the budget guard", () => {
 
   it("refuses to call once today's budget is spent, without sending a request", async () => {
     const store = new InMemoryLlmUsageStore();
-    // $0.001 budget; one Sonnet call above costs $0.0034.
-    const { llm, requests } = clientReturning(
-      [{ status: 200, body: message('{"answer":"yes"}') }],
-      budgetWith(store, 0.001),
-    );
+    // $0.0001 budget; one call above costs $0.00017. Two good responses: only the guard stops the second.
+    const ok = { status: 200, body: message('{"answer":"yes"}') };
+    const { llm, requests } = clientReturning([ok, ok], budgetWith(store, 0.0001));
     await llm.structured(call("converse"));
     expect(await failure(llm.structured(call("converse")))).toBe("unavailable");
     expect(requests).toHaveLength(1);
