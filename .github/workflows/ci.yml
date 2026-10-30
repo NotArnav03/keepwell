@@ -51,6 +51,8 @@ jobs:
     env:
       # A local, disposable CI database: not a secret.
       KEEPWELL_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Turn a skipped database test into a failure here: a green job must mean the tests ran.
+      KEEPWELL_REQUIRE_DATABASE_TESTS: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: pnpm/action-setup@v6

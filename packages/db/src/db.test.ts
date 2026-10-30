@@ -56,6 +56,15 @@ async function errorCode(run: () => Promise<unknown>): Promise<string> {
   return "none";
 }
 
+// CI's database job sets KEEPWELL_REQUIRE_DATABASE_TESTS, so a missing URL fails there instead of
+// silently skipping everything below (which once made the job green without running a test).
+it.runIf(process.env.KEEPWELL_REQUIRE_DATABASE_TESTS === "1" && TEST_DATABASE_URL === undefined)(
+  "has a test database when the database tests are required",
+  () => {
+    expect.fail("KEEPWELL_REQUIRE_DATABASE_TESTS is set but KEEPWELL_TEST_DATABASE_URL is not");
+  },
+);
+
 // A remote Neon branch is a few hundred ms per round trip, hence the generous timeout.
 describe.skipIf(TEST_DATABASE_URL === undefined)("packages/db against Postgres", { timeout: 30_000 }, () => {
   beforeAll(async () => {
