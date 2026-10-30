@@ -4,6 +4,7 @@
 export { computeMenu, rankedKinds } from "./menu.js";
 export { describeOffer, evaluate, evaluateAcceptance, explain, type PresentedOffer } from "./evaluate.js";
 export { pantryPlanPolicy } from "./defaults.js";
+export { validatePolicy } from "./validate.js";
 export {
   DEFAULT_REASON_PREFERENCES,
   OFFERABLE_KINDS,
