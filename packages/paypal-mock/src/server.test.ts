@@ -9,6 +9,7 @@ import { createPayPalMock, type PayPalMock } from "./server.js";
 
 const NOW = new Date("2026-11-01T12:00:00Z");
 const MAYA = fixtureSubscriptionId("maya");
+const PANTRY_PLAN_MERCHANT = pantryPlanFixture(NOW).merchant.id;
 const RAJ = fixtureSubscriptionId("raj");
 const OTHER = { id: "other-merchant", name: "Other", clientId: "other-client", clientSecret: "other-secret" };
 
@@ -413,6 +414,19 @@ describe("what PayPal does on its own", () => {
     const after = await subscription(MAYA);
     const nextOf = (s: typeof before) => (s?.billing_info as { next_billing_time: string }).next_billing_time;
     expect(Date.parse(nextOf(after))).toBeGreaterThan(Date.parse(nextOf(before)));
+  });
+
+  it("names events the way PayPal does: reactivating sends ACTIVATED", () => {
+    const events: string[] = [];
+    mock.state.onEvent = (_merchant, event) => events.push(event.event_type);
+    mock.state.suspend(PANTRY_PLAN_MERCHANT, MAYA);
+    mock.state.activate(PANTRY_PLAN_MERCHANT, MAYA);
+    mock.state.cancel(PANTRY_PLAN_MERCHANT, MAYA);
+    expect(events).toEqual([
+      "BILLING.SUBSCRIPTION.SUSPENDED",
+      "BILLING.SUBSCRIPTION.ACTIVATED",
+      "BILLING.SUBSCRIPTION.CANCELLED",
+    ]);
   });
 
   it("suspends after the plan's failure threshold, with PAYMENT.FAILED for each failure", async () => {

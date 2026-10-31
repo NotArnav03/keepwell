@@ -304,6 +304,31 @@ export class DbActionEngine implements ActionEngine<Tx> {
     });
   }
 
+  /**
+   * A sync (webhook or reconciler) just saw this subscription's real status: APPLIED Actions whose
+   * target it is become CONFIRMED, with no extra PayPal call. Registered on subscription.synced.
+   */
+  async confirmFromSync(
+    merchantId: string,
+    subscriptionId: string,
+    status: SubscriptionStatus,
+  ): Promise<string[]> {
+    return this.o.db.forMerchant(merchantId, async (tx) => {
+      const applied = await tx
+        .select()
+        .from(actions)
+        .where(and(eq(actions.subscriptionId, subscriptionId), eq(actions.state, "APPLIED")))
+        .for("update");
+      const confirmed: string[] = [];
+      for (const row of applied) {
+        if (!isMutation(row.type) || TARGET[row.type] !== status) continue;
+        await this.move(tx, row, "CONFIRMED", {});
+        confirmed.push(row.id);
+      }
+      return confirmed;
+    });
+  }
+
   /** Scheduled resumes whose time has come become activate Actions (the resume.due job). */
   async runDueResumes(limit = 50): Promise<string[]> {
     const now = this.clock();
