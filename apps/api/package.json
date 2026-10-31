@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "eval": "node --env-file-if-exists=../../.env --import tsx src/modules/agent/evals/cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
@@ -18,7 +19,8 @@
     "@keepwell/policy": "workspace:*",
     "fastify": "5.12.7",
     "pg": "8.23.1",
-    "zod": "4.6.7"
+    "zod": "4.6.7",
+    "@keepwell/evals": "workspace:*"
   },
   "devDependencies": {
     "@keepwell/paypal-mock": "workspace:*",
