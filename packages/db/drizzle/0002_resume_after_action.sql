@@ -1,0 +1,2 @@
+ALTER TABLE "scheduled_resumes" ADD COLUMN "after_action_id" uuid;--> statement-breakpoint
+ALTER TABLE "scheduled_resumes" ADD CONSTRAINT "scheduled_resumes_after_action_id_actions_id_fk" FOREIGN KEY ("after_action_id") REFERENCES "public"."actions"("id") ON DELETE no action ON UPDATE no action;
