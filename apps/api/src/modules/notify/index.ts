@@ -8,6 +8,7 @@ import { ConsoleFreeProvider, ResendProvider, type EmailProvider } from "./provi
 export { loadNotifyConfig, type NotifyConfig } from "./config.js";
 export { createDispatcher, enqueueDueNotifications, backoffMs, type DispatchOutcome } from "./dispatcher.js";
 export { createNotifier } from "./notifier.js";
+export { notifyRoutes, type NotifyRoutesOptions } from "./routes.js";
 export { EmailProviderError, FakeEmailProvider, type EmailProvider } from "./providers.js";
 
 export interface CreateNotifyOptions {
