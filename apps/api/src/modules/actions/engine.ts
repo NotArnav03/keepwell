@@ -63,6 +63,11 @@ export interface ActionEngineOptions {
   publicBaseUrl?: string;
   /** A buyer who hasn't approved a revise by then won't: ABANDONED. PayPal's links last about 3 h. */
   approvalExpiresMs?: number;
+  /**
+   * Queues a new Action's execution in the creating transaction (the action.execute job), so it runs
+   * within seconds rather than at the next due sweep, and only if the creation commits.
+   */
+  enqueue?: (actionId: string, tx: Tx) => Promise<void>;
   random?: () => number;
 }
 
@@ -143,6 +148,7 @@ export class DbActionEngine implements ActionEngine<Tx> {
       return toAction(raced);
     }
     await this.record(tx, row, null, ACTOR[row.origin]);
+    await this.o.enqueue?.(row.id, tx);
     if (row.type === "cancel" && row.subscriptionId !== null) await this.supersedeFor(tx, row);
     return toAction(row);
   }
