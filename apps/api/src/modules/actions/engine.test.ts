@@ -51,6 +51,11 @@ function makeEngine(options: Partial<ConstructorParameters<typeof DbActionEngine
     suspend: (m, id, r) => (calls.push(`suspend ${id}`), client.suspend(m, id, r)),
     activate: (m, id, r) => (calls.push(`activate ${id}`), client.activate(m, id, r)),
     cancel: (m, id, r) => (calls.push(`cancel ${id}`), client.cancel(m, id, r)),
+    revise: (m, id, input) => (calls.push(`revise ${id}`), client.revise(m, id, input)),
+    patchPrice: (m, id, price) => (calls.push(`patch ${id}`), client.patchPrice(m, id, price)),
+    refund: (m, input) => (calls.push(`refund ${input.transactionId}`), client.refund(m, input)),
+    capture: (m, id, input) => (calls.push(`capture ${id}`), client.capture(m, id, input)),
+    createPlan: (m, input) => (calls.push(`create_plan ${input.name}`), client.createPlan(m, input)),
   };
   return new DbActionEngine({
     db,

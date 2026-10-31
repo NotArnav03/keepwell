@@ -6,8 +6,11 @@ import {
   type Page,
   type PayPalErrorKind,
   type PayPalGateway,
+  type BillingInterval,
+  type Money,
 } from "@keepwell/contracts";
 import type { CredentialSource } from "./credentials.js";
+import { toPayPalMoney } from "./money.js";
 import { TokenBuckets, type RateLimit } from "./rate-limit.js";
 
 // The only code that calls PayPal (ARCHITECTURE.md §6.1, apps/api/CLAUDE.md). Other modules get the
@@ -114,6 +117,11 @@ export const PayPalPlan = z.looseObject({
   ),
 });
 export type PayPalPlan = z.infer<typeof PayPalPlan>;
+
+const ReviseResponse = z.looseObject({
+  links: z.array(z.looseObject({ href: z.string(), rel: z.string() })),
+});
+const IdBody = z.looseObject({ id: z.string().min(1) });
 
 const VerifyResponse = z.looseObject({ verification_status: z.string() });
 
@@ -262,6 +270,117 @@ export class PayPalClient implements PayPalGateway {
       body: { reason },
     });
     return { debugId };
+  }
+
+  /**
+   * Starts a plan change. Nothing changes until the buyer approves on the returned link; PayPal
+   * then sends them to returnUrl (or cancelUrl). Re-running only makes a fresh link (§6.1).
+   */
+  async revise(
+    merchantId: string,
+    paypalSubscriptionId: string,
+    input: { planId: string; returnUrl: string; cancelUrl: string },
+  ): Promise<MutationResult & { approveUrl: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: `/v1/billing/subscriptions/${encodeURIComponent(paypalSubscriptionId)}/revise`,
+      body: {
+        plan_id: input.planId,
+        application_context: {
+          return_url: input.returnUrl,
+          cancel_url: input.cancelUrl,
+          user_action: "CONTINUE",
+        },
+      },
+    });
+    const approve = ReviseResponse.parse(body).links.find((l) => l.rel === "approve");
+    if (!approve)
+      throw new PayPalGatewayError("invalid_request", "PayPal's revise answer had no approve link");
+    return { debugId, approveUrl: approve.href };
+  }
+
+  /** Sets the next cycles' price (a discount), or puts the plan's price back. */
+  async patchPrice(
+    merchantId: string,
+    paypalSubscriptionId: string,
+    fixedPrice: Money,
+  ): Promise<MutationResult> {
+    const { debugId } = await this.request(merchantId, {
+      method: "PATCH",
+      path: `/v1/billing/subscriptions/${encodeURIComponent(paypalSubscriptionId)}`,
+      body: [
+        {
+          op: "replace",
+          path: "/plan/billing_cycles/@sequence==1/pricing_scheme/fixed_price",
+          value: toPayPalMoney(fixedPrice),
+        },
+      ],
+    });
+    return { debugId };
+  }
+
+  /**
+   * Refunds part of a subscription payment. Spike Q1: the transactions' ids are v2 capture ids, and a
+   * repeated PayPal-Request-Id answers 200 with the first refund, so a retry can't refund twice.
+   */
+  async refund(
+    merchantId: string,
+    input: { transactionId: string; amount: Money; requestId: string },
+  ): Promise<MutationResult & { refundId: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: `/v2/payments/captures/${encodeURIComponent(input.transactionId)}/refund`,
+      body: { amount: toPayPalMoney(input.amount) },
+      requestId: input.requestId,
+    });
+    return { debugId, refundId: IdBody.parse(body).id };
+  }
+
+  /** Collects the outstanding balance now; PayPal-Request-Id makes it safe to retry. */
+  async capture(
+    merchantId: string,
+    paypalSubscriptionId: string,
+    input: { amount: Money; requestId: string },
+  ): Promise<MutationResult & { transactionId: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: `/v1/billing/subscriptions/${encodeURIComponent(paypalSubscriptionId)}/capture`,
+      body: {
+        note: "Outstanding balance",
+        capture_type: "OUTSTANDING_BALANCE",
+        amount: toPayPalMoney(input.amount),
+      },
+      requestId: input.requestId,
+    });
+    return { debugId, transactionId: IdBody.parse(body).id };
+  }
+
+  /** A new plan on an existing product (insight-to-action). PayPal-Request-Id makes it safe to retry. */
+  async createPlan(
+    merchantId: string,
+    input: { productId: string; name: string; price: Money; interval: BillingInterval; requestId: string },
+  ): Promise<MutationResult & { planId: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/billing/plans",
+      body: {
+        product_id: input.productId,
+        name: input.name,
+        status: "ACTIVE",
+        billing_cycles: [
+          {
+            frequency: { interval_unit: input.interval.unit, interval_count: input.interval.count },
+            tenure_type: "REGULAR",
+            sequence: 1,
+            total_cycles: 0,
+            pricing_scheme: { fixed_price: toPayPalMoney(input.price) },
+          },
+        ],
+        payment_preferences: { auto_bill_outstanding: true, payment_failure_threshold: 3 },
+      },
+      requestId: input.requestId,
+    });
+    return { debugId, planId: IdBody.parse(body).id };
   }
 
   // ---------- transport ----------
