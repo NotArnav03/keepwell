@@ -15,12 +15,15 @@
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
     "@keepwell/contracts": "workspace:*",
+    "@keepwell/db": "workspace:*",
     "@keepwell/policy": "workspace:*",
+    "drizzle-orm": "0.45.4",
     "fastify": "5.12.7",
     "pg": "8.23.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@keepwell/paypal-mock": "workspace:*",
     "@types/pg": "8.23.1",
     "pino-pretty": "13.2.0",
     "tsx": "4.23.15"
