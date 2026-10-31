@@ -1,0 +1,61 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v2/payments/captures/845647799G006720N",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "debugId": "ca52426ad0edb",
+    "body": {
+      "id": "845647799G006720N",
+      "amount": {
+        "currency_code": "USD",
+        "value": "1.00"
+      },
+      "final_capture": true,
+      "seller_protection": {
+        "status": "ELIGIBLE",
+        "dispute_categories": ["ITEM_NOT_RECEIVED", "UNAUTHORIZED_TRANSACTION"]
+      },
+      "seller_receivable_breakdown": {
+        "gross_amount": {
+          "currency_code": "USD",
+          "value": "1.00"
+        },
+        "paypal_fee": {
+          "currency_code": "USD",
+          "value": "0.52"
+        },
+        "net_amount": {
+          "currency_code": "USD",
+          "value": "0.48"
+        }
+      },
+      "custom_id": "spike-q1",
+      "status": "COMPLETED",
+      "supplementary_data": {
+        "related_ids": {}
+      },
+      "payee": {
+        "email_address": "redacted@example.com",
+        "merchant_id": "REDACTED"
+      },
+      "create_time": "2026-10-29T18:12:15Z",
+      "update_time": "2026-10-29T18:12:15Z",
+      "links": [
+        {
+          "href": "https://api.sandbox.paypal.com/v2/payments/captures/845647799G006720N",
+          "rel": "self",
+          "method": "GET"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v2/payments/captures/845647799G006720N/refund",
+          "rel": "refund",
+          "method": "POST"
+        }
+      ]
+    }
+  }
+}

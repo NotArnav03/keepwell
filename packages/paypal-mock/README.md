@@ -28,7 +28,7 @@ await mock.close();
 | OAuth | `POST /v1/oauth2/token` (client credentials, Basic auth) |
 | Subscriptions | `GET /v1/billing/subscriptions[/:id]` (`fields=plan` shows a price override), `POST …/suspend`, `…/activate`, `…/cancel`, `…/revise`, `…/capture`, `PATCH …/:id`, `GET …/:id/transactions` |
 | Plans | `GET /v1/billing/plans[/:id]`, `POST /v1/billing/plans` |
-| Refunds | `POST /v1/payments/sale/:id/refund` and `POST /v2/payments/captures/:id/refund` (spike Q1 picks one) |
+| Refunds | `POST /v2/payments/captures/:id/refund` is the one Keepwell uses (spike Q1, docs/spikes/Q1.md); `POST /v1/payments/sale/:id/refund` also works, as in real sandbox |
 | Webhooks | `POST/GET/DELETE /v1/notifications/webhooks`, `POST /v1/notifications/verify-webhook-signature`, `GET /v1/notifications/webhooks-events/:id`, `POST …/:id/resend` |
 | Buyer approval | `GET/POST /webapps/billing/subscriptions/update?ba_token=…`: the page a revise's `approve` link opens |
 
