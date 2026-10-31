@@ -22,6 +22,13 @@
       "when": 1793433060350,
       "tag": "0002_resume_after_action",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793446422089,
+      "tag": "0003_drift_reports",
+      "breakpoints": true
     }
   ]
 }

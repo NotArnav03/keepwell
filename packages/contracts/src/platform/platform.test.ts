@@ -297,6 +297,7 @@ describe("jobs", () => {
       "action.confirm": { actionId: ACTION },
       "reconcile.subscription": { subscriptionId: SUB },
       "reconcile.sweep": { merchantId: MERCHANT },
+      "reconcile.drift": { merchantId: MERCHANT },
       "due.sweep": {},
       "resume.due": { scheduledResumeId: ACTION },
       "domain.dispatch": { domainEventId: ACTION, handler: "recovery.open_case" },
@@ -313,6 +314,10 @@ describe("jobs", () => {
     );
     expect(platformJobs["reconcile.sweep"].idempotencyKey({ merchantId: MERCHANT }, now)).toBe(
       `${MERCHANT}:2026-10-29T17:00`,
+    );
+    // One drift report per merchant per UTC day.
+    expect(platformJobs["reconcile.drift"].idempotencyKey({ merchantId: MERCHANT }, now)).toBe(
+      `${MERCHANT}:2026-10-29`,
     );
     expect(platformJobs["pool.health"].idempotencyKey({}, now)).toBe("2026-10-29T17:20");
     expect(platformJobs["domain.dispatch"].idempotencyKey({ domainEventId: ACTION, handler: "h" }, now)).toBe(

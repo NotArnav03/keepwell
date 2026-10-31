@@ -23,6 +23,11 @@ export const platformJobs = {
     (p, now) => `${p.subscriptionId}:${bucket(now, 1)}`,
   ),
   "reconcile.sweep": job(z.object({ merchantId: Id }), (p, now) => `${p.merchantId}:${bucket(now, 30)}`),
+  /** Nightly: compare every live subscription with PayPal before re-syncing it, and report drift (§6.3). */
+  "reconcile.drift": job(
+    z.object({ merchantId: Id }),
+    (p, now) => `${p.merchantId}:${now.toISOString().slice(0, 10)}`,
+  ),
   "due.sweep": job(z.strictObject({}), (_p, now) => bucket(now, 1)),
   "resume.due": job(z.object({ scheduledResumeId: Id }), (p) => p.scheduledResumeId),
   "domain.dispatch": job(
