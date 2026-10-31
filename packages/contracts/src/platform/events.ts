@@ -4,6 +4,7 @@ import { ActionError, ActionState, ActionType } from "./actions.js";
 import { SubscriptionSnapshot, SubscriptionStatus } from "./subscriptions.js";
 import { brainEventPayloads } from "../brain/agent.js";
 import { surfacesEventPayloads } from "../surfaces/sessions.js";
+import { growthEventPayloads } from "../growth/jobs-events.js";
 
 // Domain events (CONTRACTS.md §2). Producers own their payloads; consumers ignore unknown fields.
 
@@ -49,6 +50,7 @@ export const domainEventPayloads = {
   ...platformEventPayloads,
   ...brainEventPayloads,
   ...surfacesEventPayloads,
+  ...growthEventPayloads,
 } as const;
 
 export type DomainEventType = keyof typeof domainEventPayloads;
