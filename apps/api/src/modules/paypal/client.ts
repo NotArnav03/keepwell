@@ -158,6 +158,17 @@ export class PayPalClient implements PayPalGateway {
     );
   }
 
+  /** True when PayPal issues (or has issued) this merchant a token: /readyz and /status use it. */
+  async checkAuth(merchantId: string): Promise<boolean> {
+    try {
+      await this.token(merchantId);
+      return true;
+    } catch {
+      // The reason is already in PayPalGatewayError's log line; here only up or down matters.
+      return false;
+    }
+  }
+
   // ---------- reads: the PayPalGateway contract ----------
 
   /** With `fields=plan`, so a discount's fixed_price override is visible. */
