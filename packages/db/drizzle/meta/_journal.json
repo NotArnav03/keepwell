@@ -15,6 +15,20 @@
       "when": 1793381081305,
       "tag": "0001_tenant_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793415899486,
+      "tag": "0002_insight_sources",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793415915550,
+      "tag": "0003_insight_views",
+      "breakpoints": true
     }
   ]
 }
