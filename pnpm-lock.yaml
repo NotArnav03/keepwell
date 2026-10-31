@@ -115,7 +115,17 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
-  packages/evals: {}
+  packages/evals:
+    dependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@keepwell/policy':
+        specifier: workspace:*
+        version: link:../policy
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/paypal-mock:
     dependencies:
