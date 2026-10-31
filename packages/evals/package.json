@@ -13,6 +13,15 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
-  }
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@keepwell/contracts": "workspace:*",
+    "@keepwell/policy": "workspace:*",
+    "zod": "4.6.7"
+  },
+  "files": [
+    "dist",
+    "results"
+  ]
 }
