@@ -65,6 +65,7 @@ async function status(options: OpsOptions, now: Date): Promise<StatusBody> {
     rejectedLastHour: number;
     lastSweepAt: Date | null;
     drift: number;
+    merchants: number;
   }
   const readings: Readings | null = await options.db
     .acrossMerchants(async (tx): Promise<Readings> => {
@@ -77,6 +78,7 @@ async function status(options: OpsOptions, now: Date): Promise<StatusBody> {
         })
         .from(webhookEvents)
         .where(gt(webhookEvents.receivedAt, hourAgo));
+      const [count] = await tx.select({ n: sql<number>`count(*)::int` }).from(merchants);
       const [sweep] = await tx
         .select({ at: sql<Date | null>`max(${merchants.lastSweepAt})` })
         .from(merchants);
@@ -90,12 +92,19 @@ async function status(options: OpsOptions, now: Date): Promise<StatusBody> {
         rejectedLastHour: webhooks?.rejected ?? 0,
         lastSweepAt: sweep?.at ? new Date(sweep.at) : null,
         drift: latest.reduce((sum, r) => sum + r.drifted, 0),
+        merchants: count?.n ?? 0,
       };
     })
     // The database can't be reached: that is the status, not an error to throw.
     .catch(() => null);
   const database: Health = readings === null ? "down" : "operational";
-  const { lagSeconds = null, rejectedLastHour = 0, lastSweepAt = null, drift = 0 } = readings ?? {};
+  const {
+    lagSeconds = null,
+    rejectedLastHour = 0,
+    lastSweepAt = null,
+    drift = 0,
+    merchants: merchantCount = 0,
+  } = readings ?? {};
   const paypal: Health | "unknown" = options.paypalCheck
     ? await options.paypalCheck().then(
         (ok) => (ok ? "operational" : "down"),
@@ -105,7 +114,8 @@ async function status(options: OpsOptions, now: Date): Promise<StatusBody> {
   const webhooksHealth: Health =
     lagSeconds !== null && lagSeconds > LAG_DEGRADED_SECONDS ? "degraded" : "operational";
   const sweepAt = lastSweepAt;
-  const stale = sweepAt === null || now.getTime() - sweepAt.getTime() > SWEEP_STALE_MS;
+  // With no merchants yet (a fresh deployment) there is nothing to sweep, so nothing is stale.
+  const stale = merchantCount > 0 && (sweepAt === null || now.getTime() - sweepAt.getTime() > SWEEP_STALE_MS);
   const reconcilerHealth: Health = drift > 0 || stale ? "degraded" : "operational";
   const parts = [database, paypal === "unknown" ? "operational" : paypal, webhooksHealth, reconcilerHealth];
   const overall: Health =

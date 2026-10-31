@@ -13,8 +13,10 @@ PayPal is the source of truth, and this module keeps our copy of it right (ARCHI
 | every minute | Actions to run or retry (`engine.due()`), lost workers' Actions (`recoverStuck`), resumes that came due, revise links nobody used, and APPLIED Actions more than 2 min old to confirm | `action.execute`, `action.confirm` |
 | every minute | due work other modules register (`registerDueWork`), e.g. dunning and win-back sends. A failing module is logged and the others still run. | (theirs) |
 | every 2 minutes | **hot loop:** subscriptions with an Action in flight, or one that moved this hour | `reconcile.subscription` |
-| every 30 minutes | **sweep:** per merchant, `GET /v1/billing/subscriptions?status_updated_after=<last sweep − 5 min>`, then sync each one | `reconcile.sweep` |
-| 03:00 UTC | **drift report:** per merchant, every live subscription compared with PayPal *before* it is re-synced. Stored in `drift_reports`. **Target: zero.** | `reconcile.drift` |
+| a merchant's last sweep is 30 min old (or it has none) | **sweep:** `GET /v1/billing/subscriptions?status_updated_after=<last sweep − 5 min>`, then sync each one | `reconcile.sweep` |
+| no drift report yet today, from 03:00 UTC | **drift report:** every live subscription compared with PayPal *before* it is re-synced. Stored in `drift_reports`. **Target: zero.** | `reconcile.drift` |
+
+Sweeps and drift reports are due by **age, not by clock slot**. A server that slept through :00 and :30, as Render's free plan does, sweeps on its first minute awake, and a report missed at night runs that morning.
 
 Every job has an idempotency key (a minute, a 30-minute window, a UTC day), so a slow run or a second instance never doubles the work.
 
