@@ -8,14 +8,14 @@ import { reviseReturn } from "./modules/actions/revise-return.js";
 import { DbAudit } from "./modules/audit/log.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
-import { PayPalClient, type PayPalClientLogger } from "./modules/paypal/client.js";
+import { PayPalClient } from "./modules/paypal/client.js";
 import { singleAppCredentials } from "./modules/paypal/credentials.js";
 import { opsRoutes } from "./modules/reconcile/ops.js";
 import { Reconciler } from "./modules/reconcile/reconciler.js";
 import { SubscriptionSync } from "./modules/reconcile/sync.js";
 import { webhookIntake } from "./modules/webhooks/intake.js";
 import { WebhookProcessor } from "./modules/webhooks/processor.js";
-import { buildServer } from "./server.js";
+import { buildServer, type ReadinessCheck } from "./server.js";
 
 // The composition root: builds the M1 platform from the environment and starts it. Migrations,
 // pools, the PayPal gateway, jobs and their workers, domain events, the action engine, the
@@ -39,67 +39,19 @@ export async function startPlatform(env: Env): Promise<Platform> {
     return { app, stop: () => app.close() };
   }
 
-  const onIdleError = (err: Error) => app.log.warn({ err }, "idle postgres connection closed");
-  if (env.RUN_MIGRATIONS) {
-    // As the owner role, the only one allowed to change the schema.
-    const owner = createPool(url, onIdleError, { max: 1 });
-    try {
-      await runMigrations(owner);
-    } finally {
-      await owner.end();
-    }
-  }
-  // Every app query runs as keepwell_app, which row-level security binds.
-  const pool = createPool(url, onIdleError, { connectionOptions: APP_ROLE_OPTIONS });
-  const db = createDb(pool);
-
-  const useMock = env.PAYPAL_USE_MOCK;
-  const credentials =
-    env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET
-      ? { clientId: env.PAYPAL_CLIENT_ID, clientSecret: env.PAYPAL_CLIENT_SECRET }
-      : MOCK_CREDENTIALS;
-  // The server (and its logger) needs the pool for readiness, so the gateway's log points at it below.
-  const paypalLog: PayPalClientLogger = { info: () => {}, warn: () => {} };
-  const paypal = new PayPalClient({
-    baseUrl: useMock ? env.PAYPAL_MOCK_URL : env.PAYPAL_API_BASE,
-    credentials: singleAppCredentials(credentials),
-    log: paypalLog,
-  });
-
-  const app = buildServer(env, {
-    readinessChecks: [
-      postgresReadiness(pool),
-      {
-        name: "paypal",
-        check: async () => {
-          if (!(await paypal.checkAuth("readiness"))) throw new Error("PayPal OAuth failed");
-        },
-      },
-    ],
-    // Waking a suspended Neon compute can take a few seconds.
-    readinessTimeoutMs: 5000,
-  });
-  paypalLog.info = (obj, msg) => app.log.debug(obj, msg);
-  paypalLog.warn = (obj, msg) => app.log.warn(obj, msg);
-
-  const jobs = await Jobs.start({ connectionString: withStrictSsl(url), log: app.log });
-  const audit = new DbAudit(db);
-  const events = new DbDomainEvents(db, jobs, app.log);
-  const engine = new DbActionEngine({
-    db,
-    lockPool: pool,
-    paypal,
-    audit,
-    events,
-    log: app.log,
-    publicBaseUrl: env.API_PUBLIC_URL ?? `http://localhost:${env.PORT}`,
-    enqueue: async (actionId, tx) => {
-      await jobs.send("action.execute", { actionId }, { tx });
+  // The readiness checks need the pool, and the core needs the server's logger: checks join below.
+  const readinessChecks: ReadinessCheck[] = [];
+  // Waking a suspended Neon compute can take a few seconds.
+  const app = buildServer(env, { readinessChecks, readinessTimeoutMs: 5000 });
+  const core = await createCore(env, url, app.log);
+  const { pool, db, paypal, jobs, events, engine, sync, reconciler } = core;
+  readinessChecks.push(postgresReadiness(pool), {
+    name: "paypal",
+    check: async () => {
+      if (!(await paypal.checkAuth("readiness"))) throw new Error("PayPal OAuth failed");
     },
   });
-  const sync = new SubscriptionSync(db, paypal, events);
   const processor = new WebhookProcessor(db, paypal, sync, app.log);
-  const reconciler = new Reconciler({ db, paypal, sync, engine, jobs, log: app.log });
 
   // Handlers before workers: an event reaches the handlers registered when it is emitted.
   events.on("subscription.synced", "actions.confirm", async (event) => {
@@ -138,7 +90,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   });
   app.addHook("onClose", () => pool.end());
 
-  app.log.info({ paypal: useMock ? "mock" : "sandbox" }, "platform started");
+  app.log.info({ paypal: env.PAYPAL_USE_MOCK ? "mock" : "sandbox" }, "platform started");
   return {
     app,
     async stop() {
@@ -154,4 +106,55 @@ async function merchantOf(db: Db, actionId: string): Promise<string | null> {
     tx.select({ merchantId: actions.merchantId }).from(actions).where(eq(actions.id, actionId)),
   );
   return row?.merchantId ?? null;
+}
+
+export interface CoreLogger {
+  debug(obj: object, msg: string): void;
+  info(obj: object, msg: string): void;
+  warn(obj: object, msg: string): void;
+  error(obj: object, msg: string): void;
+}
+
+/** The platform's pieces, built and connected but not started: the server and `pnpm seed` share it. */
+export async function createCore(env: Env, url: string, log: CoreLogger) {
+  const onIdleError = (err: Error) => log.warn({ err }, "idle postgres connection closed");
+  if (env.RUN_MIGRATIONS) {
+    // As the owner role, the only one allowed to change the schema.
+    const owner = createPool(url, onIdleError, { max: 1 });
+    try {
+      await runMigrations(owner);
+    } finally {
+      await owner.end();
+    }
+  }
+  // Every app query runs as keepwell_app, which row-level security binds.
+  const pool = createPool(url, onIdleError, { connectionOptions: APP_ROLE_OPTIONS });
+  const db = createDb(pool);
+  const credentials =
+    env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET
+      ? { clientId: env.PAYPAL_CLIENT_ID, clientSecret: env.PAYPAL_CLIENT_SECRET }
+      : MOCK_CREDENTIALS;
+  const paypal = new PayPalClient({
+    baseUrl: env.PAYPAL_USE_MOCK ? env.PAYPAL_MOCK_URL : env.PAYPAL_API_BASE,
+    credentials: singleAppCredentials(credentials),
+    log: { info: (obj, msg) => log.debug(obj, msg), warn: (obj, msg) => log.warn(obj, msg) },
+  });
+  const jobs = await Jobs.start({ connectionString: withStrictSsl(url), log });
+  const audit = new DbAudit(db);
+  const events = new DbDomainEvents(db, jobs, log);
+  const engine = new DbActionEngine({
+    db,
+    lockPool: pool,
+    paypal,
+    audit,
+    events,
+    log,
+    publicBaseUrl: env.API_PUBLIC_URL ?? `http://localhost:${env.PORT}`,
+    enqueue: async (actionId, tx) => {
+      await jobs.send("action.execute", { actionId }, { tx });
+    },
+  });
+  const sync = new SubscriptionSync(db, paypal, events);
+  const reconciler = new Reconciler({ db, paypal, sync, engine, jobs, log });
+  return { pool, db, paypal, jobs, audit, events, engine, sync, reconciler };
 }

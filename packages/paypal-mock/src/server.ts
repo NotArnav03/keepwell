@@ -149,6 +149,22 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
     });
   });
 
+  // ---------- catalog products (the seed creates Pantry Plan's) ----------
+
+  app.post("/v1/catalogs/products", (request, reply) => {
+    const body = parse(
+      z.object({ name: z.string().min(1).max(127), type: z.enum(["PHYSICAL", "DIGITAL", "SERVICE"]) }),
+      request.body,
+    );
+    const merchantId = merchant(request);
+    const product = state.idempotent(merchantId, requestId(request, "product"), () =>
+      state.createProduct(merchantId, body.name),
+    );
+    return reply.code(201).send({ ...product, type: body.type });
+  });
+
+  app.get("/v1/catalogs/products", (request) => ({ products: state.products(merchant(request)) }));
+
   // ---------- plans ----------
 
   app.get("/v1/billing/plans", (request) => {
