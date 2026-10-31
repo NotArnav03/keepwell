@@ -1,11 +1,6 @@
 import { createHash } from "node:crypto";
 import { and, eq, inArray } from "drizzle-orm";
-import type {
-  DomainEvents,
-  Money,
-  PayPalSubscription,
-  SubscriptionSnapshot,
-} from "@keepwell/contracts";
+import type { DomainEvents, Money, PayPalSubscription, SubscriptionSnapshot } from "@keepwell/contracts";
 import { actions, plans, subscriptions, type Db, type Tx } from "@keepwell/db";
 import type { PayPalPlan } from "../paypal/client.js";
 import { toMoney } from "../paypal/money.js";
