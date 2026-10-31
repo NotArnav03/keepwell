@@ -1,9 +1,12 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
+import type { AgentStreamEvent, SessionContext } from "@keepwell/contracts";
+import { FakeAudit, FakeDomainEvents, PANTRY_PLAN, pantryPlanSubscription } from "@keepwell/contracts/fakes";
 import { AnthropicLlmClient } from "./anthropic.js";
 import { InMemoryLlmUsageStore, LlmBudget, type LlmUsageStore } from "./budget.js";
 import { LlmError, type AgentLogger, type LlmPurpose } from "./llm.js";
+import { AgentRuntime } from "./runtime.js";
 
 // The real client against a fake fetch: checks the request we send, how responses map to
 // LlmError, and the budget guard, without ever reaching the Anthropic API.
@@ -232,5 +235,83 @@ describe("AnthropicLlmClient with the budget guard", () => {
     );
     await expect(llm.structured(call())).resolves.toEqual({ answer: "yes" });
     expect(errors).toContain("llm usage not recorded");
+  });
+});
+
+describe("the agent when the model can't be used (#26)", () => {
+  function session(): SessionContext {
+    return {
+      sessionId: SESSION,
+      merchantId: PANTRY_PLAN.merchantId,
+      channel: "widget",
+      policy: PANTRY_PLAN.policy,
+      subscription: pantryPlanSubscription(NOW),
+      history: {
+        savesLast365d: 0,
+        pausesLast365d: 0,
+        lastPauseEndedAt: null,
+        refundedLast30d: { value: "0.00", currency: "USD" },
+      },
+      plans: PANTRY_PLAN.plans,
+      menu: null,
+      transcript: [],
+      presentedOfferId: null,
+      fallbackLevel: "L0",
+    };
+  }
+
+  async function respondWith(llm: AnthropicLlmClient) {
+    const runtime = new AgentRuntime({
+      llm,
+      events: new FakeDomainEvents(() => NOW),
+      audit: new FakeAudit(() => NOW),
+      log: logger().log,
+      clock: () => NOW,
+    });
+    const stream: AgentStreamEvent[] = [];
+    await runtime.respond(session(), "It's too expensive for me now", (e) => stream.push(e));
+    return { runtime, stream };
+  }
+
+  it("a revoked API key: one request, then L1 with reason chips, no offer, and chips still work", async () => {
+    const { llm, requests } = clientReturning([apiError(401, "authentication_error")]);
+    const { runtime, stream } = await respondWith(llm);
+
+    expect(requests).toHaveLength(1);
+    expect(stream.map((e) => e.type)).toContain("fallback.changed");
+    expect(stream.find((e) => e.type === "fallback.changed")).toEqual({
+      type: "fallback.changed",
+      level: "L1",
+    });
+    expect(stream.some((e) => e.type === "reason.chips")).toBe(true);
+    expect(stream.some((e) => e.type === "offer.presented")).toBe(false);
+
+    // The chip path never needs the model, so the subscriber can still finish (or cancel).
+    const chip: AgentStreamEvent[] = [];
+    await runtime.respondToReason({ ...session(), fallbackLevel: "L1" }, "price", (e) => chip.push(e));
+    expect(chip.at(-1)?.type).toBe("agent.done");
+  });
+
+  it("a spent daily budget: no request at all, then L1", async () => {
+    const store = new InMemoryLlmUsageStore();
+    await store.record({
+      at: NOW.toISOString(),
+      sessionId: "someone-else",
+      purpose: "converse",
+      model: "claude-haiku-5-5",
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costNanoUsd: 5_000_000_000,
+      durationMs: 0,
+    });
+    const { llm, requests } = clientReturning([], budgetWith(store, 5));
+    const { stream } = await respondWith(llm);
+    expect(requests).toHaveLength(0);
+    expect(stream.find((e) => e.type === "fallback.changed")).toEqual({
+      type: "fallback.changed",
+      level: "L1",
+    });
   });
 });

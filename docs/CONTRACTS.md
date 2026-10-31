@@ -31,7 +31,7 @@ Conventions:
 - `PolicyDocument` limits are bounded (`version ≥ 1`, `maxCycles ≥ 1`, percents 1–100, counts ≥ 0).
 - New `PolicyContext` (input to `computeMenu`/`evaluate`): `now`, `channel`, `reason`, `cancelIntent`, `offersPresentedThisSession`, `subscription: SubscriptionSnapshot`, `history: SubscriberHistory` (saves and pauses in 365 days, last pause end, refunds in 30 days) and `plans: PlanInfo[]`. Time is passed in so the engine stays pure.
 - `Channel` now lives in `shared.ts` (moved by M3 in #22).
-- New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`.
+- New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`, and an optional `locale` (from `CreateSessionRequest.locale`; template text and L1 replies use it until the classifier detects the subscriber's language).
 - `AgentStreamEvent` is the part of `SessionStreamEvent` the agent emits (`agent.delta`, `agent.done`, `offer.presented`, `reason.chips`, `fallback.changed`); `shownTextHash` is sha256 hex. M3's `SessionStreamEvent` = this union + `action.update`, `session.closed`, `error`.
 - `brainEventPayloads` (`session.offer_presented`, `policy.published`) are registered in `domainEventPayloads`; `brainJobs` has `llm.budget_reset` keyed by UTC day.
 - `reasonPreferences[reason]` is an allowlist as well as a ranking: unlisted kinds are not offered for that reason, and `"none"` ends the list. Unranked reasons use `DEFAULT_REASON_PREFERENCES` from `packages/policy`.
