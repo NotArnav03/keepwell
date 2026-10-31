@@ -18,6 +18,10 @@ When a subscriber goes to cancel, Keepwell has one short, honest conversation. I
 
 Work items are GitHub Issues labelled `owner:<name>`, grouped into milestones.
 
+## Evals
+
+Every agent change is tested against 404 personas: 300 everyday subscribers in English, Hindi and Spanish, and 104 attackers. The hard gates are **0 policy violations** and **1 click to cancel**. The latest results are on the API's public `/evals` page (JSON at `/v1/evals`) and in [packages/evals/results](packages/evals/results). How it works: [packages/evals](packages/evals/README.md).
+
 ## Read first
 
 1. [CLAUDE.md](CLAUDE.md): rules for everyone and every Claude Code session
