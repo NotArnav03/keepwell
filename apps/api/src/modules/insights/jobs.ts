@@ -1,4 +1,6 @@
 import { growthJobs, type DomainEvents } from "@keepwell/contracts";
+import { sql } from "drizzle-orm";
+import type { Db } from "@keepwell/db";
 import type { ExtractOutcome, InsightExtractor, InsightsLogger, SourceRef } from "./extractor.js";
 
 /** The slice of the pg-boss wrapper (M1) this module needs; a duplicate singletonKey is a no-op. */
@@ -46,4 +48,13 @@ export async function handleExtractJob(
 ): Promise<ExtractOutcome> {
   const payload = growthJobs["insights.extract"].payload.parse(rawPayload);
   return extractor.extract(payload);
+}
+
+/** Worker body, hourly. Safe to run twice: refreshing a materialized view twice is the same as once. */
+export async function handleRefreshViewsJob(db: Db, log: InsightsLogger): Promise<void> {
+  // Cross-tenant by nature: the view covers every merchant, and the definer function from
+  // migration 0003 is the only way for the app role to refresh it. It rebuilds a derived cache
+  // rather than changing merchant data, so it is logged, not audited per merchant.
+  await db.acrossMerchants((tx) => tx.execute(sql`select refresh_insight_views()`));
+  log.info({}, "insight views refreshed");
 }
