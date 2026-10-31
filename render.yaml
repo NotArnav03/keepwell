@@ -1,10 +1,12 @@
 # Render Blueprint for the staging API. Arnav (M1) applies it by hand in the Render dashboard.
 # Secrets use `sync: false`, so Render asks for them; they never live in this file.
+# Free plan (the project runs on ₹0): it sleeps after 15 idle minutes and wakes on the next request
+# in under a minute. Staging is allowed to sleep; see ARCHITECTURE.md §4 for keeping prod-demo awake.
 services:
   - type: web
     name: keepwell-api-staging
     runtime: node
-    plan: starter
+    plan: free
     region: oregon
     branch: main
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/api
@@ -32,3 +34,6 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
+      # The whole AI budget is a  prepaid credit that must last until judging ends (21 Dec).
+      - key: LLM_DAILY_BUDGET_USD
+        value: "0.10"

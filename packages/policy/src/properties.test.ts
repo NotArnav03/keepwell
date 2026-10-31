@@ -9,7 +9,7 @@ import {
 } from "@keepwell/contracts";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { evaluate } from "./evaluate.js";
+import { evaluate, evaluateAcceptance } from "./evaluate.js";
 import { analyse, computeMenu, rankedKinds } from "./menu.js";
 import { OFFERABLE_KINDS, PRICE_CHANGE_MIN_DAYS, REFUND_WINDOW_DAYS } from "./rules.js";
 import { daysBetween, fromCents, toCents } from "./units.js";
@@ -269,6 +269,55 @@ describe("policy properties", () => {
           expect(decision.violations).toEqual([]);
           expect(decision.allowed).toBe(true);
           expect(decision.offer).toEqual(offer);
+        }
+      }),
+      RUNS,
+    );
+  });
+
+  it("evaluateAcceptance allows every shown offer when nothing changed", () => {
+    fc.assert(
+      fc.property(
+        policyArb,
+        ctxArb,
+        fc.integer({ min: 1, max: 3 }),
+        fc.boolean(),
+        (policy, ctx, shown, cancel) => {
+          const atAccept = { ...ctx, offersPresentedThisSession: shown, cancelIntent: cancel };
+          for (const offer of computeMenu(policy, ctx).offers) {
+            const decision = evaluateAcceptance(policy, atAccept, { offer, policyVersion: policy.version });
+            expect(decision.violations).toEqual([]);
+            expect(decision.offer).toEqual(offer);
+          }
+        },
+      ),
+      RUNS,
+    );
+  });
+
+  it("evaluateAcceptance only allows what the policy would offer, unchanged, at accept time", () => {
+    const later = fc.record({
+      hours: fc.integer({ min: 0, max: 40 * 24 }),
+      status: fc.oneof(
+        { weight: 3, arbitrary: fc.constant(null) },
+        { weight: 1, arbitrary: fc.constantFrom("SUSPENDED", "CANCELLED", "EXPIRED") },
+      ),
+    });
+    fc.assert(
+      fc.property(policyArb, ctxArb, later, (policy, ctx, { hours, status }) => {
+        const now = new Date(Date.parse(ctx.now) + hours * 3_600_000).toISOString();
+        const sub = status === null ? ctx.subscription : { ...ctx.subscription, status };
+        const atAccept = { ...ctx, now, subscription: sub };
+        const fresh = computeMenu(policy, {
+          ...atAccept,
+          cancelIntent: false,
+          offersPresentedThisSession: 0,
+        });
+        for (const offer of computeMenu(policy, ctx).offers) {
+          const decision = evaluateAcceptance(policy, atAccept, { offer, policyVersion: policy.version });
+          if (sub.status !== "ACTIVE") expect(decision.allowed).toBe(false);
+          if (decision.allowed) expect(fresh.offers).toContainEqual(offer);
+          else expect(decision.violations.length).toBeGreaterThan(0);
         }
       }),
       RUNS,

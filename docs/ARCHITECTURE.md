@@ -105,7 +105,7 @@ flowchart LR
 
 | Piece | Where | Tier | Why |
 |---|---|---|---|
-| `apps/api`: API, webhooks, workers, SSE, MCP | Render Web Service | **Starter (paid, ~$7/month)** | Must be always on. Free instances sleep, which delays webhooks and makes judges wait. |
+| `apps/api`: API, webhooks, workers, SSE, MCP | Render Web Service | Free | Sleeps after 15 idle minutes. `.github/workflows/keep-awake.yml` pings prod-demo every 10 minutes. The free 750 hours a month cover one always-on service, so staging may sleep. |
 | `apps/dashboard`, `apps/portal`, `apps/judge` | Render Static Sites | Free | |
 | `apps/demo-store` (Pantry Plan) | Render Static Site, **separate origin** | Free | Proves the widget works on a third-party site |
 | `packages/widget` bundle | Render Static Site (acts as CDN) | Free | Loads even if the API is down (law 1) |
@@ -113,12 +113,16 @@ flowchart LR
 | Email | Resend free tier | Free | Plus an in-app "demo inbox" so judges can see emails without receiving them |
 | Errors | Sentry free tier | Free | |
 | Uptime + status page | Render health checks + a free uptime monitor | Free | |
-| LLM | Anthropic API | Pay as you go | **Set a hard monthly spend limit in the Anthropic Console.** Claude Pro subscriptions don't cover API usage. |
-| CI | GitHub Actions (public repo) | Free | |
+| LLM | Anthropic API, Claude Haiku 5.5 | $5 prepaid credit, already paid, auto-reload off | When the credit runs out, calls fail and sessions drop to L1; Cancel never depends on it. `LLM_DAILY_BUDGET_USD` (#26) spreads it over the weeks until judging ends. Claude Pro subscriptions don't cover API usage. |
+| CI | GitHub Actions | Free | The repo is public (since 31 Oct), so Actions minutes are unlimited. While private it used about 240 a day against a 2,000-minute monthly allowance. |
 
 **Before relying on any of these, check the current free-tier limits on each vendor's pricing page.** For example, Render's free Postgres has had an expiry, which is why Neon is chosen. Judging runs **1–15 December**, so everything must stay up until at least 21 December.
 
-**Expected total: roughly $15–20 for Render plus a capped Anthropic budget.** Choose the cap after measuring a full eval run in week 1.
+**Budget: ₹0 of new spending (decided 30 Oct).** Everything runs on free tiers, plus the $5 Anthropic credit already paid. What that costs us, and how each cost is handled:
+- **Cold starts.** A sleeping instance takes up to a minute to answer its first request. The keep-awake ping covers prod-demo during judging, and PayPal retries a webhook that times out.
+- **Scheduled work waits while asleep.** The due-work sweep (§6.3) runs on wake and catches up resumes, dunning sends and win-backs. That only matters for staging.
+- **Limited AI budget.** Unit tests and most eval runs use the fake LLM. Full evals are run deliberately and sparingly. Running the evals' simulated subscriber and LLM judge on a free model, with only the agent on Haiku, would stretch the credit further (M2's call).
+- **Neon free-tier limits** are shared by all branches. Check the usage page weekly, and let idle branches scale to zero.
 
 Environments:
 - `local`: each member's laptop, their own Neon branch, mock PayPal or sandbox.
@@ -201,7 +205,7 @@ The only code allowed to call PayPal. Everything else calls the gateway or the a
 | Cancel | `POST …/cancel` | Read-before-retry for `CANCELLED`; a 422 "already cancelled" counts as success |
 | Revise | `POST …/revise` | Re-running only creates a fresh approval link. Store the latest; confirm by GET showing the new `plan_id`. |
 | Price override | `PATCH …/{id}` | Compare the current value with the target before and after |
-| Refund | Refund endpoint (decided by spike Q1) | `PayPal-Request-Id` if the chosen endpoint supports it, otherwise check the refund list before retrying |
+| Refund | `POST /v2/payments/captures/{transactionId}/refund` (spike Q1: subscription transaction ids are v2 capture ids) | `PayPal-Request-Id` = Action id. A replay returns 200 with the same refund, so no refund-list check is needed |
 
 ### 6.2 Webhook pipeline (M1)
 
@@ -456,7 +460,9 @@ Judge Mode page: test credentials, three one-click scenarios (pause, downgrade, 
 
 ## 7. Data model (Postgres, Drizzle)
 
-All tables carry `merchant_id` (multi-tenant) and `created_at`. Money is stored as `{value: numeric(12,2) as string, currency: char(3)}`, never as floats.
+All tables carry `merchant_id` (multi-tenant) and `created_at`. Money is stored as `{value: numeric(12,2) as string, currency: char(3)}`, never as floats. Ids are UUIDv7 from Postgres 18's `uuidv7()`.
+
+**Tenant isolation is enforced by Postgres** (#7): every tenant table has row-level security matching `merchant_id` against a per-transaction setting, and the app queries as `keepwell_app`, a role that can't bypass it (Neon's owner role can). Code reaches the database only through `db.forMerchant(id, tx => …)` or, for cross-tenant jobs, `db.acrossMerchants(tx => …)`; a query outside them sees no rows. `audit_log` and `policies` are append-only: no UPDATE/DELETE grant for the app role, plus a trigger that refuses them for every role. Two additions to the table below: `session_events` (the SSE replay log, keyed by session and seq) and `llm_usage` is deployment-wide (no `merchant_id`).
 
 | Table | Key columns | Owner |
 |---|---|---|
@@ -559,7 +565,7 @@ Classifier times out after 8 s → the session switches to L1 → reason chips a
 
 - **Secrets:** only in Render environment variables and local `.env` files (git-ignored; `.env.example` committed). Merchant PayPal secrets are encrypted at rest with AES-256-GCM under a master key from the environment. CI runs a secret scanner (gitleaks) on every PR.
 - **Authentication:** merchant sessions use httpOnly, Secure, SameSite=Lax cookies; argon2id passwords; CSRF token on mutations. Subscriber access is per 6.7. MCP uses delegation tokens and merchant API keys (stored hashed).
-- **Authorisation:** every query is scoped by `merchant_id` (a helper makes unscoped queries impossible to write by accident). Subscriber tokens are bound to exactly one subscription.
+- **Authorisation:** every query is scoped by `merchant_id` through Postgres row-level security (§7), so an unscoped query returns nothing instead of another merchant's data. Subscriber tokens are bound to exactly one subscription.
 - **Web:** strict CSP on our apps; the widget communicates only with our API origin; `postMessage` origin checks for the PayPal popup; CORS allow-list per merchant domain.
 - **Rate limits:** per IP and per token on session creation, messages and magic links.
 - **Privacy:** the LLM never receives emails, PayPal IDs or payment details, only first name (optional), plan, tenure and the conversation. Messages are stored with emails and phone numbers redacted. Webhook bodies and snapshots are sandbox data.

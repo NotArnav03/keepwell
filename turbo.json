@@ -12,7 +12,8 @@
       "dependsOn": ["^build"]
     },
     "test": {
-      "dependsOn": ["^build"]
+      "dependsOn": ["^build"],
+      "env": ["KEEPWELL_TEST_DATABASE_URL", "KEEPWELL_REQUIRE_DATABASE_TESTS"]
     },
     "dev": {
       "cache": false,

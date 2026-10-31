@@ -35,6 +35,10 @@ describe("checkClaims rejects adversarial model text", () => {
     ["२ महीने के लिए रोकें।", OFFERS.pause, ["duration", "figure"]],
     ["३० दिनों तक", null, ["duration", "figure"]],
     ["Pausa de dos meses.", OFFERS.pause, ["duration", "figure"]],
+    ["Fifteen percent off for a couple of months.", OFFERS.discount, ["duration", "figure"]],
+    ["Ninety, or zero.", null, ["figure"]],
+    ["Un descuento del quince.", OFFERS.discount, ["figure"]],
+    ["Son cuarenta, o dieciséis.", OFFERS.pause, ["figure"]],
     // Dates
     ["Your plan renews on November 28.", null, ["date", "figure"]],
     ["Next Tuesday nothing is charged.", OFFERS.pause, ["date"]],
