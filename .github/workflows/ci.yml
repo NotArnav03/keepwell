@@ -35,6 +35,34 @@ jobs:
       - run: pnpm test:hooks
       - run: pnpm format:check
 
+  database:
+    name: database (Postgres 18)
+    runs-on: ubuntu-latest
+    # Migrations and the row-level security tests against a real, throwaway Postgres (#7). The
+    # matrix job skips them: Windows runners can't run service containers.
+    services:
+      postgres:
+        image: postgres:18
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 15
+    env:
+      # A local, disposable CI database: not a secret.
+      KEEPWELL_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/postgres
+      # Turn a skipped database test into a failure here: a green job must mean the tests ran.
+      KEEPWELL_REQUIRE_DATABASE_TESTS: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm turbo run test --filter=@keepwell/db
+
   gitleaks:
     name: secret scan
     runs-on: ubuntu-latest

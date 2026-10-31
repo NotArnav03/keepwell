@@ -75,7 +75,7 @@ These come from the ten design laws (ARCHITECTURE.md §2). Breaking one fails re
 - **The AI picks from the policy's menu, and the policy re-checks the pick.** Subscriber consent is a button click, never parsed from text.
 - **Neon is Postgres only.** The repo keeps just the `neon-postgres` and `neon-postgres-branches` skills, on purpose. Their text says to install the parent `neon` skill first: don't. Also don't add Neon Auth, Functions, AI Gateway, Realtime or Object Storage; the architecture already covers each. The API connects with `pg` over the **direct** URL (`DATABASE_URL_UNPOOLED`).
 - **Webhooks are hints.** Re-GET the subscription and diff it. Never trust the event body as state.
-- **Every side effect writes an audit entry.** Every database query is scoped by `merchant_id` through the scoped helper.
+- **Every side effect writes an audit entry.** Every database query runs inside `db.forMerchant(merchantId, tx => …)` (Postgres row-level security does the scoping); `db.acrossMerchants` only for jobs that are cross-tenant by nature.
 - **Simulated anything** (simulated events, time-machine shifts) is flagged `simulated: true` and shown as `SIMULATED` in the UI.
 - **Money:** `{ value: "12.00", currency: "USD" }` decimal strings, never floats. Times are ISO-8601 UTC. Our IDs are UUIDv7.
 - **zod at every boundary** (HTTP, jobs, webhooks, LLM output, env). Import types from `packages/contracts`; never redefine them locally.
