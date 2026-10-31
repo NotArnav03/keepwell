@@ -4,10 +4,17 @@
 export const LOCALES = ["en", "hi", "es"] as const;
 export type Locale = (typeof LOCALES)[number];
 
-/** "hi-IN" → "hi", "es-MX" → "es", anything unsupported → "en". */
-export function resolveLocale(tag: string | null | undefined): Locale {
-  const base = (tag ?? "").trim().toLowerCase().split(/[-_]/)[0];
-  return LOCALES.find((l) => l === base) ?? "en";
+/**
+ * The first tag we have templates for: "hi-IN" → "hi", "es-MX" → "es". Pass the best guess first
+ * (the classifier's language, then the session's); nothing supported → "en".
+ */
+export function resolveLocale(...tags: (string | null | undefined)[]): Locale {
+  for (const tag of tags) {
+    const base = (tag ?? "").trim().toLowerCase().split(/[-_]/)[0];
+    const found = LOCALES.find((l) => l === base);
+    if (found) return found;
+  }
+  return "en";
 }
 
 /** Money stays a decimal string end to end: Intl formats the string, it never becomes a float. */

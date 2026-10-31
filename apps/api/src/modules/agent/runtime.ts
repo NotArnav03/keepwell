@@ -24,6 +24,7 @@ import {
   classifyInput,
   CONVERSE_SYSTEM,
   converseInput,
+  PROMPT_VERSION,
   Reply,
   type Classification as ClassificationT,
 } from "./prompts.js";
@@ -96,8 +97,8 @@ export class AgentRuntime implements Agent {
     const s = SessionContext.parse(session);
     const emit = checkedEmitter(stream);
     const llm = this.llm;
-    // English until the classifier names the language: no model call means no language yet.
-    let locale: Locale = "en";
+    // The session's language until the classifier hears the subscriber's own.
+    let locale: Locale = resolveLocale(s.locale);
     if (llm === null || s.fallbackLevel !== "L0") return this.fallToL1(emit, false, locale);
 
     const transcript = withCurrentMessage(s.transcript, text, this.now());
@@ -119,8 +120,8 @@ export class AgentRuntime implements Agent {
           sessionId: s.sessionId,
         }),
       );
-      this.log.info({ ...log, classification }, "agent classified");
-      locale = resolveLocale(classification.language);
+      this.log.info({ ...log, classification, promptVersion: PROMPT_VERSION }, "agent classified");
+      locale = resolveLocale(classification.language, s.locale);
 
       // No-means-no, abuse and distress close without a model reply and without an offer.
       if (classification.flags.includes("distress"))
@@ -192,8 +193,8 @@ export class AgentRuntime implements Agent {
     const s = SessionContext.parse(session);
     const chosen = ReasonCategory.parse(reason);
     const emit = checkedEmitter(stream);
-    // A chip tap carries no text to detect a language from (see the module README).
-    const locale: Locale = "en";
+    // A chip tap carries no text to detect a language from, so the session's language it is.
+    const locale: Locale = resolveLocale(s.locale);
     if (s.presentedOfferId !== null) return this.say(emit, TEMPLATES[locale].close, null, locale);
 
     const now = this.now();
@@ -273,7 +274,13 @@ export class AgentRuntime implements Agent {
         subscriptionId: s.subscription.id,
         paypalSubscriptionId: s.subscription.paypalSubscriptionId,
       },
-      payload: { offer, reason, fallbackLevel: s.fallbackLevel, decision: explain(decision) },
+      payload: {
+        offer,
+        reason,
+        fallbackLevel: s.fallbackLevel,
+        promptVersion: PROMPT_VERSION,
+        decision: explain(decision),
+      },
     });
   }
 
