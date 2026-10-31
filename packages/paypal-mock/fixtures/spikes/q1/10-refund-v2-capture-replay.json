@@ -1,0 +1,62 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v2/payments/captures/845647799G006720N/refund",
+    "headers": {
+      "PayPal-Request-Id": "om-spike-q1-v2-refund-1"
+    },
+    "body": {
+      "amount": {
+        "value": "0.40",
+        "currency_code": "USD"
+      },
+      "note_to_payer": "Spike Q1 partial refund (v2)"
+    }
+  },
+  "response": {
+    "status": 200,
+    "debugId": "ca52426c85972",
+    "body": {
+      "id": "0MH29538VE914483V",
+      "amount": {
+        "currency_code": "USD",
+        "value": "0.40"
+      },
+      "note_to_payer": "Spike Q1 partial refund (v2)",
+      "seller_payable_breakdown": {
+        "gross_amount": {
+          "currency_code": "USD",
+          "value": "0.40"
+        },
+        "paypal_fee": {
+          "currency_code": "USD",
+          "value": "0.00"
+        },
+        "net_amount": {
+          "currency_code": "USD",
+          "value": "0.40"
+        },
+        "total_refunded_amount": {
+          "currency_code": "USD",
+          "value": "0.40"
+        }
+      },
+      "custom_id": "spike-q1",
+      "status": "COMPLETED",
+      "create_time": "2026-10-29T11:12:56-07:00",
+      "update_time": "2026-10-29T11:12:56-07:00",
+      "links": [
+        {
+          "href": "https://api.sandbox.paypal.com/v2/payments/refunds/0MH29538VE914483V",
+          "rel": "self",
+          "method": "GET"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v2/payments/captures/845647799G006720N",
+          "rel": "up",
+          "method": "GET"
+        }
+      ]
+    }
+  }
+}

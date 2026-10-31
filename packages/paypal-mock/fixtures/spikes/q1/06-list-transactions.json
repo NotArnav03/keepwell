@@ -1,0 +1,47 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/billing/subscriptions/I-6EFTT451KLGH/transactions?start_time=2026-10-27T18:12:43.717Z&end_time=2026-10-30T18:12:43.718Z",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "debugId": "ca524265acc7a",
+    "body": {
+      "transactions": [
+        {
+          "id": "845647799G006720N",
+          "amount_with_breakdown": {
+            "gross_amount": {
+              "currency_code": "USD",
+              "value": "1.00"
+            },
+            "fee_amount": {
+              "currency_code": "USD",
+              "value": "0.52"
+            },
+            "net_amount": {
+              "currency_code": "USD",
+              "value": "0.48"
+            }
+          },
+          "payer_name": {
+            "given_name": "John",
+            "surname": "Doe"
+          },
+          "payer_email": "redacted@example.com",
+          "time": "2026-10-29T18:12:15.000Z",
+          "status": "COMPLETED"
+        }
+      ],
+      "links": [
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-6EFTT451KLGH/transactions?start_time=2026-10-27T18%3A12%3A43.717Z&end_time=2026-10-30T18%3A12%3A43.718Z",
+          "rel": "SELF",
+          "method": "GET"
+        }
+      ]
+    }
+  }
+}
