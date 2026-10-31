@@ -15,6 +15,7 @@ import {
 } from "@keepwell/paypal-mock";
 import { PayPalClient } from "../paypal/client.js";
 import { singleAppCredentials } from "../paypal/credentials.js";
+import { DbAudit } from "../audit/log.js";
 import { DbActionEngine, type PayPalMutator } from "./engine.js";
 
 // The engine against a real Postgres (row-level security, advisory locks) and paypal-mock over
@@ -294,6 +295,22 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbActionEngine", { timeout: 60
       holder.release();
     }
     expect(await engine.execute(M, action.id)).toBe("applied");
+  });
+
+  it("writes every transition into the real audit chain, in the same transaction", async () => {
+    const chain = new DbAudit(db, () => now);
+    const audited = makeEngine({ audit: chain });
+    const action = await audited.create({
+      merchantId: M,
+      subscriptionId: subId.lena,
+      type: "suspend",
+      origin: "session",
+      params: { reason: "Pause" },
+    });
+    await audited.execute(M, action.id);
+    const result = await chain.verify(M);
+    expect(result.ok).toBe(true);
+    expect(result.checked).toBeGreaterThanOrEqual(3);
   });
 
   it("lists due work and hides other merchants' Actions", async () => {
