@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, unique, uuid } from "drizzle-orm/pg-core";
 import { ReasonCategory } from "@keepwell/contracts";
 import { amount, at, createdAt, currency, id, merchantId, enumText } from "./columns.js";
 import { merchants } from "./merchants.js";
@@ -83,3 +83,49 @@ export const insightActions = pgTable("insight_actions", {
   createdAt: createdAt(),
   decidedAt: at(),
 });
+
+/**
+ * One row per cancellation made inside PayPal (ARCHITECTURE.md 6.10). `dueAt` is the durable timer:
+ * the winback.start job is only its trigger, and the due-work sweep re-fires pending rows.
+ * The unique key is what makes "one message per cancellation" hold under duplicate events.
+ */
+export const winbackCases = pgTable(
+  "winback_cases",
+  {
+    id: id(),
+    merchantId: merchantId().references(() => merchants.id),
+    subscriptionId: uuid()
+      .notNull()
+      .references(() => subscriptions.id),
+    state: text({ enum: ["pending", "sent", "replied", "skipped"] })
+      .notNull()
+      .default("pending"),
+    /** Set when state is "skipped": no_longer_cancelled, session_saved, no_email, ... */
+    skipReason: text(),
+    dueAt: at().notNull(),
+    sentAt: at(),
+    /** The Notifier outbox row. No foreign key: the notify module owns that table's shape. */
+    notificationId: uuid(),
+    simulated: boolean().notNull().default(false),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.merchantId, t.subscriptionId), index().on(t.state, t.dueAt)],
+);
+
+/** The one-question answer from the exit-interview page. Raw text; the extractor redacts it. */
+export const winbackReplies = pgTable(
+  "winback_replies",
+  {
+    id: id(),
+    merchantId: merchantId().references(() => merchants.id),
+    caseId: uuid()
+      .notNull()
+      .references(() => winbackCases.id),
+    subscriptionId: uuid()
+      .notNull()
+      .references(() => subscriptions.id),
+    text: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [unique().on(t.caseId)],
+);
