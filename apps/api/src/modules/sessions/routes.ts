@@ -20,6 +20,7 @@ import {
   type SessionsApi,
   type SubscriberPrincipal,
 } from "@keepwell/contracts";
+import type { FixedWindowLimiter, SessionRateLimits } from "./rate-limit.js";
 
 // HTTP and SSE for /v1/sessions/* (CONTRACTS.md §4). The session logic sits behind SessionsApi,
 // so the real module (#32) and FakeSessionsApi plug in here unchanged.
@@ -32,6 +33,12 @@ export interface SessionRoutesOptions {
   allowOrigin: (origin: string) => boolean;
   /** How often an idle stream gets an SSE comment, so proxies don't cut it. */
   heartbeatMs?: number;
+  /**
+   * Per-IP limits on the routes that reach the agent (#26). Pass `defaultSessionRateLimits()` in
+   * production; unset means no limits (tests). Cancel is never limited. Behind Render's proxy,
+   * `request.ip` needs Fastify's `trustProxy`.
+   */
+  rateLimits?: SessionRateLimits;
 }
 
 const SessionParams = z.object({ id: Id });
@@ -44,7 +51,15 @@ const RETRY_MS = 2000;
 const ClientError = z.object({ statusCode: z.number().int().min(400).max(499), message: z.string() });
 
 export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, options, done) => {
-  const { sessions, authenticate } = options;
+  const { sessions, authenticate, rateLimits } = options;
+
+  /** Throws limit_reached (429) with Retry-After once this IP is over the limit. */
+  const limit = (limiter: FixedWindowLimiter | undefined, request: FastifyRequest, reply: FastifyReply) => {
+    const retryAfter = limiter?.hit(request.ip) ?? 0;
+    if (retryAfter === 0) return;
+    void reply.header("retry-after", String(retryAfter));
+    throw new SessionError("limit_reached", "Too many requests. Please wait a moment; Cancel still works.");
+  };
 
   app.addHook("onRequest", (request, reply, next) => {
     const { origin } = request.headers;
@@ -79,6 +94,7 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
   app.options("/sessions/*", preflight);
 
   app.post("/sessions", { bodyLimit: BODY_LIMIT }, async (request, reply) => {
+    limit(rateLimits?.create, request, reply);
     const principal = await authenticate(request);
     const created = await sessions.create(principal, parse(CreateSessionRequest, request.body));
     return reply.code(201).send(CreateSessionResponse.parse(created));
@@ -145,6 +161,7 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
   });
 
   app.post("/sessions/:id/messages", { bodyLimit: BODY_LIMIT }, async (request, reply) => {
+    limit(rateLimits?.talk, request, reply);
     const principal = await authenticate(request);
     const { id } = parse(SessionParams, request.params);
     await sessions.message(principal, id, parse(PostMessageRequest, request.body));
@@ -152,6 +169,7 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
   });
 
   app.post("/sessions/:id/reason", { bodyLimit: BODY_LIMIT }, async (request, reply) => {
+    limit(rateLimits?.talk, request, reply);
     const principal = await authenticate(request);
     const { id } = parse(SessionParams, request.params);
     await sessions.reason(principal, id, parse(PostReasonRequest, request.body));

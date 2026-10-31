@@ -29,3 +29,7 @@ curl -N "localhost:3000/v1/sessions/<id>/stream?fake=pause"     # in a second te
 curl -X POST localhost:3000/v1/sessions/<id>/messages -H 'content-type: application/json' \
   -H 'authorization: Bearer fake:pause' -d '{"text":"I am travelling for two months"}'
 ```
+
+## Rate limits
+
+`sessionRoutes` takes an optional `rateLimits` (#26). With `defaultSessionRateLimits()`, one IP gets 10 new sessions and 30 messages or reason taps a minute; past that the route answers 429 `limit_reached` with `Retry-After`. Cancel is never limited. The limits are in memory (one Render instance), and the daily LLM budget guard sits behind them. Behind Render's proxy, `request.ip` needs Fastify's `trustProxy`.
