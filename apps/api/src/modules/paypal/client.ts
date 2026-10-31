@@ -122,6 +122,15 @@ const ReviseResponse = z.looseObject({
   links: z.array(z.looseObject({ href: z.string(), rel: z.string() })),
 });
 const IdBody = z.looseObject({ id: z.string().min(1) });
+const PlanList = z.looseObject({
+  plans: z
+    .array(z.looseObject({ id: z.string(), name: z.string(), product_id: z.string(), status: z.string() }))
+    .default([]),
+  total_pages: z.number().int().optional(),
+});
+const WebhookList = z.looseObject({
+  webhooks: z.array(z.looseObject({ id: z.string(), url: z.string() })).default([]),
+});
 
 const VerifyResponse = z.looseObject({ verification_status: z.string() });
 
@@ -392,6 +401,61 @@ export class PayPalClient implements PayPalGateway {
       requestId: input.requestId,
     });
     return { debugId, planId: IdBody.parse(body).id };
+  }
+
+  // ---------- setup: only the seed and onboarding call these ----------
+  // Not subscription changes, so not Actions: creating a product or registering a webhook is
+  // one-time merchant setup, run by a person (pnpm seed) or by onboarding (#54).
+
+  /** The merchant's plans, all pages (a merchant has a handful). */
+  async listPlans(
+    merchantId: string,
+  ): Promise<{ id: string; name: string; productId: string; status: string }[]> {
+    const plans: { id: string; name: string; productId: string; status: string }[] = [];
+    for (let page = 1; page <= 20; page++) {
+      const { body } = await this.request(merchantId, {
+        method: "GET",
+        path: "/v1/billing/plans",
+        query: { page_size: "20", page: String(page), total_required: "true" },
+      });
+      const list = PlanList.parse(body);
+      plans.push(
+        ...list.plans.map((p) => ({ id: p.id, name: p.name, productId: p.product_id, status: p.status })),
+      );
+      if (list.plans.length < 20 || page >= (list.total_pages ?? page)) break;
+    }
+    return plans;
+  }
+
+  async createProduct(
+    merchantId: string,
+    input: { name: string; requestId: string },
+  ): Promise<{ id: string }> {
+    const { body } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/catalogs/products",
+      body: { name: input.name, type: "SERVICE" },
+      requestId: input.requestId,
+    });
+    return { id: IdBody.parse(body).id };
+  }
+
+  async listWebhooks(merchantId: string): Promise<{ id: string; url: string }[]> {
+    const { body } = await this.request(merchantId, { method: "GET", path: "/v1/notifications/webhooks" });
+    return WebhookList.parse(body).webhooks.map((w) => ({ id: w.id, url: w.url }));
+  }
+
+  /** Registers our intake URL for the event types the pipeline reads (§6.2). */
+  async createWebhook(
+    merchantId: string,
+    input: { url: string; eventTypes: string[] },
+  ): Promise<{ id: string }> {
+    const { body } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/notifications/webhooks",
+      body: { url: input.url, event_types: input.eventTypes.map((name) => ({ name })) },
+    });
+    return { id: IdBody.parse(body).id };
   }
 
   // ---------- transport ----------

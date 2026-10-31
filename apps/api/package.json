@@ -10,7 +10,8 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "seed": "node --env-file-if-exists=../../.env --import tsx src/cli/seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
