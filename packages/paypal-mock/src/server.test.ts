@@ -214,9 +214,21 @@ describe("revise, price override, capture, transactions and refunds", () => {
       amount: { currency_code: "USD", value: "7.00" },
     });
     expect(issue(tooMuch.body)).toBe("REFUND_AMOUNT_EXCEEDED");
-    expect((await call("POST", `/v2/payments/captures/${last}/refund`, {})).body).toMatchObject({
-      status: "COMPLETED",
-    });
+    const rest = await call(
+      "POST",
+      `/v2/payments/captures/${last}/refund`,
+      {},
+      { "paypal-request-id": "refund-1" },
+    );
+    expect(rest).toMatchObject({ status: 201, body: { status: "COMPLETED" } });
+    // Spike Q1: a replay answers 200 with the same refund and refunds nothing more.
+    const replay = await call(
+      "POST",
+      `/v2/payments/captures/${last}/refund`,
+      {},
+      { "paypal-request-id": "refund-1" },
+    );
+    expect(replay).toMatchObject({ status: 200, body: { id: rest.body?.id } });
     const after = (await call("GET", `/v1/billing/subscriptions/${MAYA}/transactions?${range}`)).body;
     expect((after?.transactions as { status: string }[]).at(-1)?.status).toBe("REFUNDED");
   });

@@ -51,6 +51,8 @@ describe("Pantry Plan fixtures (CONTRACTS.md §6)", () => {
     const maya = fixture.transactions.filter((t) => t.subscriptionId === byKey("maya").id);
     expect(maya).toHaveLength(8);
     expect(maya.at(-1)?.time).toBe(byKey("maya").billing_info?.last_payment?.time);
+    // As sandbox sends it (spike Q1), so clients have to normalise.
+    expect(byKey("maya").billing_info?.last_payment?.amount.value).toBe("12.0");
     for (const t of fixture.transactions) expect(t.id).toMatch(/^[A-Z0-9]{17}$/);
     expect(new Set(fixture.transactions.map((t) => t.id)).size).toBe(fixture.transactions.length);
   });

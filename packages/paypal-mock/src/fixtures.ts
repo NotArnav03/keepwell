@@ -7,7 +7,7 @@ import type {
   SubscriptionStatus,
   TransactionRecord,
 } from "./records.js";
-import { addInterval, money, paypalTime, toCents, type PayPalMoney } from "./units.js";
+import { addInterval, looseMoney, money, paypalTime, toCents, type PayPalMoney } from "./units.js";
 
 // The fictional Pantry Plan merchant and its 12 subscribers (CONTRACTS.md §6). Ids match
 // @keepwell/contracts/fakes, so FakeSessionsApi, the policy fixtures and this mock agree. Dates
@@ -257,7 +257,7 @@ function buildSubscriber(s: Subscriber, now: Date) {
       ],
       failed_payments_count: failed,
       ...(lastPayment && {
-        last_payment: { amount: money(lastPayment.grossCents, "USD"), time: lastPayment.time },
+        last_payment: { amount: looseMoney(lastPayment.grossCents, "USD"), time: lastPayment.time },
       }),
       // Assumed: only an active subscription shows its next billing time.
       ...(s.status === "ACTIVE" && { next_billing_time: paypalTime(next) }),

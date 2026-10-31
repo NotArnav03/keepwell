@@ -379,7 +379,7 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
     const body = parse(z.object({ amount: Money.optional() }).default({}), request.body ?? {});
     const merchantId = merchant(request);
     const root = base(request);
-    const result = state.idempotent(merchantId, requestId(request, "refund"), () => {
+    const { result, replayed } = state.idempotentCall(merchantId, requestId(request, "refund"), () => {
       const refund = state.refund(merchantId, id, body.amount ? toCents(body.amount.value) : null);
       return {
         id: refund.refundId,
@@ -387,7 +387,8 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
         links: [link(root, `/v2/payments/refunds/${refund.refundId}`, "self")],
       };
     });
-    return reply.code(201).send(result);
+    // Spike Q1: the same PayPal-Request-Id again returns 200 with the first refund, not a new one.
+    return reply.code(replayed ? 200 : 201).send(result);
   });
 
   // ---------- webhooks ----------

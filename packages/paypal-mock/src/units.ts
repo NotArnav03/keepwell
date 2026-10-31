@@ -39,3 +39,12 @@ export function paypalId(length: number, random: () => number = Math.random): st
   for (let i = 0; i < length; i++) id += ALPHANUMERIC[Math.floor(random() * ALPHANUMERIC.length)];
   return id;
 }
+
+/**
+ * `billing_info.last_payment.amount` as sandbox really sends it: trailing zeros dropped, one decimal
+ * kept ("1.00" came back as "1.0" in spike Q1). Clients must normalise; the mock makes them.
+ */
+export function looseMoney(cents: number, currency: string): PayPalMoney {
+  const value = (cents / 100).toFixed(2).replace(/0$/, "");
+  return { currency_code: currency, value };
+}
