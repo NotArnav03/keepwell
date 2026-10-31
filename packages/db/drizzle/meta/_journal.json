@@ -36,6 +36,13 @@
       "when": 1793528894015,
       "tag": "0004_insight_sources",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1793528910090,
+      "tag": "0005_insight_views",
+      "breakpoints": true
     }
   ]
 }
