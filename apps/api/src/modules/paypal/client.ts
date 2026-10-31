@@ -60,6 +60,8 @@ interface Request {
   path: string;
   query?: Record<string, string | undefined>;
   body?: unknown;
+  /** A body already serialised, sent byte for byte (webhook verification). */
+  rawBody?: string;
   /** PayPal-Request-Id, on the endpoints that honour it (create plan, capture, refund). */
   requestId?: string;
 }
@@ -90,6 +92,30 @@ const TransactionList = z.looseObject({
     )
     .default([]),
 });
+
+/** The parts of a billing plan the snapshot needs. */
+export const PayPalPlan = z.looseObject({
+  id: z.string().min(1),
+  name: z.string(),
+  product_id: z.string().optional(),
+  status: z.string(),
+  billing_cycles: z.array(
+    z.looseObject({
+      tenure_type: z.string(),
+      sequence: z.number().int(),
+      frequency: z.looseObject({
+        interval_unit: z.enum(["DAY", "WEEK", "MONTH", "YEAR"]),
+        interval_count: z.number().int().min(1),
+      }),
+      pricing_scheme: z
+        .looseObject({ fixed_price: z.looseObject({ currency_code: z.string(), value: z.string() }) })
+        .optional(),
+    }),
+  ),
+});
+export type PayPalPlan = z.infer<typeof PayPalPlan>;
+
+const VerifyResponse = z.looseObject({ verification_status: z.string() });
 
 const TokenResponse = z.looseObject({ access_token: z.string().min(1), expires_in: z.number().int().min(1) });
 
@@ -178,6 +204,38 @@ export class PayPalClient implements PayPalGateway {
     }));
   }
 
+  /** A billing plan: name, price and interval for the subscription snapshot. */
+  async getPlan(merchantId: string, paypalPlanId: string): Promise<PayPalPlan> {
+    const { body } = await this.request(merchantId, {
+      method: "GET",
+      path: `/v1/billing/plans/${encodeURIComponent(paypalPlanId)}`,
+    });
+    return PayPalPlan.parse(body);
+  }
+
+  /**
+   * POST /v1/notifications/verify-webhook-signature (ARCHITECTURE.md §6.2). PayPal checks the
+   * signature over the exact bytes it sent, so the received body goes in verbatim: the request JSON
+   * is built as a string around it, never by re-serialising a parsed copy.
+   */
+  async verifyWebhookSignature(
+    merchantId: string,
+    input: { webhookId: string; headers: Record<string, string | undefined>; rawBody: string },
+  ): Promise<boolean> {
+    const header = (name: string) => JSON.stringify(input.headers[name] ?? "");
+    const rawBody =
+      `{"auth_algo":${header("paypal-auth-algo")},"cert_url":${header("paypal-cert-url")},` +
+      `"transmission_id":${header("paypal-transmission-id")},"transmission_sig":${header("paypal-transmission-sig")},` +
+      `"transmission_time":${header("paypal-transmission-time")},"webhook_id":${JSON.stringify(input.webhookId)},` +
+      `"webhook_event":${input.rawBody}}`;
+    const { body } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/notifications/verify-webhook-signature",
+      rawBody,
+    });
+    return VerifyResponse.parse(body).verification_status === "SUCCESS";
+  }
+
   // ---------- mutations: only the action engine calls these ----------
 
   suspend(merchantId: string, paypalSubscriptionId: string, reason: string): Promise<MutationResult> {
@@ -232,7 +290,9 @@ export class PayPalClient implements PayPalGateway {
             prefer: "return=representation",
             ...(req.requestId && { "paypal-request-id": req.requestId }),
           },
-          ...(req.body !== undefined && { body: JSON.stringify(req.body) }),
+          ...(req.rawBody !== undefined
+            ? { body: req.rawBody }
+            : req.body !== undefined && { body: JSON.stringify(req.body) }),
           signal: AbortSignal.timeout(this.timeoutMs),
         });
       } catch (err) {

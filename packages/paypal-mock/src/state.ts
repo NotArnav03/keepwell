@@ -527,7 +527,10 @@ export class PayPalState {
     subscription.status_update_time = this.now();
     const words = status.toLowerCase();
     this.touch(subscription);
-    this.announce(merchantId, subscription, `BILLING.SUBSCRIPTION.${status}`, `Subscription ${words}.`);
+    // PayPal names the event after the change, not the status: ACTIVE arrives as ACTIVATED.
+    const eventType =
+      status === "ACTIVE" ? "BILLING.SUBSCRIPTION.ACTIVATED" : `BILLING.SUBSCRIPTION.${status}`;
+    this.announce(merchantId, subscription, eventType, `Subscription ${words}.`);
   }
 
   private touch(subscription: SubscriptionRecord): void {
