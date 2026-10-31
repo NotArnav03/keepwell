@@ -24,6 +24,8 @@ export type EventSink = (merchantId: string, event: WebhookEvent) => void;
 interface MerchantState {
   merchant: MerchantRecord;
   plans: Map<string, PlanRecord>;
+  /** Catalog products: id → name. Fixture plans' product ids count as existing products. */
+  products: Map<string, string>;
   subscriptions: Map<string, SubscriptionRecord>;
   priceOverrides: Map<string, PayPalMoney>;
   transactions: TransactionRecord[];
@@ -73,6 +75,7 @@ export class PayPalState {
         {
           merchant: f.merchant,
           plans: new Map(f.plans.map((p) => [p.id, p])),
+          products: new Map(f.plans.map((p) => [p.product_id, f.merchant.name])),
           subscriptions: new Map(f.subscriptions.map((s) => [s.id, s])),
           priceOverrides: new Map(Object.entries(f.priceOverrides ?? {})),
           transactions: f.transactions,
@@ -111,6 +114,18 @@ export class PayPalState {
   /** Every issued token stops working, so tests can exercise refresh-on-401. */
   expireTokens(): void {
     this.tokens.clear();
+  }
+
+  // ---------- catalog products ----------
+
+  createProduct(merchantId: string, name: string): { id: string; name: string } {
+    const id = "PROD-" + paypalId(12);
+    this.of(merchantId).products.set(id, name);
+    return { id, name };
+  }
+
+  products(merchantId: string): { id: string; name: string }[] {
+    return [...this.of(merchantId).products].map(([id, name]) => ({ id, name }));
   }
 
   // ---------- plans ----------
