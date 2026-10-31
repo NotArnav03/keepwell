@@ -6,6 +6,12 @@ import { describeOffer } from "@keepwell/policy";
 // prompts never change between calls so they stay cached; per-session data goes in the input.
 // Tuned in #30; evals (#28) run against these.
 
+/**
+ * Bump on any change to CLASSIFY_SYSTEM or CONVERSE_SYSTEM (prompts.test.ts pins their hash). The
+ * audit log records it with every offer, and each eval run records the version it measured.
+ */
+export const PROMPT_VERSION = 1;
+
 export const Intent = z.enum(["cancel_now", "explaining", "asking", "other"]);
 export type Intent = z.infer<typeof Intent>;
 

@@ -27,7 +27,11 @@ It is deterministic, with no model call: every reply passes through it, so it co
 
 ## Languages
 
-Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money, percentages and dates are formatted with `Intl`; money is formatted from its decimal string and never becomes a float. The classifier's `language` picks the locale, and anything else falls back to English. A reason-chip tap (L1) carries no text, so it uses English until `SessionContext` carries the session's locale.
+Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money, percentages and dates are formatted with `Intl`; money is formatted from its decimal string and never becomes a float. The classifier's `language` picks the locale. When it names a language we have no templates for, or before any model call (L1, the message limit), the session's `locale` is used (`SessionContext.locale`, from `CreateSessionRequest.locale`), then English. A reason-chip tap carries no text, so it always uses the session's locale.
+
+## Prompt versions
+
+`PROMPT_VERSION` in `prompts.ts` names the system prompts. `prompts.test.ts` pins each version's hash, so editing a prompt fails the test until the version is bumped. The version goes into every `offer.presented` audit entry and every eval run, so a result always says which prompt produced it.
 
 ## Model calls
 
@@ -59,6 +63,5 @@ Two failure cases are handled on purpose:
 
 ## Not yet (later issues)
 
-- The session's locale in `SessionContext` (from `CreateSessionRequest.locale`), so L1 replies are localised too.
 - Per-IP rate limits on the session routes (#26): they belong with the HTTP layer, e.g. `@fastify/rate-limit` on `/v1/sessions/*`.
 - Prompt tuning against the evals (#28, #30).
