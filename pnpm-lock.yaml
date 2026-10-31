@@ -50,6 +50,9 @@ importers:
       '@keepwell/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@keepwell/evals':
+        specifier: workspace:*
+        version: link:../../packages/evals
       '@keepwell/policy':
         specifier: workspace:*
         version: link:../../packages/policy
