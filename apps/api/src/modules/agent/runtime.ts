@@ -14,6 +14,8 @@ import {
 } from "@keepwell/contracts";
 import { computeMenu, evaluate, explain } from "@keepwell/policy";
 import { renderCardText, shownTextHash } from "./cards.js";
+import { checkClaims, type ClaimViolation } from "./claims.js";
+import { resolveLocale, TEMPLATES, type Locale } from "./i18n.js";
 import { uuidv7 } from "./ids.js";
 import { LlmError, type AgentLogger, type LlmClient } from "./llm.js";
 import {
@@ -22,14 +24,13 @@ import {
   classifyInput,
   CONVERSE_SYSTEM,
   converseInput,
-  hasFigures,
   Reply,
   type Classification as ClassificationT,
 } from "./prompts.js";
 
-// The agent runtime (ARCHITECTURE.md §6.5): Haiku classifies, Sonnet picks one action from the
-// policy's menu, the policy re-checks the pick, and every offer card renders from the Offer
-// object. Stateless: the sessions module hands it a fresh SessionContext on every call.
+// The agent runtime (ARCHITECTURE.md §6.5): Haiku classifies, a second Haiku call picks one action
+// from the policy's menu, the policy re-checks the pick, and every offer card renders from the
+// Offer object. Stateless: the sessions module hands it a fresh SessionContext on every call.
 
 /** Hard session limits (§6.5). The sessions module also refuses a 4th message. */
 export const MAX_SUBSCRIBER_MESSAGES = 3;
@@ -38,17 +39,7 @@ export const DEFAULT_DEADLINE_MS = 8_000;
 
 const CHIP_REASONS = ReasonCategory.options.filter((r) => r !== "unknown");
 
-// Template text: shown when the model is skipped, fails, or breaks a rule twice. English until
-// #24 makes them multilingual.
-export const TEMPLATES = {
-  close: "Understood. The Cancel button below ends your subscription right away.",
-  care: "I'm sorry you're going through this. The Cancel button below ends your subscription right away, with nothing else to do.",
-  limit:
-    "Thanks for talking it through with me. Whatever you decide, the Cancel button below ends your subscription right away.",
-  offer:
-    "Thanks for telling me. Here's one option that might help. If it doesn't, the Cancel button below ends your subscription right away.",
-  l1: "Sorry, I can't chat right now. Pick the reason that fits best, or use the Cancel button below.",
-} as const;
+export { TEMPLATES } from "./i18n.js";
 
 export interface AgentRuntimeOptions {
   /** null when no Anthropic key is configured: every session starts in L1. */
@@ -62,13 +53,14 @@ export interface AgentRuntimeOptions {
 
 type Emit = (event: AgentStreamEvent) => void;
 
-/** One Sonnet reply after our checks. `offer` is set only when the policy allowed the pick. */
+/** One conversation reply after our checks. `offer` is set only when the policy allowed the pick. */
 interface Checked {
   reply: Reply;
   offer: Offer | null;
   decision: PolicyDecision | null;
   pickOk: boolean;
   textOk: boolean;
+  violations: ClaimViolation[];
 }
 
 export class AgentRuntime implements Agent {
@@ -104,11 +96,14 @@ export class AgentRuntime implements Agent {
     const s = SessionContext.parse(session);
     const emit = checkedEmitter(stream);
     const llm = this.llm;
-    if (llm === null || s.fallbackLevel !== "L0") return this.fallToL1(emit, false);
+    // English until the classifier names the language: no model call means no language yet.
+    let locale: Locale = "en";
+    if (llm === null || s.fallbackLevel !== "L0") return this.fallToL1(emit, false, locale);
 
     const transcript = withCurrentMessage(s.transcript, text, this.now());
     const subscriberTurns = transcript.filter((t) => t.role === "subscriber").length;
-    if (subscriberTurns > MAX_SUBSCRIBER_MESSAGES) return this.say(emit, TEMPLATES.limit, null);
+    if (subscriberTurns > MAX_SUBSCRIBER_MESSAGES)
+      return this.say(emit, TEMPLATES[locale].limit, null, locale);
 
     const signal = AbortSignal.timeout(this.deadlineMs);
     const log = { sessionId: s.sessionId, merchantId: s.merchantId, subscriptionId: s.subscription.id };
@@ -121,20 +116,23 @@ export class AgentRuntime implements Agent {
           schema: Classification,
           maxTokens: 1024,
           signal,
+          sessionId: s.sessionId,
         }),
       );
       this.log.info({ ...log, classification }, "agent classified");
+      locale = resolveLocale(classification.language);
 
       // No-means-no, abuse and distress close without a model reply and without an offer.
-      if (classification.flags.includes("distress")) return this.say(emit, TEMPLATES.care, null);
+      if (classification.flags.includes("distress"))
+        return this.say(emit, TEMPLATES[locale].care, null, locale);
       if (classification.intent === "cancel_now" || classification.flags.includes("abusive")) {
-        return this.say(emit, TEMPLATES.close, null);
+        return this.say(emit, TEMPLATES[locale].close, null, locale);
       }
 
       const presented = s.presentedOfferId === null ? 0 : 1;
       const ctx = policyContext(s, this.now(), classification.reason, presented);
       const menu = computeMenu(s.policy, ctx);
-      if (menu.offers.length === 0) return this.say(emit, TEMPLATES.close, null);
+      if (menu.offers.length === 0) return this.say(emit, TEMPLATES[locale].close, null, locale);
 
       // One clarifying question per session, and only as the agent's first turn, when an answer
       // can still come. The transcript has no turn kinds, so "first agent turn" is the safe proxy.
@@ -154,6 +152,7 @@ export class AgentRuntime implements Agent {
             schema: Reply,
             maxTokens: 2048,
             signal,
+            sessionId: s.sessionId,
           });
         } catch (err) {
           if (err instanceof LlmError && err.failure === "invalid_output" && attempt === 1) continue;
@@ -161,7 +160,7 @@ export class AgentRuntime implements Agent {
         }
         const checked = this.check(s, ctx, menu, reply, questionAllowed);
         if (checked.pickOk && checked.textOk)
-          return this.reply(s, emit, checked, reply.message, classification);
+          return this.reply(s, emit, checked, reply.message, classification, locale);
         this.log.warn(
           {
             ...log,
@@ -170,6 +169,7 @@ export class AgentRuntime implements Agent {
             offerId: reply.offerId,
             pickOk: checked.pickOk,
             textOk: checked.textOk,
+            violations: checked.violations,
           },
           "agent reply rejected",
         );
@@ -177,12 +177,13 @@ export class AgentRuntime implements Agent {
         if (checked.offer) fallbackPick = checked;
       }
       // Two rejected replies: keep a pick the policy allowed, with template text; else close.
-      if (fallbackPick?.offer) return this.reply(s, emit, fallbackPick, TEMPLATES.offer, classification);
-      return this.say(emit, TEMPLATES.close, null);
+      if (fallbackPick?.offer)
+        return this.reply(s, emit, fallbackPick, TEMPLATES[locale].offer, classification, locale);
+      return this.say(emit, TEMPLATES[locale].close, null, locale);
     } catch (err) {
       if (!(err instanceof LlmError)) throw err;
       this.log.warn({ ...log, failure: err.failure, err }, "agent falling back to L1");
-      return this.fallToL1(emit, true);
+      return this.fallToL1(emit, true, locale);
     }
   }
 
@@ -191,22 +192,24 @@ export class AgentRuntime implements Agent {
     const s = SessionContext.parse(session);
     const chosen = ReasonCategory.parse(reason);
     const emit = checkedEmitter(stream);
-    if (s.presentedOfferId !== null) return this.say(emit, TEMPLATES.close, null);
+    // A chip tap carries no text to detect a language from (see the module README).
+    const locale: Locale = "en";
+    if (s.presentedOfferId !== null) return this.say(emit, TEMPLATES[locale].close, null, locale);
 
     const now = this.now();
     const fullMenu = computeMenu(s.policy, policyContext(s, now, "unknown", 0));
     const offerId = fullMenu.defaultByReason[chosen];
-    if (!offerId) return this.say(emit, TEMPLATES.close, null);
+    if (!offerId) return this.say(emit, TEMPLATES[locale].close, null, locale);
     const decision = evaluate(s.policy, policyContext(s, now, chosen, 0), offerId, fullMenu);
     if (!decision.allowed || !decision.offer) {
       this.log.warn(
         { sessionId: s.sessionId, reason: chosen, violations: decision.violations },
         "L1 default denied",
       );
-      return this.say(emit, TEMPLATES.close, null);
+      return this.say(emit, TEMPLATES[locale].close, null, locale);
     }
     await this.recordOffer(s, decision.offer, decision, chosen);
-    this.say(emit, TEMPLATES.offer, decision.offer);
+    this.say(emit, TEMPLATES[locale].offer, decision.offer, locale);
   }
 
   private check(
@@ -216,16 +219,18 @@ export class AgentRuntime implements Agent {
     reply: Reply,
     questionAllowed: boolean,
   ): Checked {
-    const textOk = !hasFigures(reply.message);
-    if (reply.action === "no_offer") return { reply, offer: null, decision: null, pickOk: true, textOk };
-    if (reply.action === "ask_one_question") {
-      return { reply, offer: null, decision: null, pickOk: questionAllowed, textOk };
-    }
-    if (reply.offerId === null) return { reply, offer: null, decision: null, pickOk: false, textOk };
+    // The text is checked against the offer it would accompany: none unless the pick is allowed.
+    const withText = (offer: Offer | null, decision: PolicyDecision | null, pickOk: boolean): Checked => {
+      const violations = checkClaims(reply.message, offer);
+      return { reply, offer, decision, pickOk, textOk: violations.length === 0, violations };
+    };
+    if (reply.action === "no_offer") return withText(null, null, true);
+    if (reply.action === "ask_one_question") return withText(null, null, questionAllowed);
+    if (reply.offerId === null) return withText(null, null, false);
     // Defence in depth: the pick is re-checked against a menu recomputed from scratch.
     const decision = evaluate(s.policy, ctx, reply.offerId, menu);
     const offer = decision.allowed ? decision.offer : null;
-    return { reply, offer, decision, pickOk: offer !== null, textOk };
+    return withText(offer, decision, offer !== null);
   }
 
   private async reply(
@@ -234,11 +239,12 @@ export class AgentRuntime implements Agent {
     checked: Checked,
     message: string,
     classification: ClassificationT,
+    locale: Locale,
   ): Promise<void> {
     if (checked.offer && checked.decision) {
       await this.recordOffer(s, checked.offer, checked.decision, classification.reason);
     }
-    this.say(emit, message, checked.offer);
+    this.say(emit, message, checked.offer, locale);
   }
 
   /** Recorded before the card is shown, so the subscriber never sees an offer the log lacks. */
@@ -271,17 +277,17 @@ export class AgentRuntime implements Agent {
     });
   }
 
-  private fallToL1(emit: Emit, changed: boolean): void {
+  private fallToL1(emit: Emit, changed: boolean, locale: Locale): void {
     if (changed) emit({ type: "fallback.changed", level: "L1" });
-    this.say(emit, TEMPLATES.l1, null);
+    this.say(emit, TEMPLATES[locale].l1, null, locale);
     emit({ type: "reason.chips", reasons: CHIP_REASONS });
   }
 
   /** Streams the text, then the card (if any), then done: the order the widget expects. */
-  private say(emit: Emit, message: string, offer: Offer | null): void {
+  private say(emit: Emit, message: string, offer: Offer | null, locale: Locale): void {
     for (const word of message.split(/(?<= )/)) emit({ type: "agent.delta", text: word });
     if (offer) {
-      const cardText = renderCardText(offer);
+      const cardText = renderCardText(offer, locale);
       emit({ type: "offer.presented", offer, cardText, shownTextHash: shownTextHash(message, cardText) });
     }
     emit({ type: "agent.done", messageId: uuidv7(this.clock().getTime()) });

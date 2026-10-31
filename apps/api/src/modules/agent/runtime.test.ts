@@ -107,8 +107,11 @@ describe("AgentRuntime.respond", () => {
     expect(text()).toBe("A break might suit you better.");
     const [presented] = offers();
     expect(presented?.offer).toEqual(pause);
-    expect(presented?.cardText).toMatch(
-      /^Pause for \d billing cycles?\. Billing resumes on \d{4}-\d{2}-\d{2}\.$/,
+    const resumes = new Intl.DateTimeFormat("en", { dateStyle: "long", timeZone: "UTC" }).format(
+      new Date(pause.resumesOn),
+    );
+    expect(presented?.cardText).toBe(
+      `Pause for ${pause.cycles} billing cycle${pause.cycles === 1 ? "" : "s"}. Billing resumes on ${resumes}.`,
     );
     const hash = createHash("sha256").update(`${text()}\n${presented?.cardText}`).digest("hex");
     expect(presented?.shownTextHash).toBe(hash);
@@ -132,9 +135,9 @@ describe("AgentRuntime.respond", () => {
   });
 
   it.each([
-    ["cancel_now", classified({ intent: "cancel_now" }), TEMPLATES.close],
-    ["abusive", classified({ flags: ["abusive"] }), TEMPLATES.close],
-    ["distress", classified({ flags: ["distress"] }), TEMPLATES.care],
+    ["cancel_now", classified({ intent: "cancel_now" }), TEMPLATES.en.close],
+    ["abusive", classified({ flags: ["abusive"] }), TEMPLATES.en.close],
+    ["distress", classified({ flags: ["distress"] }), TEMPLATES.en.care],
   ])("closes on %s with no offer and no conversation call", async (_name, step, template) => {
     const llm = new FakeLlmClient().script("classify", step);
     const { runtime, push, text, offers, events } = setup(llm);
@@ -157,7 +160,7 @@ describe("AgentRuntime.respond", () => {
     expect(llm.calls.filter((c) => c.purpose === "converse")).toHaveLength(2);
     expect(offers()).toHaveLength(0);
     expect(events.emitted).toHaveLength(0);
-    expect(text()).toBe(TEMPLATES.close);
+    expect(text()).toBe(TEMPLATES.en.close);
   });
 
   it("denies a real offer id that the policy rules out for this reason", async () => {
@@ -169,7 +172,7 @@ describe("AgentRuntime.respond", () => {
     const { runtime, push, offers, text } = setup(llm);
     await runtime.respond(session(), "travelling", push);
     expect(offers()).toHaveLength(0);
-    expect(text()).toBe(TEMPLATES.close);
+    expect(text()).toBe(TEMPLATES.en.close);
   });
 
   it("closes without asking the model when the subscription isn't active", async () => {
@@ -178,7 +181,7 @@ describe("AgentRuntime.respond", () => {
     const { runtime, push, offers, text } = setup(llm);
     await runtime.respond(s, "too expensive", push);
     expect(offers()).toHaveLength(0);
-    expect(text()).toBe(TEMPLATES.close);
+    expect(text()).toBe(TEMPLATES.en.close);
     expect(llm.calls.map((c) => c.purpose)).toEqual(["classify"]);
   });
 
@@ -195,7 +198,7 @@ describe("AgentRuntime.respond", () => {
     const { runtime, push, text, offers } = setup(llm);
     await runtime.respond(session(), "travelling", push);
     expect(offers()[0]?.offer).toEqual(pause);
-    expect(text()).toBe(TEMPLATES.offer);
+    expect(text()).toBe(TEMPLATES.en.offer);
   });
 
   it("keeps an allowed pick with template text when the model writes figures twice", async () => {
@@ -211,7 +214,43 @@ describe("AgentRuntime.respond", () => {
       .script("converse", withFigures, withFigures);
     const { runtime, push, text, offers } = setup(llm);
     await runtime.respond(session(), "travelling", push);
-    expect(text()).toBe(TEMPLATES.offer);
+    expect(text()).toBe(TEMPLATES.en.offer);
+    expect(offers()[0]?.offer).toEqual(pause);
+  });
+
+  it("speaks the subscriber's language on the card", async () => {
+    const pause = menuFor("temporary").offers.find((o) => o.kind === "pause");
+    if (!pause) throw new Error("fixture: pause");
+    const message = "थोड़ा विराम आपकी यात्रा के लिए ठीक रहेगा।";
+    const llm = new FakeLlmClient()
+      .script("classify", classified({ language: "hi-IN" }))
+      .script("converse", replied({ action: "present_offer", offerId: pause.id, message }));
+    const { runtime, push, text, offers } = setup(llm);
+    await runtime.respond(session(), "मैं दो महीने बाहर रहूँगा", push);
+    expect(text()).toBe(message);
+    expect(offers()[0]?.cardText).toContain("बिलिंग चक्र के लिए रोकें");
+  });
+
+  it("closes in the subscriber's language", async () => {
+    const llm = new FakeLlmClient().script("classify", classified({ language: "es", intent: "cancel_now" }));
+    const { runtime, push, text } = setup(llm);
+    await runtime.respond(session(), "quiero cancelar", push);
+    expect(text()).toBe(TEMPLATES.es.close);
+  });
+
+  it("retries a reply that talks about an offer it didn't present", async () => {
+    const pause = menuFor("temporary").offers.find((o) => o.kind === "pause");
+    if (!pause) throw new Error("fixture: pause");
+    const offTopic = replied({
+      action: "present_offer",
+      offerId: pause.id,
+      message: "Or I could refund you.",
+    });
+    const llm = new FakeLlmClient().script("classify", classified()).script("converse", offTopic, offTopic);
+    const { runtime, push, text, offers } = setup(llm);
+    await runtime.respond(session(), "travelling", push);
+    expect(llm.calls.filter((c) => c.purpose === "converse")).toHaveLength(2);
+    expect(text()).toBe(TEMPLATES.en.offer);
     expect(offers()[0]?.offer).toEqual(pause);
   });
 
@@ -241,7 +280,7 @@ describe("AgentRuntime.respond", () => {
     s.transcript.splice(1, 0, { role: "agent", text: "What made you decide?", at: NOW.toISOString() });
     await runtime.respond(s, "not sure", push);
     expect(llm.calls[1]?.input).toContain("ask_one_question allowed: no");
-    expect(text()).toBe(TEMPLATES.close);
+    expect(text()).toBe(TEMPLATES.en.close);
   });
 
   it("offers nothing more once an offer was presented", async () => {
@@ -249,7 +288,7 @@ describe("AgentRuntime.respond", () => {
     const { runtime, push, text, offers } = setup(llm);
     await runtime.respond(session({ presentedOfferId: "offer-pause-1" }), "what about a discount?", push);
     expect(offers()).toHaveLength(0);
-    expect(text()).toBe(TEMPLATES.close);
+    expect(text()).toBe(TEMPLATES.en.close);
     expect(llm.calls.map((c) => c.purpose)).toEqual(["classify"]);
   });
 
@@ -257,7 +296,7 @@ describe("AgentRuntime.respond", () => {
     const llm = new FakeLlmClient();
     const { runtime, push, text } = setup(llm);
     await runtime.respond(session({}, ["a", "b", "c", "d"]), "d", push);
-    expect(text()).toBe(TEMPLATES.limit);
+    expect(text()).toBe(TEMPLATES.en.limit);
     expect(llm.calls).toHaveLength(0);
   });
 
@@ -269,7 +308,7 @@ describe("AgentRuntime.respond", () => {
     const { runtime, push, stream, text } = setup(llm);
     await runtime.respond(session(), "travelling", push);
     expect(stream[0]).toEqual({ type: "fallback.changed", level: "L1" });
-    expect(text()).toBe(TEMPLATES.l1);
+    expect(text()).toBe(TEMPLATES.en.l1);
     expect(stream.at(-1)).toMatchObject({ type: "reason.chips" });
     expect(stream.at(-1)).not.toMatchObject({ reasons: expect.arrayContaining(["unknown"]) as unknown });
   });
@@ -310,7 +349,7 @@ describe("AgentRuntime.respondToReason (L1)", () => {
     await runtime.respondToReason(session({ fallbackLevel: "L1" }), "temporary", push);
     expect(llm.calls).toHaveLength(0);
     expect(offers()[0]?.offer.id).toBe(defaultId);
-    expect(text()).toBe(TEMPLATES.offer);
+    expect(text()).toBe(TEMPLATES.en.offer);
     expect(audit.byKind("offer.presented")).toHaveLength(1);
   });
 
@@ -318,7 +357,7 @@ describe("AgentRuntime.respondToReason (L1)", () => {
     const { runtime, push, text, offers } = setup();
     await runtime.respondToReason(session({ fallbackLevel: "L1" }), "missing_feature", push);
     expect(offers()).toHaveLength(0);
-    expect(text()).toBe(TEMPLATES.close);
+    expect(text()).toBe(TEMPLATES.en.close);
   });
 
   it("closes when an offer was already presented", async () => {

@@ -4,16 +4,22 @@ import type { z } from "zod";
 // The agent module's only seam to a model. AnthropicLlmClient is the real one; FakeLlmClient
 // scripts it for tests and evals, so no unit test ever calls the Anthropic API.
 
-/** Each job maps to one model (CLAUDE.md §3). */
 export type LlmPurpose = "classify" | "converse";
 
+/**
+ * Each job maps to one model (CLAUDE.md §3). Both are Haiku: a reply is a few sentences picking
+ * from a fixed menu, the 8 s deadline covers two calls, and every pick and sentence is re-checked
+ * in code, so a faster, cheaper model fits better than Sonnet here.
+ */
 export const MODEL_FOR: Record<LlmPurpose, string> = {
   classify: "claude-haiku-5-5",
-  converse: "claude-sonnet-5-5",
+  converse: "claude-haiku-5-5",
 };
 
 export interface StructuredCall<S extends z.ZodType> {
   purpose: LlmPurpose;
+  /** For the per-session limits in the budget guard; null outside a session. */
+  sessionId: string | null;
   /** Identical bytes on every call, so it is served from the prompt cache. */
   system: string;
   /** Everything that varies: the menu, the transcript. */
