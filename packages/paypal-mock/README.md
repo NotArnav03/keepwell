@@ -82,7 +82,12 @@ These follow the docs or our best guess, and get corrected as the spikes report 
 - **List subscriptions** (`GET /v1/billing/subscriptions` with `statuses`, `plan_ids`, `status_updated_after`): the shape ARCHITECTURE.md §6.3 assumes.
 - **Activate after suspend** keeps the billing anchor and charges nothing at activation (Q2).
 - **Failed renewals** retry after 5 days; `next_billing_time` moves on a cycle anyway (Q5).
-- **Refund** endpoint and error codes (Q1); revise approval timing and webhooks (Q3); webhook latency (Q6).
+- Revise approval timing and webhooks (Q3); webhook latency (Q6).
 - PATCH supports only the paths Keepwell sends: the `fixed_price` override, `outstanding_balance` and `custom_id`.
+
+Confirmed by spike Q1 (docs/spikes/Q1.md) and mirrored here:
+- Refunds go through `POST /v2/payments/captures/:id/refund`; the subscription's transaction ids are v2 capture ids.
+- A replayed `PayPal-Request-Id` answers **200** with the first refund, and nothing more is refunded.
+- `billing_info.last_payment.amount` comes with loose decimals (`"12.0"`), so clients must normalise amounts.
 
 Still to come (#6): a recorder that saves real sandbox responses, scrubbed, as fixtures. It lands with the spikes.

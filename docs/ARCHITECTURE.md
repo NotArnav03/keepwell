@@ -205,7 +205,7 @@ The only code allowed to call PayPal. Everything else calls the gateway or the a
 | Cancel | `POST …/cancel` | Read-before-retry for `CANCELLED`; a 422 "already cancelled" counts as success |
 | Revise | `POST …/revise` | Re-running only creates a fresh approval link. Store the latest; confirm by GET showing the new `plan_id`. |
 | Price override | `PATCH …/{id}` | Compare the current value with the target before and after |
-| Refund | Refund endpoint (decided by spike Q1) | `PayPal-Request-Id` if the chosen endpoint supports it, otherwise check the refund list before retrying |
+| Refund | `POST /v2/payments/captures/{transactionId}/refund` (spike Q1: subscription transaction ids are v2 capture ids) | `PayPal-Request-Id` = Action id. A replay returns 200 with the same refund, so no refund-list check is needed |
 
 ### 6.2 Webhook pipeline (M1)
 

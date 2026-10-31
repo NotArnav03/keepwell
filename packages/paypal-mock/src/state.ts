@@ -9,7 +9,7 @@ import type {
   WebhookEvent,
   WebhookRecord,
 } from "./records.js";
-import { addInterval, money, paypalId, paypalTime, toCents, type PayPalMoney } from "./units.js";
+import { addInterval, looseMoney, money, paypalId, paypalTime, toCents, type PayPalMoney } from "./units.js";
 
 // The mock's whole world, in memory. Each mutation follows PayPal's status rules and announces
 // itself through `onEvent`, which the server turns into signed webhook deliveries. Behaviour that
@@ -447,12 +447,21 @@ export class PayPalState {
 
   /** Runs `fn` once per PayPal-Request-Id; a repeat returns the first result without re-running. */
   idempotent<T>(merchantId: string, requestId: string | undefined, fn: () => T): T {
-    if (requestId === undefined) return fn();
+    return this.idempotentCall(merchantId, requestId, fn).result;
+  }
+
+  /** The same, also saying whether this was a replay: PayPal answers a replayed refund 200, not 201 (Q1). */
+  idempotentCall<T>(
+    merchantId: string,
+    requestId: string | undefined,
+    fn: () => T,
+  ): { result: T; replayed: boolean } {
+    if (requestId === undefined) return { result: fn(), replayed: false };
     const store = this.of(merchantId).idempotency;
-    if (store.has(requestId)) return store.get(requestId) as T;
+    if (store.has(requestId)) return { result: store.get(requestId) as T, replayed: true };
     const result = fn();
     store.set(requestId, result);
-    return result;
+    return { result, replayed: false };
   }
 
   // ---------- internals ----------
@@ -497,7 +506,7 @@ export class PayPalState {
     };
     this.of(merchantId).transactions.push(transaction);
     if (subscription.billing_info) {
-      subscription.billing_info.last_payment = { amount: money(cents, currency), time };
+      subscription.billing_info.last_payment = { amount: looseMoney(cents, currency), time };
     }
     this.emit(merchantId, "PAYMENT.SALE.COMPLETED", "sale", "Payment completed.", {
       id: transaction.id,
