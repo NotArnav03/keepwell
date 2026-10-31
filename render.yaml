@@ -34,6 +34,13 @@ services:
         sync: false
       - key: ANTHROPIC_API_KEY
         sync: false
-      # The whole AI budget is a  prepaid credit that must last until judging ends (21 Dec).
+      # The whole AI budget is a $5 prepaid credit that must last until judging ends (21 Dec).
       - key: LLM_DAILY_BUDGET_USD
         value: "0.10"
+      # The service's own URL: PayPal sends buyers back here after a revise.
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-staging.onrender.com
+      - key: OPS_TOKEN
+        sync: false
+      - key: SENTRY_DSN
+        sync: false

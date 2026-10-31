@@ -1,4 +1,4 @@
-import { and, eq, gt, inArray, lt, ne, or } from "drizzle-orm";
+import { and, eq, gt, gte, inArray, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
 import type { ListSubscriptionsQuery, Page, PayPalSubscription } from "@keepwell/contracts";
 import { actions, driftReports, merchants, subscriptions, type Db } from "@keepwell/db";
 import type { DbActionEngine } from "../actions/engine.js";
@@ -10,8 +10,10 @@ import type { SubscriptionSync } from "./sync.js";
 // - every minute, the due work: Actions to run or retry, lost workers' Actions, resumes that came
 //   due, revise links nobody used, APPLIED Actions to confirm, and any due work modules register;
 // - every 2 minutes, the hot loop: re-sync subscriptions with an Action in flight or recent activity;
-// - every 30 minutes, each merchant's sweep: what PayPal says changed since the last one;
-// - nightly at 03:00 UTC, each merchant's drift report (target zero).
+// - each merchant's sweep, once its last one is 30 minutes old: what PayPal says changed since;
+// - each merchant's drift report, once a day from 03:00 UTC (target zero).
+// Sweeps and drift go by age, not by clock slot, so a server that slept (Render's free plan)
+// catches up on its first minute awake.
 // Each piece is its own job with an idempotency key, so a slow run or a second instance never
 // doubles the work.
 
@@ -42,6 +44,7 @@ const HOUR = 60 * 60_000;
 const SWEEP_OVERLAP_MS = 5 * 60_000;
 /** APPLIED this long ago and still not confirmed: ask PayPal directly. */
 const CONFIRM_AFTER_MS = 2 * 60_000;
+const SWEEP_EVERY_MS = 30 * 60_000;
 
 export class Reconciler {
   private readonly dueWork = new Map<string, () => Promise<void>>();
@@ -68,11 +71,12 @@ export class Reconciler {
     for (const actionId of await this.unconfirmed(now)) await jobs.send("action.confirm", { actionId });
 
     if (now.getUTCMinutes() % 2 === 0) await this.hotLoop();
-    if (now.getUTCMinutes() % 30 === 0) {
-      for (const merchantId of await this.merchantIds()) await jobs.send("reconcile.sweep", { merchantId });
-    }
-    if (now.getUTCHours() === 3 && now.getUTCMinutes() === 0) {
-      for (const merchantId of await this.merchantIds()) await jobs.send("reconcile.drift", { merchantId });
+    // By age, not by clock slot: a server that slept through :00 and :30 (Render's free plan) sweeps
+    // as soon as it wakes, and a drift report missed at night runs on the next morning's first minute.
+    for (const merchantId of await this.dueForSweep(now)) await jobs.send("reconcile.sweep", { merchantId });
+    if (now.getUTCHours() >= 3) {
+      for (const merchantId of await this.dueForDrift(now))
+        await jobs.send("reconcile.drift", { merchantId });
     }
     for (const [name, fn] of this.dueWork) {
       // One module's failure mustn't stop the others' due work.
@@ -154,7 +158,9 @@ export class Reconciler {
     }
     const drifted = Object.keys(details).length;
     await this.o.db.forMerchant(merchantId, (tx) =>
-      tx.insert(driftReports).values({ merchantId, checked: live.length, drifted, details }),
+      tx
+        .insert(driftReports)
+        .values({ merchantId, checked: live.length, drifted, details, ranAt: this.clock() }),
     );
     if (drifted > 0) this.o.log.warn({ merchantId, drifted, details }, "reconciler found drift");
     return { checked: live.length, drifted };
@@ -172,8 +178,34 @@ export class Reconciler {
     return rows.map((r) => r.id);
   }
 
-  private async merchantIds(): Promise<string[]> {
-    const rows = await this.o.db.acrossMerchants((tx) => tx.select({ id: merchants.id }).from(merchants));
+  /** Merchants never swept, or swept more than 30 minutes ago. */
+  private async dueForSweep(now: Date): Promise<string[]> {
+    const before = new Date(now.getTime() - SWEEP_EVERY_MS);
+    const rows = await this.o.db.acrossMerchants((tx) =>
+      tx
+        .select({ id: merchants.id })
+        .from(merchants)
+        .where(or(isNull(merchants.lastSweepAt), lt(merchants.lastSweepAt, before))),
+    );
+    return rows.map((r) => r.id);
+  }
+
+  /** Merchants with no drift report yet today (UTC). */
+  private async dueForDrift(now: Date): Promise<string[]> {
+    const today = new Date(now.toISOString().slice(0, 10) + "T00:00:00Z");
+    const rows = await this.o.db.acrossMerchants((tx) =>
+      tx
+        .select({ id: merchants.id })
+        .from(merchants)
+        .where(
+          notExists(
+            tx
+              .select({ one: sql`1` })
+              .from(driftReports)
+              .where(and(eq(driftReports.merchantId, merchants.id), gte(driftReports.ranAt, today))),
+          ),
+        ),
+    );
     return rows.map((r) => r.id);
   }
 }
