@@ -34,6 +34,22 @@ export class SubscriptionSync {
   async sync(merchantId: string, paypalSubscriptionId: string): Promise<SubscriptionSnapshot> {
     // PayPal is read outside any transaction: a slow call mustn't hold locks.
     const raw = await this.paypal.getSubscription(merchantId, paypalSubscriptionId);
+    return (await this.store(merchantId, raw)).snapshot;
+  }
+
+  /**
+   * The nightly drift check (§6.3): which tracked fields our snapshot had wrong compared with PayPal
+   * now, before the same fetch corrects them. Zero drift means webhooks and sweeps missed nothing.
+   */
+  async checkDrift(merchantId: string, paypalSubscriptionId: string): Promise<string[]> {
+    const raw = await this.paypal.getSubscription(merchantId, paypalSubscriptionId);
+    return (await this.store(merchantId, raw)).drifted;
+  }
+
+  private async store(
+    merchantId: string,
+    raw: PayPalSubscription,
+  ): Promise<{ snapshot: SubscriptionSnapshot; drifted: string[] }> {
     const plan = await this.planFor(merchantId, raw.plan_id);
     return this.db.forMerchant(merchantId, async (tx) => {
       const [previous] = await tx
@@ -51,7 +67,7 @@ export class SubscriptionSync {
       if (!row) throw new Error(`Could not store subscription ${raw.id}`);
       const snapshot = toSnapshot(row);
       await this.emitDiff(tx, previous, row, snapshot);
-      return snapshot;
+      return { snapshot, drifted: previous ? changedFields(previous, row) : [] };
     });
   }
 
@@ -250,13 +266,17 @@ const COMPARED: (keyof SubscriptionRow)[] = [
   "lastFailureAt",
 ];
 
-function meaningfulChange(a: SubscriptionRow, b: SubscriptionRow): boolean {
-  return COMPARED.some((key) => {
+function changedFields(a: SubscriptionRow, b: SubscriptionRow): string[] {
+  return COMPARED.filter((key) => {
     const x = a[key];
     const y = b[key];
     if (x instanceof Date && y instanceof Date) return x.getTime() !== y.getTime();
     return x !== y;
   });
+}
+
+function meaningfulChange(a: SubscriptionRow, b: SubscriptionRow): boolean {
+  return changedFields(a, b).length > 0;
 }
 
 export function toSnapshot(row: SubscriptionRow): SubscriptionSnapshot {

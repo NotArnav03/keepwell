@@ -264,6 +264,7 @@ Emitted to the `domain_events` table and to Postgres `NOTIFY` (for the live feed
 | `action.confirm` | M1 | `{ actionId }` | actionId |
 | `reconcile.subscription` | M1 | `{ subscriptionId }` | subscriptionId + minute |
 | `reconcile.sweep` | M1 | `{ merchantId }` | merchantId + window |
+| `reconcile.drift` | M1 | `{ merchantId }` | merchantId + UTC day (nightly drift report, #14) |
 | `due.sweep` | M1 | `{}` | minute |
 | `resume.due` | M1 | `{ scheduledResumeId }` | scheduledResumeId |
 | `domain.dispatch` | M1 | `{ domainEventId, handler }` | domainEventId + handler |

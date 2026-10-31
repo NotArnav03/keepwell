@@ -150,3 +150,18 @@ export const poolSubscriptions = pgTable(
   },
   (t) => [index().on(t.merchantId, t.state)],
 );
+
+/** One nightly drift check per merchant (§6.3): how many snapshots disagreed with PayPal. Target 0. */
+export const driftReports = pgTable(
+  "drift_reports",
+  {
+    id: id(),
+    merchantId: merchantId().references(() => merchants.id),
+    checked: integer().notNull(),
+    drifted: integer().notNull(),
+    /** paypalSubscriptionId → the fields that were wrong. */
+    details: jsonb().notNull(),
+    ranAt: createdAt(),
+  },
+  (t) => [index().on(t.merchantId, t.ranAt)],
+);
