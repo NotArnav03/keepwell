@@ -15,6 +15,13 @@
       "when": 1793381081305,
       "tag": "0001_tenant_isolation",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793415819091,
+      "tag": "0002_notify_outbox",
+      "breakpoints": true
     }
   ]
 }
