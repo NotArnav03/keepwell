@@ -17,6 +17,8 @@ export interface ScheduledResume {
   merchantId: string;
   subscriptionId: string;
   dueAt: string;
+  /** The suspend Action it waits for (see ActionEngine.scheduleResume), or null. */
+  afterActionId: string | null;
 }
 
 /**
@@ -83,13 +85,19 @@ export class FakeActionEngine implements ActionEngine {
     return Promise.resolve(found ? structuredClone(found) : null);
   }
 
-  scheduleResume(input: { merchantId: string; subscriptionId: string; dueAt: string }): Promise<string> {
+  scheduleResume(input: {
+    merchantId: string;
+    subscriptionId: string;
+    dueAt: string;
+    afterActionId?: string;
+  }): Promise<string> {
     return new Promise((resolve) => {
       const resume: ScheduledResume = {
         id: uuidv7(this.clock().getTime()),
         merchantId: Id.parse(input.merchantId),
         subscriptionId: Id.parse(input.subscriptionId),
         dueAt: IsoDateTime.parse(input.dueAt),
+        afterActionId: input.afterActionId === undefined ? null : Id.parse(input.afterActionId),
       };
       this.resumes.push(resume);
       resolve(resume.id);

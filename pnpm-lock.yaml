@@ -50,9 +50,15 @@ importers:
       '@keepwell/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@keepwell/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@keepwell/policy':
         specifier: workspace:*
         version: link:../../packages/policy
+      drizzle-orm:
+        specifier: 0.45.4
+        version: 0.45.4(@opentelemetry/api@1.10.0)(@types/pg@8.23.1)(pg@8.23.1)
       fastify:
         specifier: 5.12.7
         version: 5.12.7

@@ -371,7 +371,9 @@ interface PayPalGateway {
 interface ActionEngine {
   create(input: ActionCreateInput, tx?: Tx): Promise<Action>;          // typed params per type, optional idempotencyKey
   get(merchantId: string, actionId: string): Promise<Action | null>;   // merchant-scoped
-  scheduleResume(input: { merchantId; subscriptionId; dueAt }, tx?: Tx): Promise<string>; // scheduled resume id
+  scheduleResume(input: { merchantId; subscriptionId; dueAt; afterActionId? }, tx?: Tx): Promise<string>; // scheduled resume id
+  // afterActionId (#11): a pause's suspend, written in the same tx. The resume waits until that suspend
+  // is APPLIED and is cancelled if it fails or is superseded.
 }
 interface Audit {
   append(entry: AuditAppendInput, tx?: Tx): Promise<AuditEntry>;      // log sets seq, at, prevHash, hash
