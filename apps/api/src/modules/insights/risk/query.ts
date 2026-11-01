@@ -44,6 +44,10 @@ const DEFAULT_MIN_SCORE = 25;
 const DAY_MS = 86_400_000;
 const INTERVAL_DAYS = { DAY: 1, WEEK: 7, MONTH: 30, YEAR: 365 } as const;
 
+// Drizzle's raw execute hands timestamptz back as text, not Date, so the SQL formats them as ISO
+// UTC and this turns them into Dates.
+const IsoDate = z.iso.datetime().transform((v) => new Date(v));
+
 const Row = z.object({
   id: Id,
   subscriber_first_name: z.string().nullable(),
@@ -51,12 +55,12 @@ const Row = z.object({
   status: SubscriptionStatus,
   interval_unit: z.enum(["DAY", "WEEK", "MONTH", "YEAR"]),
   interval_count: z.number().int(),
-  started_at: z.date(),
-  next_billing_time: z.date().nullable(),
-  last_payment_at: z.date().nullable(),
+  started_at: IsoDate,
+  next_billing_time: IsoDate.nullable(),
+  last_payment_at: IsoDate.nullable(),
   outstanding_value: z.string().nullable(),
   failed_payments_count: z.number().int(),
-  last_failure_at: z.date().nullable(),
+  last_failure_at: IsoDate.nullable(),
   prior_pauses: z.number().int(),
   prior_downgrades: z.number().int(),
   prior_discounts: z.number().int(),
@@ -105,12 +109,12 @@ export async function listAtRisk(
              s.status,
              s.interval_unit,
              s.interval_count,
-             s.started_at,
-             s.next_billing_time,
-             s.last_payment_at,
+             to_char(s.started_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS started_at,
+             to_char(s.next_billing_time AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS next_billing_time,
+             to_char(s.last_payment_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_payment_at,
              s.outstanding_value,
              s.failed_payments_count,
-             s.last_failure_at,
+             to_char(s.last_failure_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') AS last_failure_at,
              count(a.id) FILTER (WHERE a.type = 'suspend' AND a.origin IN ('session', 'insight'))::int AS prior_pauses,
              count(a.id) FILTER (WHERE a.type = 'revise' AND a.origin IN ('session', 'insight')
                                   AND a.created_at < ${reviseCutoff}::timestamptz)::int AS prior_downgrades,
