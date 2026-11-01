@@ -343,7 +343,7 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
     };
   });
 
-  // ---------- refunds (spike Q1 decides which one Keepwell uses; both are here) ----------
+  // ---------- refunds (spike Q1: Keepwell uses the v2 capture endpoint; v1 sale works too) ----------
 
   app.post("/v1/payments/sale/:id/refund", (request, reply) => {
     const { id } = parse(SubscriptionParams, request.params);

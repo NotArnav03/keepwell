@@ -101,7 +101,12 @@ export const scheduledResumes = pgTable(
     dueAt: at().notNull(),
     /** The activate Action, once created. */
     actionId: uuid().references(() => actions.id),
-    status: text({ enum: ["scheduled", "done", "cancelled"] })
+    /**
+     * A pause's suspend Action, written in the same transaction. While it is in flight the resume is
+     * "waiting"; it becomes "scheduled" when the suspend is APPLIED and "cancelled" if it never is.
+     */
+    afterActionId: uuid().references(() => actions.id),
+    status: text({ enum: ["waiting", "scheduled", "done", "cancelled"] })
       .notNull()
       .default("scheduled"),
     createdAt: createdAt(),

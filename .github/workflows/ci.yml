@@ -61,7 +61,7 @@ jobs:
           node-version-file: .node-version
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm turbo run test --filter=@keepwell/db
+      - run: pnpm turbo run test --filter=@keepwell/db --filter=@keepwell/api
 
   gitleaks:
     name: secret scan

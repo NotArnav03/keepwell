@@ -1,0 +1,56 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/payments/sale/845647799G006720N/refund",
+    "headers": {
+      "PayPal-Request-Id": "om-spike-q1-v1-refund-1"
+    },
+    "body": {
+      "amount": {
+        "total": "0.30",
+        "currency": "USD"
+      },
+      "description": "Spike Q1 partial refund (v1)"
+    }
+  },
+  "response": {
+    "status": 201,
+    "debugId": "ca52426d1ec41",
+    "body": {
+      "id": "97A27860V6767235P",
+      "state": "completed",
+      "amount": {
+        "total": "0.30",
+        "currency": "USD"
+      },
+      "description": "Spike Q1 partial refund (v1)",
+      "refund_from_received_amount": {
+        "value": "0.30",
+        "currency": "USD"
+      },
+      "refund_from_transaction_fee": {
+        "value": "0.00",
+        "currency": "USD"
+      },
+      "total_refunded_amount": {
+        "value": "0.70",
+        "currency": "USD"
+      },
+      "sale_id": "845647799G006720N",
+      "create_time": "2026-10-29T18:13:00Z",
+      "update_time": "2026-10-29T18:13:00Z",
+      "links": [
+        {
+          "href": "https://api.sandbox.paypal.com/v1/payments/refund/97A27860V6767235P",
+          "rel": "self",
+          "method": "GET"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/payments/sale/845647799G006720N",
+          "rel": "sale",
+          "method": "GET"
+        }
+      ]
+    }
+  }
+}

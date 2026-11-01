@@ -219,6 +219,16 @@ export const InsightAction = z.object({
 });
 ```
 
+### M5 growth types, as implemented
+Code: `packages/contracts/src/growth/` (`InsightRecord`, `InsightAction`, `InsightActionProposal`, notifications, `DunningCase`, `growthJobs`, `growthEventPayloads`); `FakeNotifier` in `@keepwell/contracts/fakes`. Differences from the sketch above:
+
+- `InsightRecord` gains `replyId`; exactly the id matching `source` is set. `quote` is at most 20 words (and 160 characters).
+- `InsightAction` gains `merchantId`, `createdAt`, `decidedAt`. `InsightActionProposal` is a union on `kind` with typed `params` (checked before a row is written); the stored `params` stay a generic record.
+- Notifications: `Notification` (outbox row, status `queued|sending|sent|failed|suppressed`, `suppressedBecause` `frequency_cap|unsubscribed|superseded`) and `OutboxResponse` (Demo Inbox) are new.
+- `DunningCase`, `DunningPlaybook` and `DunningState` are new; `reasonCode` stays a free string.
+- Job `dunning.evaluate` payload is `{ subscriptionId, failedCount }` (the idempotency key needs the count). `insights.extract` takes exactly one of `sessionId` or `replyId`.
+- `notification.sent` payload is `{ notificationId, template, channel }`; `insight_action.proposed` is `{ insightActionId }`. Both are in `domainEventPayloads`.
+
 ---
 
 ## 2. Internal domain events
@@ -371,7 +381,9 @@ interface PayPalGateway {
 interface ActionEngine {
   create(input: ActionCreateInput, tx?: Tx): Promise<Action>;          // typed params per type, optional idempotencyKey
   get(merchantId: string, actionId: string): Promise<Action | null>;   // merchant-scoped
-  scheduleResume(input: { merchantId; subscriptionId; dueAt }, tx?: Tx): Promise<string>; // scheduled resume id
+  scheduleResume(input: { merchantId; subscriptionId; dueAt; afterActionId? }, tx?: Tx): Promise<string>; // scheduled resume id
+  // afterActionId (#11): a pause's suspend, written in the same tx. The resume waits until that suspend
+  // is APPLIED and is cancelled if it fails or is superseded.
 }
 interface Audit {
   append(entry: AuditAppendInput, tx?: Tx): Promise<AuditEntry>;      // log sets seq, at, prevHash, hash
@@ -402,10 +414,15 @@ interface PolicyStore {
   publish(input: PublishPolicyInput, tx?: Tx): Promise<StoredPolicy>;  // append-only; PolicyError("version_conflict") on a stale base
 }
 
-// M5 → M4
+// M5 → everyone (M1 job handlers, M4 cockpit)
+// As implemented in packages/contracts/src/growth/notifier.ts
 interface Notifier {
-  enqueue(n: { merchantId: string; to: string; template: TemplateId; payload: object; dueAt?: string }, tx?: Tx): Promise<string>;
+  // Inserts an outbox row in the caller's transaction; notify.dispatch sends it later. Returns the notification id.
+  // Rejects (never throws synchronously) if the request breaks the contract.
+  enqueue(n: NotificationRequest, tx?: Tx): Promise<string>;
 }
+// NotificationRequest = { merchantId, subscriptionId | null, to, content: NotificationContent, dueAt?, simulated (default false) }
+// NotificationContent = discriminated union on `template`; each payload holds facts only (amounts, dates, links).
 ```
 
 ---

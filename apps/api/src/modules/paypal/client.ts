@@ -6,8 +6,11 @@ import {
   type Page,
   type PayPalErrorKind,
   type PayPalGateway,
+  type BillingInterval,
+  type Money,
 } from "@keepwell/contracts";
 import type { CredentialSource } from "./credentials.js";
+import { toPayPalMoney } from "./money.js";
 import { TokenBuckets, type RateLimit } from "./rate-limit.js";
 
 // The only code that calls PayPal (ARCHITECTURE.md §6.1, apps/api/CLAUDE.md). Other modules get the
@@ -60,6 +63,8 @@ interface Request {
   path: string;
   query?: Record<string, string | undefined>;
   body?: unknown;
+  /** A body already serialised, sent byte for byte (webhook verification). */
+  rawBody?: string;
   /** PayPal-Request-Id, on the endpoints that honour it (create plan, capture, refund). */
   requestId?: string;
 }
@@ -90,6 +95,35 @@ const TransactionList = z.looseObject({
     )
     .default([]),
 });
+
+/** The parts of a billing plan the snapshot needs. */
+export const PayPalPlan = z.looseObject({
+  id: z.string().min(1),
+  name: z.string(),
+  product_id: z.string().optional(),
+  status: z.string(),
+  billing_cycles: z.array(
+    z.looseObject({
+      tenure_type: z.string(),
+      sequence: z.number().int(),
+      frequency: z.looseObject({
+        interval_unit: z.enum(["DAY", "WEEK", "MONTH", "YEAR"]),
+        interval_count: z.number().int().min(1),
+      }),
+      pricing_scheme: z
+        .looseObject({ fixed_price: z.looseObject({ currency_code: z.string(), value: z.string() }) })
+        .optional(),
+    }),
+  ),
+});
+export type PayPalPlan = z.infer<typeof PayPalPlan>;
+
+const ReviseResponse = z.looseObject({
+  links: z.array(z.looseObject({ href: z.string(), rel: z.string() })),
+});
+const IdBody = z.looseObject({ id: z.string().min(1) });
+
+const VerifyResponse = z.looseObject({ verification_status: z.string() });
 
 const TokenResponse = z.looseObject({ access_token: z.string().min(1), expires_in: z.number().int().min(1) });
 
@@ -178,6 +212,38 @@ export class PayPalClient implements PayPalGateway {
     }));
   }
 
+  /** A billing plan: name, price and interval for the subscription snapshot. */
+  async getPlan(merchantId: string, paypalPlanId: string): Promise<PayPalPlan> {
+    const { body } = await this.request(merchantId, {
+      method: "GET",
+      path: `/v1/billing/plans/${encodeURIComponent(paypalPlanId)}`,
+    });
+    return PayPalPlan.parse(body);
+  }
+
+  /**
+   * POST /v1/notifications/verify-webhook-signature (ARCHITECTURE.md §6.2). PayPal checks the
+   * signature over the exact bytes it sent, so the received body goes in verbatim: the request JSON
+   * is built as a string around it, never by re-serialising a parsed copy.
+   */
+  async verifyWebhookSignature(
+    merchantId: string,
+    input: { webhookId: string; headers: Record<string, string | undefined>; rawBody: string },
+  ): Promise<boolean> {
+    const header = (name: string) => JSON.stringify(input.headers[name] ?? "");
+    const rawBody =
+      `{"auth_algo":${header("paypal-auth-algo")},"cert_url":${header("paypal-cert-url")},` +
+      `"transmission_id":${header("paypal-transmission-id")},"transmission_sig":${header("paypal-transmission-sig")},` +
+      `"transmission_time":${header("paypal-transmission-time")},"webhook_id":${JSON.stringify(input.webhookId)},` +
+      `"webhook_event":${input.rawBody}}`;
+    const { body } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/notifications/verify-webhook-signature",
+      rawBody,
+    });
+    return VerifyResponse.parse(body).verification_status === "SUCCESS";
+  }
+
   // ---------- mutations: only the action engine calls these ----------
 
   suspend(merchantId: string, paypalSubscriptionId: string, reason: string): Promise<MutationResult> {
@@ -206,6 +272,117 @@ export class PayPalClient implements PayPalGateway {
     return { debugId };
   }
 
+  /**
+   * Starts a plan change. Nothing changes until the buyer approves on the returned link; PayPal
+   * then sends them to returnUrl (or cancelUrl). Re-running only makes a fresh link (§6.1).
+   */
+  async revise(
+    merchantId: string,
+    paypalSubscriptionId: string,
+    input: { planId: string; returnUrl: string; cancelUrl: string },
+  ): Promise<MutationResult & { approveUrl: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: `/v1/billing/subscriptions/${encodeURIComponent(paypalSubscriptionId)}/revise`,
+      body: {
+        plan_id: input.planId,
+        application_context: {
+          return_url: input.returnUrl,
+          cancel_url: input.cancelUrl,
+          user_action: "CONTINUE",
+        },
+      },
+    });
+    const approve = ReviseResponse.parse(body).links.find((l) => l.rel === "approve");
+    if (!approve)
+      throw new PayPalGatewayError("invalid_request", "PayPal's revise answer had no approve link");
+    return { debugId, approveUrl: approve.href };
+  }
+
+  /** Sets the next cycles' price (a discount), or puts the plan's price back. */
+  async patchPrice(
+    merchantId: string,
+    paypalSubscriptionId: string,
+    fixedPrice: Money,
+  ): Promise<MutationResult> {
+    const { debugId } = await this.request(merchantId, {
+      method: "PATCH",
+      path: `/v1/billing/subscriptions/${encodeURIComponent(paypalSubscriptionId)}`,
+      body: [
+        {
+          op: "replace",
+          path: "/plan/billing_cycles/@sequence==1/pricing_scheme/fixed_price",
+          value: toPayPalMoney(fixedPrice),
+        },
+      ],
+    });
+    return { debugId };
+  }
+
+  /**
+   * Refunds part of a subscription payment. Spike Q1: the transactions' ids are v2 capture ids, and a
+   * repeated PayPal-Request-Id answers 200 with the first refund, so a retry can't refund twice.
+   */
+  async refund(
+    merchantId: string,
+    input: { transactionId: string; amount: Money; requestId: string },
+  ): Promise<MutationResult & { refundId: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: `/v2/payments/captures/${encodeURIComponent(input.transactionId)}/refund`,
+      body: { amount: toPayPalMoney(input.amount) },
+      requestId: input.requestId,
+    });
+    return { debugId, refundId: IdBody.parse(body).id };
+  }
+
+  /** Collects the outstanding balance now; PayPal-Request-Id makes it safe to retry. */
+  async capture(
+    merchantId: string,
+    paypalSubscriptionId: string,
+    input: { amount: Money; requestId: string },
+  ): Promise<MutationResult & { transactionId: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: `/v1/billing/subscriptions/${encodeURIComponent(paypalSubscriptionId)}/capture`,
+      body: {
+        note: "Outstanding balance",
+        capture_type: "OUTSTANDING_BALANCE",
+        amount: toPayPalMoney(input.amount),
+      },
+      requestId: input.requestId,
+    });
+    return { debugId, transactionId: IdBody.parse(body).id };
+  }
+
+  /** A new plan on an existing product (insight-to-action). PayPal-Request-Id makes it safe to retry. */
+  async createPlan(
+    merchantId: string,
+    input: { productId: string; name: string; price: Money; interval: BillingInterval; requestId: string },
+  ): Promise<MutationResult & { planId: string }> {
+    const { body, debugId } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/billing/plans",
+      body: {
+        product_id: input.productId,
+        name: input.name,
+        status: "ACTIVE",
+        billing_cycles: [
+          {
+            frequency: { interval_unit: input.interval.unit, interval_count: input.interval.count },
+            tenure_type: "REGULAR",
+            sequence: 1,
+            total_cycles: 0,
+            pricing_scheme: { fixed_price: toPayPalMoney(input.price) },
+          },
+        ],
+        payment_preferences: { auto_bill_outstanding: true, payment_failure_threshold: 3 },
+      },
+      requestId: input.requestId,
+    });
+    return { debugId, planId: IdBody.parse(body).id };
+  }
+
   // ---------- transport ----------
 
   private async request(
@@ -232,7 +409,9 @@ export class PayPalClient implements PayPalGateway {
             prefer: "return=representation",
             ...(req.requestId && { "paypal-request-id": req.requestId }),
           },
-          ...(req.body !== undefined && { body: JSON.stringify(req.body) }),
+          ...(req.rawBody !== undefined
+            ? { body: req.rawBody }
+            : req.body !== undefined && { body: JSON.stringify(req.body) }),
           signal: AbortSignal.timeout(this.timeoutMs),
         });
       } catch (err) {

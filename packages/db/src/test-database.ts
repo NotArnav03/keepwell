@@ -12,6 +12,8 @@ import { withStrictSsl } from "./ssl.js";
 export const TEST_DATABASE_URL = process.env.KEEPWELL_TEST_DATABASE_URL;
 
 export interface TestDatabase {
+  /** Its connection string, for a child process that needs its own pool. */
+  url: string;
   /** As the login role: what migrations and admin queries use. */
   ownerPool: pg.Pool;
   /** As keepwell_app, like the API's pool. */
@@ -30,6 +32,7 @@ export async function createTestDatabase(serverUrl: string): Promise<TestDatabas
   const appPool = new pg.Pool({ connectionString: url.toString(), max: 4, options: APP_ROLE_OPTIONS });
 
   return {
+    url: url.toString(),
     ownerPool,
     appPool,
     async drop() {

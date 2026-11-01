@@ -3,6 +3,7 @@ export { FakeActionEngine, type ScheduledResume } from "./action-engine.js";
 export { FakeAudit } from "./audit.js";
 export { FakeDomainEvents } from "./domain-events.js";
 export { FakeAgent } from "./agent.js";
+export { FakeNotifier } from "./notifier.js";
 export { FakePayPalGateway } from "./paypal-gateway.js";
 export { FakePolicyStore } from "./policy-store.js";
 export { FakeSessionsApi, type FakeSessionsApiOptions, type SessionScript } from "./sessions.js";

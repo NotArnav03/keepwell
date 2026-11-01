@@ -236,7 +236,13 @@ describe("FakeActionEngine", () => {
       dueAt: "2026-12-29T10:00:00Z",
     });
     expect(engine.resumes).toEqual([
-      { id: resumeId, merchantId: MERCHANT, subscriptionId: SUB, dueAt: "2026-12-29T10:00:00Z" },
+      {
+        id: resumeId,
+        merchantId: MERCHANT,
+        subscriptionId: SUB,
+        dueAt: "2026-12-29T10:00:00Z",
+        afterActionId: null,
+      },
     ]);
   });
 });
