@@ -35,6 +35,14 @@ interface MerchantState {
   idempotency: Map<string, unknown>;
 }
 
+/** A new subscription waiting for the buyer, as POST /v1/billing/subscriptions leaves it. */
+interface PendingSignup {
+  merchantId: string;
+  subscriptionId: string;
+  returnUrl: string | null;
+  cancelUrl: string | null;
+}
+
 interface PendingRevision {
   merchantId: string;
   subscriptionId: string;
@@ -59,6 +67,7 @@ export class PayPalState {
   private merchants = new Map<string, MerchantState>();
   private tokens = new Map<string, { merchantId: string; expiresAt: number }>();
   private revisions = new Map<string, PendingRevision>();
+  private signups = new Map<string, PendingSignup>();
 
   constructor(
     fixtures: MerchantFixture[],
@@ -87,6 +96,7 @@ export class PayPalState {
     );
     this.tokens.clear();
     this.revisions.clear();
+    this.signups.clear();
   }
 
   // ---------- OAuth ----------
@@ -204,6 +214,45 @@ export class PayPalState {
     return paginate(matching, query);
   }
 
+  /**
+   * POST /v1/billing/subscriptions: APPROVAL_PENDING until the buyer approves on the returned link.
+   * The sandbox and pool refill create subscriptions this way; real subscribers use the JS SDK button.
+   */
+  createSubscription(
+    merchantId: string,
+    input: { planId: string; customId: string | null; returnUrl: string | null; cancelUrl: string | null },
+  ): { subscription: SubscriptionRecord; token: string } {
+    const plan = this.of(merchantId).plans.get(input.planId);
+    if (!plan || plan.status !== "ACTIVE") {
+      throw unprocessable("INVALID_PLAN_ID", `Plan ${input.planId} is not an active plan of this merchant.`);
+    }
+    const now = this.now();
+    const subscription: SubscriptionRecord = {
+      id: `I-${paypalId(12)}`,
+      plan_id: plan.id,
+      status: "APPROVAL_PENDING",
+      status_update_time: now,
+      start_time: now,
+      create_time: now,
+      update_time: now,
+      quantity: "1",
+      plan_overridden: false,
+      ...(input.customId !== null && { custom_id: input.customId }),
+      // Who the buyer is isn't known until they approve; approval fills in the sandbox buyer.
+      subscriber: { name: { given_name: "", surname: "" }, email_address: "", payer_id: "" },
+    };
+    this.of(merchantId).subscriptions.set(subscription.id, subscription);
+    const token = `BA-${paypalId(17)}`;
+    this.signups.set(token, {
+      merchantId,
+      subscriptionId: subscription.id,
+      returnUrl: input.returnUrl,
+      cancelUrl: input.cancelUrl,
+    });
+    this.announce(merchantId, subscription, "BILLING.SUBSCRIPTION.CREATED", "Subscription created.");
+    return { subscription, token };
+  }
+
   suspend(merchantId: string, id: string): void {
     const subscription = this.getSubscription(merchantId, id);
     requireStatus(subscription, ["ACTIVE"], "suspend");
@@ -250,7 +299,55 @@ export class PayPalState {
     return token;
   }
 
-  /** The buyer's answer on PayPal's approval page. Returns where PayPal would redirect them. */
+  /**
+   * The buyer's answer on PayPal's approval page, for a new subscription or a revise. Returns where
+   * PayPal would redirect them.
+   */
+  decide(token: string, approve: boolean): string | null {
+    return this.signups.has(token) ? this.decideSignup(token, approve) : this.decideRevision(token, approve);
+  }
+
+  private decideSignup(token: string, approve: boolean): string | null {
+    const signup = this.signups.get(token);
+    if (!signup) throw notFound(`Approval token ${token}`);
+    this.signups.delete(token);
+    const { merchantId, subscriptionId } = signup;
+    const query = { subscription_id: subscriptionId, ba_token: token };
+    // A buyer who cancels leaves it APPROVAL_PENDING; PayPal expires those on its own later.
+    if (!approve) return withQuery(signup.cancelUrl, query);
+    const subscription = this.getSubscription(merchantId, subscriptionId);
+    const cycle = this.cycleOf(merchantId, subscription);
+    const price = cycle.pricing_scheme.fixed_price;
+    const now = this.clock();
+    subscription.subscriber = {
+      name: { given_name: "Sandbox", surname: "Buyer" },
+      email_address: "buyer@example.com",
+      payer_id: paypalId(13),
+    };
+    subscription.start_time = paypalTime(now);
+    subscription.billing_info = {
+      outstanding_balance: money(0, price.currency_code),
+      cycle_executions: [
+        {
+          tenure_type: "REGULAR",
+          sequence: cycle.sequence,
+          cycles_completed: 1,
+          cycles_remaining: 0,
+          total_cycles: cycle.total_cycles,
+        },
+      ],
+      next_billing_time: paypalTime(
+        addInterval(now, cycle.frequency.interval_unit, cycle.frequency.interval_count),
+      ),
+      failed_payments_count: 0,
+    };
+    // With no trial cycle, PayPal charges the first cycle when the buyer approves (spike Q1's
+    // subscription had its first payment at approval).
+    this.recordPayment(merchantId, subscription, toCents(price.value), price.currency_code);
+    this.setStatus(merchantId, subscription, "ACTIVE");
+    return withQuery(signup.returnUrl, query);
+  }
+
   decideRevision(token: string, approve: boolean): string | null {
     const revision = this.revisions.get(token);
     if (!revision) throw notFound(`Approval token ${token}`);

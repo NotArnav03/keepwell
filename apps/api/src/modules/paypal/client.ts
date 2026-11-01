@@ -122,6 +122,11 @@ const ReviseResponse = z.looseObject({
   links: z.array(z.looseObject({ href: z.string(), rel: z.string() })),
 });
 const IdBody = z.looseObject({ id: z.string().min(1) });
+const CreatedSubscription = z.looseObject({
+  id: z.string().min(1),
+  status: z.string(),
+  links: z.array(z.looseObject({ href: z.string(), rel: z.string() })),
+});
 const PlanList = z.looseObject({
   plans: z
     .array(z.looseObject({ id: z.string(), name: z.string(), product_id: z.string(), status: z.string() }))
@@ -403,7 +408,7 @@ export class PayPalClient implements PayPalGateway {
     return { debugId, planId: IdBody.parse(body).id };
   }
 
-  // ---------- setup: only the seed and onboarding call these ----------
+  // ---------- setup: only the seed, onboarding and the pool call these ----------
   // Not subscription changes, so not Actions: creating a product or registering a webhook is
   // one-time merchant setup, run by a person (pnpm seed) or by onboarding (#54).
 
@@ -438,6 +443,35 @@ export class PayPalClient implements PayPalGateway {
       requestId: input.requestId,
     });
     return { id: IdBody.parse(body).id };
+  }
+
+  /**
+   * A new subscription, APPROVAL_PENDING until a buyer approves it on `approveUrl`. Real subscribers
+   * come through the JS SDK button instead; this is for the judge pool (#15) and the sandbox spike.
+   */
+  async createSubscription(
+    merchantId: string,
+    input: { planId: string; customId?: string; returnUrl: string; cancelUrl: string; requestId: string },
+  ): Promise<{ id: string; status: string; approveUrl: string }> {
+    const { body } = await this.request(merchantId, {
+      method: "POST",
+      path: "/v1/billing/subscriptions",
+      body: {
+        plan_id: input.planId,
+        ...(input.customId !== undefined && { custom_id: input.customId }),
+        application_context: {
+          return_url: input.returnUrl,
+          cancel_url: input.cancelUrl,
+          user_action: "SUBSCRIBE_NOW",
+        },
+      },
+      requestId: input.requestId,
+    });
+    const created = CreatedSubscription.parse(body);
+    const approve = created.links.find((l) => l.rel === "approve");
+    if (!approve)
+      throw new PayPalGatewayError("invalid_request", "PayPal's new subscription had no approve link");
+    return { id: created.id, status: created.status, approveUrl: approve.href };
   }
 
   async listWebhooks(merchantId: string): Promise<{ id: string; url: string }[]> {

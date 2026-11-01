@@ -274,6 +274,43 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
     return subscriptionBody(subscription, base(request), plan);
   });
 
+  app.post("/v1/billing/subscriptions", (request, reply) => {
+    const body = parse(
+      z.object({
+        plan_id: z.string().min(1),
+        custom_id: z.string().max(127).optional(),
+        application_context: z
+          .object({ return_url: z.url().optional(), cancel_url: z.url().optional() })
+          .optional(),
+      }),
+      request.body,
+    );
+    const merchantId = merchant(request);
+    const root = base(request);
+    const { subscription, token } = state.idempotent(merchantId, requestId(request, "subscription"), () =>
+      state.createSubscription(merchantId, {
+        planId: body.plan_id,
+        customId: body.custom_id ?? null,
+        returnUrl: body.application_context?.return_url ?? null,
+        cancelUrl: body.application_context?.cancel_url ?? null,
+      }),
+    );
+    const self = `/v1/billing/subscriptions/${subscription.id}`;
+    return reply.code(201).send({
+      id: subscription.id,
+      plan_id: subscription.plan_id,
+      status: subscription.status,
+      status_update_time: subscription.status_update_time,
+      create_time: subscription.create_time,
+      ...(subscription.custom_id !== undefined && { custom_id: subscription.custom_id }),
+      links: [
+        { href: `${root}/webapps/billing/subscriptions?ba_token=${token}`, rel: "approve", method: "GET" },
+        link(root, self, "edit", "PATCH"),
+        link(root, self, "self"),
+      ],
+    });
+  });
+
   for (const action of ["suspend", "activate", "cancel"] as const) {
     app.post(`/v1/billing/subscriptions/:id/${action}`, (request, reply) => {
       const { id } = parse(SubscriptionParams, request.params);
@@ -483,22 +520,31 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
 
   // ---------- the buyer's approval page for revise (PayPal's own site in real life) ----------
 
-  app.get("/webapps/billing/subscriptions/update", (request, reply) => {
-    const { ba_token } = parse(z.object({ ba_token: z.string().min(1) }), request.query);
-    return reply.type("text/html; charset=utf-8").send(approvalPage(ba_token));
-  });
+  // `subscriptions` approves a new subscription, `subscriptions/update` a revise.
+  for (const [path, question] of [
+    ["/webapps/billing/subscriptions", "Subscribe to this merchant's plan?"],
+    [
+      "/webapps/billing/subscriptions/update",
+      "The merchant wants to change your subscription plan. Approve the change?",
+    ],
+  ] as const) {
+    app.get(path, (request, reply) => {
+      const { ba_token } = parse(z.object({ ba_token: z.string().min(1) }), request.query);
+      return reply.type("text/html; charset=utf-8").send(approvalPage(ba_token, question));
+    });
 
-  app.post("/webapps/billing/subscriptions/update", (request, reply) => {
-    const { ba_token, decision } = parse(
-      z.object({ ba_token: z.string().min(1), decision: z.enum(["approve", "cancel"]) }),
-      request.body,
-    );
-    const redirect = state.decideRevision(ba_token, decision === "approve");
-    if (redirect !== null) return reply.redirect(redirect, 302);
-    return reply
-      .type("text/html; charset=utf-8")
-      .send("<!doctype html><p>Done. You can close this window.</p>");
-  });
+    app.post(path, (request, reply) => {
+      const { ba_token, decision } = parse(
+        z.object({ ba_token: z.string().min(1), decision: z.enum(["approve", "cancel"]) }),
+        request.body,
+      );
+      const redirect = state.decide(ba_token, decision === "approve");
+      if (redirect !== null) return reply.redirect(redirect, 302);
+      return reply
+        .type("text/html; charset=utf-8")
+        .send("<!doctype html><p>Done. You can close this window.</p>");
+    });
+  }
 
   registerControlRoutes(app, { state, failures, webhooks, reload: () => reset() });
 
@@ -599,12 +645,12 @@ function webhookBody(webhook: { id: string; url: string; eventTypes: string[] },
   };
 }
 
-function approvalPage(token: string): string {
+function approvalPage(token: string, question: string): string {
   return `<!doctype html>
-<meta charset="utf-8"><title>PayPal (mock): approve your subscription change</title>
+<meta charset="utf-8"><title>PayPal (mock): approve your subscription</title>
 <main style="font-family: system-ui, sans-serif; max-width: 28rem; margin: 3rem auto">
   <p><strong>PAYPAL MOCK</strong> (local development only)</p>
-  <p>The merchant wants to change your subscription plan. Approve the change?</p>
+  <p>${question}</p>
   <form method="post">
     <input type="hidden" name="ba_token" value="${token.replace(/[^A-Z0-9-]/g, "")}">
     <button name="decision" value="approve">Approve</button>

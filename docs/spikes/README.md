@@ -13,3 +13,17 @@ Owner: <name> · Date: <yyyy-mm-dd>
 ## Impact on the design (link the ADR if one was needed)
 ## Fixture saved to packages/paypal-mock? yes/no
 ```
+
+## Running the sandbox spike (Q2, and the gateway's assumptions)
+
+`pnpm spike <step>` runs the gateway against the PayPal sandbox and saves every response, scrubbed, under `packages/paypal-mock/fixtures/spikes/`. It needs `PAYPAL_CLIENT_ID` and `PAYPAL_CLIENT_SECRET` in `.env` for a sandbox REST app on a **US** business account. Add `--mock` to try any step against `pnpm dev:paypal-mock` instead.
+
+| Step | What it does |
+|---|---|
+| `setup` | Makes a $1.00/day plan once, creates a subscription and prints its approval link. Approve it in a browser as the US **personal** sandbox account; the script waits until it is ACTIVE. |
+| `status` | The subscription's billing fields and its transactions. |
+| `quick` | Suspend, activate 10 s later, watch billing for a minute: a pause that crosses no billing date. |
+| `pause`, then `resume` | Suspend now, activate after the next billing time has passed: what PayPal does with the missed cycle. |
+| `list` | Whether `GET /v1/billing/subscriptions` (the reconciler's sweep) works, by plan and by `status_updated_after`. |
+
+The subscription id lives in `.spike/sandbox.json` (gitignored). Read the saved fixtures before committing them; the scrubber replaces emails, payer and merchant ids, addresses, buyer names and approval tokens.
