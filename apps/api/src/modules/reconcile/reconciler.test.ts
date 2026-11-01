@@ -133,7 +133,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
     await reconciler.syncOne(maya?.id ?? "");
   });
 
-  it("turns due work into jobs, on the minute each part is due", async () => {
+  it("turns due work into jobs, sweeping and drift-checking by age so a sleeping server catches up", async () => {
+    // Days after the last sweep, as after Render's free plan slept: everything is overdue.
     now = new Date("2026-11-10T03:00:00Z");
     let ran = 0;
     reconciler.registerDueWork("test.ok", () => Promise.resolve(void ran++));
@@ -142,16 +143,27 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
     await reconciler.dueSweep();
     const names = sent.map((s) => s.name);
     expect(names).toContain("action.execute"); // the PENDING suspend from the hot loop test
-    expect(names).toContain("reconcile.subscription"); // minute 0 is even
-    expect(names).toContain("reconcile.sweep"); // minute 0 is a multiple of 30
-    expect(names).toContain("reconcile.drift"); // 03:00 UTC
+    expect(names).toContain("reconcile.subscription"); // the hot loop runs on even minutes
+    expect(names).toContain("reconcile.sweep"); // last sweep more than 30 minutes ago
+    expect(names).toContain("reconcile.drift"); // no drift report yet today, and it's past 03:00
     // A broken module's due work doesn't stop the others.
     expect(ran).toBe(2);
 
+    // The jobs run: now swept and drift-checked at 03:00.
+    await reconciler.sweep(M);
+    await reconciler.drift(M);
     sent = [];
     now = new Date("2026-11-10T03:07:00Z");
     await reconciler.dueSweep();
     expect(sent.map((s) => s.name).filter((n) => n.startsWith("reconcile."))).toEqual([]);
+
+    // The next day before 03:00: a sweep is due again, the drift report not yet.
+    sent = [];
+    now = new Date("2026-11-11T02:01:00Z");
+    await reconciler.dueSweep();
+    const early = sent.map((s) => s.name);
+    expect(early).toContain("reconcile.sweep");
+    expect(early).not.toContain("reconcile.drift");
   });
 
   it("serves /status from the reconciler's state, and /ops behind its token", async () => {
