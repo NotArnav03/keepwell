@@ -38,6 +38,7 @@ export class FakeInsightStore implements InsightStore {
   async save(
     merchantId: string,
     record: InsightRecord,
+    _extra: { subscriptionId: string | null },
     onStored: (tx: unknown) => Promise<void>,
   ): Promise<boolean> {
     const key = record.sessionId ? `s:${record.sessionId}` : `r:${String(record.replyId)}`;

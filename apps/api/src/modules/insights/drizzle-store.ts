@@ -39,6 +39,7 @@ export class DrizzleSessionReader implements SessionReader {
         turns,
         knownNames: subscriber?.firstName ? [subscriber.firstName] : [],
         knownReason: session.reason,
+        subscriptionId: session.subscriptionId,
       };
     });
   }
@@ -62,6 +63,7 @@ export class DrizzleInsightStore implements InsightStore {
   async save(
     merchantId: string,
     record: InsightRecord,
+    extra: { subscriptionId: string | null },
     onStored: (tx: unknown) => Promise<void>,
   ): Promise<boolean> {
     return this.db.forMerchant(merchantId, async (tx: Tx) => {
@@ -71,6 +73,7 @@ export class DrizzleInsightStore implements InsightStore {
         .values({
           merchantId,
           sessionId: record.sessionId,
+          subscriptionId: extra.subscriptionId,
           replyId: record.replyId,
           source: record.source,
           reason: record.reason,

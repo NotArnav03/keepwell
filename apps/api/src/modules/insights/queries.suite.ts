@@ -51,6 +51,7 @@ async function seedSession(
   subscriptionId: string,
   outcome: "saved_pause" | "saved_discount" | "cancelled" | "abandoned" | null,
   closedAt: string,
+  simulated = false,
 ): Promise<string> {
   const [row] = await tx
     .insert(sessions)
@@ -60,6 +61,7 @@ async function seedSession(
       channel: "widget",
       policyVersion: 1,
       outcome,
+      simulated,
       closedAt: new Date(closedAt),
     })
     .returning({ id: sessions.id });
@@ -95,6 +97,8 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
         await seedSession(tx, A, sub.a, "saved_pause", "2026-11-02T00:00:00Z"); // after
         await seedSession(tx, A, sub.a, "abandoned", "2026-10-28T10:00:00Z"); // neither save nor cancel
         await seedSession(tx, A, sub.a, null, "2026-10-28T10:00:00Z");
+        // Simulated: must not count anywhere.
+        const simulated = await seedSession(tx, A, sub.a, "saved_pause", "2026-10-28T11:00:00Z", true);
 
         await tx.insert(dunningCases).values([
           {
@@ -194,6 +198,7 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
           {
             ...base,
             replyId: uuidv7(),
+            subscriptionId: sub.a,
             source: "winback_reply",
             reason: "low_usage",
             quote: "tie two",
@@ -206,6 +211,14 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
             reason: "other",
             quote: null,
             createdAt: new Date("2026-10-28T10:00:00Z"),
+          },
+          // Simulated session: excluded from the view and from quotes.
+          {
+            ...base,
+            sessionId: simulated,
+            reason: "price",
+            quote: "simulated quote",
+            createdAt: new Date("2026-10-28T11:00:00Z"),
           },
           // Out of range.
           {
@@ -309,12 +322,12 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
           { reason: "other", count: 1 },
         ]);
         expect(r.byPlan).toEqual([
-          { plan: "(unknown)", count: 2 }, // the two win-back replies carry no session
-          { plan: "Standard", count: 2 },
+          { plan: "Standard", count: 3 }, // two sessions, plus a win-back reply linked to its subscription
+          { plan: "(unknown)", count: 1 }, // a win-back reply with no subscription
           { plan: "Basic", count: 1 },
         ]);
         expect(r.byOutcome).toEqual([
-          { outcome: "none", count: 2 },
+          { outcome: "winback_reply", count: 2 },
           { outcome: "cancelled", count: 1 },
           { outcome: "saved_discount", count: 1 },
           { outcome: "saved_pause", count: 1 },

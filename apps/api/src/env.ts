@@ -35,6 +35,8 @@ const EnvSchema = z
     API_PUBLIC_URL: optionalUrl,
     // Bearer token for GET /ops. Unset: /ops answers 404.
     OPS_TOKEN: z.preprocess(blank, z.string().min(16).optional()),
+    // Unset: no model calls anywhere; sessions run in L1 and insights use their fallback record.
+    ANTHROPIC_API_KEY: optionalString,
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
     SENTRY_DSN: optionalUrl,
   })

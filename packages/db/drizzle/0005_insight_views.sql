@@ -15,11 +15,14 @@ SELECT
   (i.created_at AT TIME ZONE 'UTC')::date AS day,
   coalesce(su.plan_name, '(unknown)') AS plan_name,
   i.reason,
-  coalesce(se.outcome, 'none') AS outcome,
+  -- Win-back replies have no session; they get their own outcome label instead of 'none'.
+  CASE WHEN i.source = 'winback_reply' THEN 'winback_reply' ELSE coalesce(se.outcome, 'none') END AS outcome,
   count(*)::int AS insight_count
 FROM insights i
 LEFT JOIN sessions se ON se.id = i.session_id
-LEFT JOIN subscriptions su ON su.id = se.subscription_id
+LEFT JOIN subscriptions su ON su.id = coalesce(i.subscription_id, se.subscription_id)
+-- Simulated sessions (time machine, injected events) stay out of merchant numbers.
+WHERE se.simulated IS NOT TRUE
 GROUP BY 1, 2, 3, 4, 5;
 --> statement-breakpoint
 -- Required by REFRESH ... CONCURRENTLY, so readers are never blocked by a refresh.

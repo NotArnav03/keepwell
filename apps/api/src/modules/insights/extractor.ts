@@ -17,6 +17,8 @@ export interface SourceText {
   knownNames: string[];
   /** The session's own reason, used when the model can't give one. */
   knownReason: ReasonCategory | null;
+  /** Whose subscription this is, so aggregates can group by plan. */
+  subscriptionId: string | null;
 }
 
 export interface SessionReader {
@@ -32,13 +34,21 @@ export interface ReplyReader {
   load(replyId: string): Promise<SourceText | null>;
 }
 
+/** Until the win-back module provides its reader: no replies exist, so a reply job ends as source_missing. */
+export const noReplies: ReplyReader = { load: () => Promise.resolve(null) };
+
 export interface InsightStore {
   exists(merchantId: string, ref: SourceRef): Promise<boolean>;
   /**
    * Inserts the record unless one exists for its source. `onStored` runs in the same transaction,
    * only when a row was inserted. Returns whether it was.
    */
-  save(merchantId: string, record: InsightRecord, onStored: (tx: unknown) => Promise<void>): Promise<boolean>;
+  save(
+    merchantId: string,
+    record: InsightRecord,
+    extra: { subscriptionId: string | null },
+    onStored: (tx: unknown) => Promise<void>,
+  ): Promise<boolean>;
 }
 
 export type ExtractOutcome = "stored" | "fallback" | "already_extracted" | "source_missing";
@@ -54,7 +64,8 @@ export class InsightsRetryLater extends Error {
 export type InsightsLogger = Pick<FastifyBaseLogger, "info" | "warn" | "error">;
 
 export interface InsightExtractorOptions {
-  llm: LlmClient;
+  /** null when no API key is configured: every insight then uses the fallback record. */
+  llm: LlmClient | null;
   sessions: SessionReader;
   replies: ReplyReader;
   store: InsightStore;
@@ -90,7 +101,7 @@ export class InsightExtractor {
     const text = this.transcript(source);
     const hasSubscriberText = source.turns.some((t) => t.role === "subscriber" && t.text.trim() !== "");
     let model: ModelInsight | null = null;
-    if (hasSubscriberText) model = await this.askModel(text, { merchantId, ...ids });
+    if (hasSubscriberText && this.o.llm) model = await this.askModel(text, { merchantId, ...ids });
 
     const record = model
       ? this.toRecord(ref, model, source.knownNames)
@@ -104,9 +115,14 @@ export class InsightExtractor {
       subjectIds: ids,
       payload: { source: record.source, reason: record.reason },
     };
-    const inserted = await this.o.store.save(merchantId, record, async (tx) => {
-      await this.o.audit.append(entry, tx);
-    });
+    const inserted = await this.o.store.save(
+      merchantId,
+      record,
+      { subscriptionId: source.subscriptionId },
+      async (tx) => {
+        await this.o.audit.append(entry, tx);
+      },
+    );
     if (!inserted) return "already_extracted"; // lost a race with another worker
     if (used === "fallback") log.warn({ merchantId, ...ids }, "insight fallback used");
     return used;
@@ -114,9 +130,11 @@ export class InsightExtractor {
 
   /** Haiku with one regeneration on invalid output. null means "use the fallback". */
   private async askModel(text: string, ctx: object): Promise<ModelInsight | null> {
+    const llm = this.o.llm;
+    if (!llm) return null;
     for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       try {
-        return await this.o.llm.structured({
+        return await llm.structured({
           purpose: "classify",
           system: EXTRACT_SYSTEM,
           input: extractInput(text),

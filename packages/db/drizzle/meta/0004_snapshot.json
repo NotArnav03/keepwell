@@ -1,5 +1,5 @@
 {
-  "id": "b6373f91-545d-4815-b2af-679ba7e462b2",
+  "id": "2e6ab527-3852-42eb-b56e-8dee11d55895",
   "prevId": "cd97dfd0-1b8c-4481-881a-67128efbacda",
   "version": "7",
   "dialect": "postgresql",
@@ -2341,6 +2341,12 @@
           "primaryKey": false,
           "notNull": false
         },
+        "subscription_id": {
+          "name": "subscription_id",
+          "type": "uuid",
+          "primaryKey": false,
+          "notNull": false
+        },
         "source": {
           "name": "source",
           "type": "text",
@@ -2465,6 +2471,19 @@
           "tableTo": "sessions",
           "columnsFrom": [
             "session_id"
+          ],
+          "columnsTo": [
+            "id"
+          ],
+          "onDelete": "no action",
+          "onUpdate": "no action"
+        },
+        "insights_subscription_id_subscriptions_id_fk": {
+          "name": "insights_subscription_id_subscriptions_id_fk",
+          "tableFrom": "insights",
+          "tableTo": "subscriptions",
+          "columnsFrom": [
+            "subscription_id"
           ],
           "columnsTo": [
             "id"

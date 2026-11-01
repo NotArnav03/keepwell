@@ -4,7 +4,16 @@ import { LlmError } from "../agent/index.js";
 import { FakeLlmClient } from "../agent/fake-llm.js";
 import { InsightExtractor, InsightsRetryLater, type SourceText } from "./extractor.js";
 import { FakeInsightStore, FakeReplyReader, FakeSessionReader } from "./fakes.js";
-import { enqueueExtract, handleExtractJob, subscribeToSessionClosed } from "./jobs.js";
+import type { Db } from "@keepwell/db";
+import {
+  EXTRACT_JOB_OPTIONS,
+  REFRESH_VIEWS_CRON,
+  enqueueExtract,
+  handleExtractJob,
+  registerInsights,
+  subscribeToSessionClosed,
+  type InsightsJobs,
+} from "./jobs.js";
 
 const merchantId = uuidv7();
 const sessionId = uuidv7();
@@ -19,6 +28,7 @@ const source: SourceText = {
   ],
   knownNames: ["Maya"],
   knownReason: "price",
+  subscriptionId: uuidv7(),
 };
 
 const good = {
@@ -145,44 +155,79 @@ describe("InsightExtractor", () => {
   });
 });
 
+function fakeJobs() {
+  const sent: { name: string; payload: object; options: object | undefined }[] = [];
+  const workers: string[] = [];
+  const scheduled: { name: string; cron: string }[] = [];
+  const jobs: InsightsJobs = {
+    send: (name, payload, options) => {
+      sent.push({ name, payload, options });
+      return Promise.resolve("job-id");
+    },
+    work: (name) => {
+      workers.push(name);
+      return Promise.resolve();
+    },
+    schedule: (name, cron) => {
+      scheduled.push({ name, cron });
+      return Promise.resolve();
+    },
+  };
+  return { jobs, sent, workers, scheduled };
+}
+
 describe("jobs", () => {
-  it("session.closed enqueues one keyed extract job; a failing model never reaches the closer", async () => {
+  it("session.closed enqueues one extract job with the retry policy", async () => {
     const events = new FakeDomainEvents();
-    const sent: { name: string; payload: object; key: string }[] = [];
-    subscribeToSessionClosed(
-      events,
-      {
-        send: (name, payload, key) => {
-          sent.push({ name, payload, key });
-          return Promise.resolve();
-        },
-      },
-      log,
-    );
+    const { jobs, sent } = fakeJobs();
+    subscribeToSessionClosed(events, jobs, log);
     await events.emit({
       type: "session.closed",
       merchantId,
       payload: { sessionId, subscriptionId: uuidv7(), outcome: "cancelled", reason: "price" },
     });
-    expect(sent).toEqual([{ name: "insights.extract", payload: { sessionId }, key: sessionId }]);
+    expect(sent).toEqual([
+      { name: "insights.extract", payload: { sessionId }, options: EXTRACT_JOB_OPTIONS },
+    ]);
   });
 
-  it("enqueueExtract keys win-back replies by reply id and rejects ambiguous payloads", async () => {
-    const sent: string[] = [];
-    const queue = {
-      send: (_n: string, _p: object, key: string) => {
-        sent.push(key);
-        return Promise.resolve();
-      },
-    };
-    await enqueueExtract(queue, { replyId });
-    expect(sent).toEqual([replyId]);
+  it("enqueueExtract sends win-back replies and rejects ambiguous payloads", async () => {
+    const { jobs, sent } = fakeJobs();
+    await enqueueExtract(jobs, { replyId });
+    expect(sent[0]?.payload).toEqual({ replyId });
     await expect(handleExtractJob(setup().extractor, { sessionId, replyId })).rejects.toThrow();
+  });
+
+  it("registerInsights subscribes, registers both workers and schedules the hourly refresh", async () => {
+    const events = new FakeDomainEvents();
+    const { jobs, workers, scheduled } = fakeJobs();
+    const { extractor } = setup();
+    await registerInsights({ db: {} as Db, jobs, events, extractor, log });
+    expect(workers).toEqual(["insights.extract", "insights.refresh_views"]);
+    expect(scheduled).toEqual([{ name: "insights.refresh_views", cron: REFRESH_VIEWS_CRON }]);
+    // The handler is registered: a second registration under the same name would throw.
+    expect(() => events.on("session.closed", "insights.enqueue_extract", () => Promise.resolve())).toThrow();
   });
 
   it("handleExtractJob propagates retry-later so pg-boss backs off", async () => {
     const { llm, extractor } = setup();
     llm.script("classify", { error: new LlmError("unavailable", "down") });
     await expect(handleExtractJob(extractor, { sessionId })).rejects.toBeInstanceOf(InsightsRetryLater);
+  });
+});
+
+describe("without an API key", () => {
+  it("stores the fallback record and never needs a model", async () => {
+    const store = new FakeInsightStore();
+    const extractor = new InsightExtractor({
+      llm: null,
+      sessions: new FakeSessionReader().set(sessionId, source),
+      replies: new FakeReplyReader(),
+      store,
+      audit: new FakeAudit(),
+      log,
+    });
+    expect(await extractor.extract({ sessionId })).toBe("fallback");
+    expect(store.rows.get(`s:${sessionId}`)?.record.reason).toBe("price");
   });
 });

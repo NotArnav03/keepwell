@@ -60,7 +60,7 @@ export function overviewKpis(db: Db, merchantId: string, rangeInput: DateRange):
                   / nullif(count(*) filter (where outcome like 'saved\_%' or outcome = 'cancelled'), 0),
                 4)::float8 as save_rate
             from sessions
-            where closed_at >= ${lower(range)} and closed_at < ${upper(range)}`,
+            where not simulated and closed_at >= ${lower(range)} and closed_at < ${upper(range)}`,
       )
     ).map((r) => KpiRow.parse(r));
     if (!kpi) throw new Error("overview query returned no row");
@@ -110,8 +110,13 @@ export const InsightsResponse = z.object({
   byWeek: z.array(z.object({ week: z.iso.date(), count: Count })),
   byPlan: z.array(z.object({ plan: z.string(), count: Count })),
   byReason: z.array(z.object({ reason: ReasonCategory, count: Count })),
-  /** "none" for insights without a session outcome (win-back replies). */
-  byOutcome: z.array(z.object({ outcome: z.union([SessionOutcome, z.literal("none")]), count: Count })),
+  /** "winback_reply" for win-back insights; "none" for a session that closed without an outcome. */
+  byOutcome: z.array(
+    z.object({
+      outcome: z.union([SessionOutcome, z.literal("winback_reply"), z.literal("none")]),
+      count: Count,
+    }),
+  ),
   topQuotes: z.array(
     z.object({
       quote: z.string(),
@@ -138,13 +143,16 @@ const QuoteRow = z.object({
 async function groupCounts(tx: Tx, dimension: Dimension, range: DateRange) {
   const key =
     dimension === "week" ? sql`date_trunc('week', day)::date::text` : sql`${sql.identifier(dimension)}::text`;
-  const orderBy = dimension === "week" ? sql`1` : sql`2 desc, 1`;
+  // Ties break on the key in byte order, so the result doesn't depend on the database's collation.
+  const orderBy = dimension === "week" ? sql`g.key` : sql`g.count desc, g.key collate "C"`;
   const result = await rows(
     tx,
-    sql`select ${key} as key, sum(insight_count)::int as count
-        from insight_daily
-        where day between ${range.from}::date and ${range.to}::date
-        group by 1 order by ${orderBy}`,
+    sql`select * from (
+          select ${key} as key, sum(insight_count)::int as count
+          from insight_daily
+          where day between ${range.from}::date and ${range.to}::date
+          group by 1
+        ) g order by ${orderBy}`,
   );
   return result.map((r) => GroupRow.parse(r));
 }
@@ -169,8 +177,9 @@ export function insightsOverview(
       tx,
       sql`select quote, reason, sentiment,
                  to_char(created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"') as created_iso
-          from insights
+          from insights i
           where quote is not null
+            and not exists (select 1 from sessions s where s.id = i.session_id and s.simulated)
             and created_at >= ${lower(range)} and created_at < ${upper(range)}
           order by created_at desc, id desc
           limit ${quoteLimit}`,
