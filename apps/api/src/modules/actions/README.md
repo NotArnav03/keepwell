@@ -29,9 +29,25 @@ Worker methods, which the jobs call (pg-boss wiring comes with the jobs module):
 | `execute(merchantId, actionId)` | `action.execute` |
 | `due()` | due-work sweep: PENDING, and RETRY_WAIT whose wait is over |
 | `recoverStuck()` | due-work sweep |
-| `confirm(merchantId, actionId)` | `action.confirm`, and the webhook diff |
+| `confirm(merchantId, actionId)` | `action.confirm` |
+| `confirmFromSync(merchantId, snapshot)` | the `subscription.synced` handler: confirms from a webhook or sweep with no extra PayPal call |
+| `completeRevise(merchantId, actionId, cancelled)` | `GET /v1/revise/return` (`revise-return.ts`), where PayPal sends the buyer back |
+| `abandonStaleApprovals()` | due-work sweep: revises nobody approved within 3 h become ABANDONED |
 | `runDueResumes()` | `resume.due`: resumes whose time has come become activate Actions (idempotency key `resume:<id>`) |
 
-Supported now: `suspend`, `activate`, `cancel`. `revise`, `patch_price`, `refund`, `capture_outstanding` and `create_plan` come with #13; creating one today throws.
+## The types (`plans.ts`)
+
+How each type runs, and how its effect is read back from PayPal (ARCHITECTURE.md §6.1):
+
+| Type | Call | Already done when… | Retry safety |
+|---|---|---|---|
+| `suspend` / `activate` / `cancel` | `POST …/suspend` etc. | status is SUSPENDED / ACTIVE / CANCELLED | read-before-retry |
+| `revise` | `POST …/revise` → **AWAITING_BUYER** with `approveUrl` | `plan_id` is the target plan | read-before-retry; a re-run only makes a fresh link |
+| `patch_price` | `PATCH` the `fixed_price` (`null` = back to the plan price) | the next cycle's price (seen with `fields=plan`) is the target | read-before-retry, and the PATCH is idempotent anyway |
+| `refund` | `POST /v2/payments/captures/{id}/refund` | — | `PayPal-Request-Id` = Action id (spike Q1: a replay answers 200 with the first refund) |
+| `capture_outstanding` | `POST …/capture` | — | `PayPal-Request-Id` = Action id |
+| `create_plan` | `POST /v1/billing/plans` (no subscription) | — | `PayPal-Request-Id` = Action id |
+
+A revise is decided by PayPal's truth, never by the redirect. The buyer's return reads the subscription: the new plan means APPLIED then CONFIRMED, and a cancel with no change means ABANDONED. A buyer who approves and closes the tab is caught by the next sync (`confirmFromSync`). Refund, capture and create plan have no subscription state to wait for, so a 2xx under our request id goes straight to CONFIRMED.
 
 The tests run against a real Postgres (row-level security, advisory locks) and paypal-mock over HTTP: `KEEPWELL_TEST_DATABASE_URL`, or CI's database job.

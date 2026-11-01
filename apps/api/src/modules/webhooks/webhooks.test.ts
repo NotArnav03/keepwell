@@ -132,9 +132,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("webhook pipeline", { timeout: 
       });
     }
     events.on("subscription.synced", "actions.confirm", (event) =>
-      engine
-        .confirmFromSync(event.merchantId, event.payload.subscriptionId, event.payload.snapshot.status)
-        .then(() => {}),
+      engine.confirmFromSync(event.merchantId, event.payload.snapshot).then(() => {}),
     );
     await events.startWorker();
     await jobs.work("webhook.process", ({ webhookEventId }) =>

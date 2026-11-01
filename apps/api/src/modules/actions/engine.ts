@@ -9,15 +9,16 @@ import {
   type ActionError,
   type ActionOrigin,
   type ActionState,
-  type ActionType,
   type Actor,
   type Audit,
   type DomainEvents,
-  type PayPalSubscription,
-  type SubscriptionStatus,
+  type Money,
+  type SubscriptionSnapshot,
 } from "@keepwell/contracts";
 import { actions, scheduledResumes, subscriptions, type Db, type Tx } from "@keepwell/db";
-import type { MutationResult } from "../paypal/client.js";
+import { planFor, truthFromPayPal, truthFromSnapshot, type PayPalMutator, type RunContext } from "./plans.js";
+
+export type { PayPalMutator } from "./plans.js";
 
 // The action engine (ARCHITECTURE.md §6.4): every change to PayPal is an Action row moving through
 // ACTION_TRANSITIONS, and every move is audited and emitted in the same transaction.
@@ -31,16 +32,11 @@ import type { MutationResult } from "../paypal/client.js";
 //   AWAITING_BUYER Actions, and its pending resumes. An EXECUTING one holds the lock and finishes.
 // - Retry budget: 8 attempts over about 45 minutes, then FAILED.
 //
-// Jobs (action.execute, action.confirm, resume.due, the due-work sweep) call the worker methods
-// below. Revise, price patch, refund, capture and create_plan arrive with #13.
-
-/** What the engine needs from the PayPal gateway: reads, and the mutations it alone may call. */
-export interface PayPalMutator {
-  getSubscription(merchantId: string, paypalSubscriptionId: string): Promise<PayPalSubscription>;
-  suspend(merchantId: string, paypalSubscriptionId: string, reason: string): Promise<MutationResult>;
-  activate(merchantId: string, paypalSubscriptionId: string, reason: string): Promise<MutationResult>;
-  cancel(merchantId: string, paypalSubscriptionId: string, reason: string): Promise<MutationResult>;
-}
+// - A revise waits in AWAITING_BUYER on PayPal's approval page. The buyer's return
+//   (completeRevise), a sync showing the new plan, or expiry decides it.
+//
+// What each type calls, and how its effect is read back, is in plans.ts. Jobs (action.execute,
+// action.confirm, resume.due, the due-work sweep) call the worker methods below.
 
 export interface EngineLogger {
   info(obj: object, msg: string): void;
@@ -63,23 +59,21 @@ export interface ActionEngineOptions {
   executingLeaseMs?: number;
   /** APPLIED but not CONFIRMED by then means something is wrong: FAILED, and an alert. */
   confirmWithinMs?: number;
+  /** The API's public URL: a revise's return and cancel links point at /v1/revise/return. */
+  publicBaseUrl?: string;
+  /** A buyer who hasn't approved a revise by then won't: ABANDONED. PayPal's links last about 3 h. */
+  approvalExpiresMs?: number;
   random?: () => number;
 }
 
-export type ExecuteOutcome = "applied" | "retry_scheduled" | "failed" | "busy" | "skipped";
+export type ExecuteOutcome = "applied" | "awaiting_buyer" | "retry_scheduled" | "failed" | "busy" | "skipped";
 export type ConfirmOutcome = "confirmed" | "pending" | "failed" | "skipped";
+export type ReviseOutcome = "confirmed" | "abandoned" | "pending" | "skipped";
 
 type ActionRow = typeof actions.$inferSelect;
-type Mutation = "suspend" | "activate" | "cancel";
 
 const MINUTE = 60_000;
 const DEFAULT_RETRY_DELAYS_MS = [0.5, 1, 2, 4, 8, 15, 15].map((m) => m * MINUTE);
-const SUPPORTED = new Set<ActionType>(["suspend", "activate", "cancel"]);
-const TARGET: Record<Mutation, SubscriptionStatus> = {
-  suspend: "SUSPENDED",
-  activate: "ACTIVE",
-  cancel: "CANCELLED",
-};
 const SUPERSEDABLE: ActionState[] = ["PENDING", "RETRY_WAIT", "AWAITING_BUYER"];
 const ACTOR: Record<ActionOrigin, Actor> = {
   session: "subscriber",
@@ -91,7 +85,13 @@ const ACTOR: Record<ActionOrigin, Actor> = {
 };
 
 type PayPalOutcome =
-  | { ok: true; debugId: string | null; via: "call" | "read_before_retry" | "read_after_422" }
+  | {
+      ok: true;
+      debugId: string | null;
+      via: "call" | "read_before_retry" | "read_after_422";
+      result?: Record<string, unknown>;
+      approveUrl?: string;
+    }
   | { ok: false; error: ActionError; retryable: boolean; debugId: string | null };
 
 export class DbActionEngine implements ActionEngine<Tx> {
@@ -99,6 +99,8 @@ export class DbActionEngine implements ActionEngine<Tx> {
   private readonly retryDelaysMs: readonly number[];
   private readonly executingLeaseMs: number;
   private readonly confirmWithinMs: number;
+  private readonly approvalExpiresMs: number;
+  private readonly publicBaseUrl: string;
   private readonly random: () => number;
 
   constructor(private readonly o: ActionEngineOptions) {
@@ -106,6 +108,8 @@ export class DbActionEngine implements ActionEngine<Tx> {
     this.retryDelaysMs = o.retryDelaysMs ?? DEFAULT_RETRY_DELAYS_MS;
     this.executingLeaseMs = o.executingLeaseMs ?? 2 * MINUTE;
     this.confirmWithinMs = o.confirmWithinMs ?? 15 * MINUTE;
+    this.approvalExpiresMs = o.approvalExpiresMs ?? 3 * 60 * MINUTE;
+    this.publicBaseUrl = (o.publicBaseUrl ?? "http://localhost:3000").replace(/\/$/, "");
     this.random = o.random ?? Math.random;
   }
 
@@ -114,9 +118,6 @@ export class DbActionEngine implements ActionEngine<Tx> {
   async create(input: ActionCreateInput, tx?: Tx): Promise<Action> {
     if (!tx) return this.o.db.forMerchant(input.merchantId, (t) => this.create(input, t));
     const parsed = ActionCreateInput.parse(input);
-    if (!SUPPORTED.has(parsed.type)) {
-      throw new Error(`${parsed.type} Actions aren't supported yet (#13)`);
-    }
     if (parsed.idempotencyKey !== undefined) {
       const existing = await this.byKey(tx, parsed.merchantId, parsed.idempotencyKey);
       if (existing) return toAction(existing);
@@ -271,62 +272,129 @@ export class DbActionEngine implements ActionEngine<Tx> {
     return recovered;
   }
 
-  /** APPLIED → CONFIRMED once PayPal shows the target status; FAILED (with an alert) if it never does. */
+  /** APPLIED → CONFIRMED once PayPal shows the effect; FAILED (with an alert) if it never does. */
   async confirm(merchantId: string, actionId: string): Promise<ConfirmOutcome> {
     const [row] = await this.o.db.forMerchant(merchantId, (tx) =>
       tx.select().from(actions).where(eq(actions.id, actionId)),
     );
-    if (row?.state !== "APPLIED" || !isMutation(row.type)) return "skipped";
-    const target = TARGET[row.type];
-    const paypalId = await this.paypalSubscriptionId(merchantId, row.subscriptionId);
-    let status: SubscriptionStatus | null = null;
+    if (row?.state !== "APPLIED") return "skipped";
+    const { plan, params } = planFor(row.type, row.params);
+    if (!plan.isDone) return "skipped";
+    const ctx = await this.subscriptionContext(merchantId, row);
+    if (ctx.paypalSubscriptionId === null) return "skipped";
+    let done: boolean;
     try {
-      status = paypalId === null ? null : (await this.o.paypal.getSubscription(merchantId, paypalId)).status;
+      const truth = truthFromPayPal(
+        await this.o.paypal.getSubscription(merchantId, ctx.paypalSubscriptionId),
+      );
+      done = plan.isDone(truth, params, ctx);
     } catch (err) {
       // A failed read isn't evidence either way; the next confirm (or webhook) decides.
       this.o.log.warn({ err, actionId }, "confirm could not read PayPal");
       return "pending";
     }
     const tooLate = this.clock().getTime() - row.updatedAt.getTime() > this.confirmWithinMs;
-    if (status !== target && !tooLate) return "pending";
+    if (!done && !tooLate) return "pending";
     return this.o.db.forMerchant(merchantId, async (tx) => {
       const current = await this.locked(tx, actionId);
       if (current?.state !== "APPLIED") return "skipped";
-      if (status === target) {
+      if (done) {
         await this.move(tx, current, "CONFIRMED", {});
         return "confirmed";
       }
-      this.o.log.error({ actionId, merchantId, status }, "Action applied but PayPal never showed it");
+      this.o.log.error({ actionId, merchantId }, "Action applied but PayPal never showed it");
       await this.move(tx, current, "FAILED", {
-        error: { code: "NOT_CONFIRMED", message: `PayPal still shows ${status ?? "nothing"}` },
+        error: { code: "NOT_CONFIRMED", message: `PayPal never showed this ${current.type}` },
       });
       return "failed";
     });
   }
 
   /**
-   * A sync (webhook or reconciler) just saw this subscription's real status: APPLIED Actions whose
-   * target it is become CONFIRMED, with no extra PayPal call. Registered on subscription.synced.
+   * A sync (webhook or reconciler) just saw this subscription: APPLIED Actions whose effect it shows
+   * become CONFIRMED, and a revise still waiting on the buyer whose new plan it shows is done too
+   * (the buyer approved, then closed the tab). No extra PayPal call. Registered on subscription.synced.
    */
-  async confirmFromSync(
-    merchantId: string,
-    subscriptionId: string,
-    status: SubscriptionStatus,
-  ): Promise<string[]> {
+  async confirmFromSync(merchantId: string, snapshot: SubscriptionSnapshot): Promise<string[]> {
+    const truth = truthFromSnapshot(snapshot);
+    const planPrice = snapshot.price;
     return this.o.db.forMerchant(merchantId, async (tx) => {
-      const applied = await tx
+      const open = await tx
         .select()
         .from(actions)
-        .where(and(eq(actions.subscriptionId, subscriptionId), eq(actions.state, "APPLIED")))
+        .where(
+          and(eq(actions.subscriptionId, snapshot.id), inArray(actions.state, ["APPLIED", "AWAITING_BUYER"])),
+        )
         .for("update");
       const confirmed: string[] = [];
-      for (const row of applied) {
-        if (!isMutation(row.type) || TARGET[row.type] !== status) continue;
-        await this.move(tx, row, "CONFIRMED", {});
+      for (const row of open) {
+        const { plan, params } = planFor(row.type, row.params);
+        if (!plan.isDone?.(truth, params, { planPrice })) continue;
+        const applied =
+          row.state === "AWAITING_BUYER" ? await this.move(tx, row, "APPLIED", { error: null }) : row;
+        await this.move(tx, applied, "CONFIRMED", {});
         confirmed.push(row.id);
       }
       return confirmed;
     });
+  }
+
+  /**
+   * The buyer came back from PayPal's approval page (GET /v1/revise/return). PayPal is read, not the
+   * redirect: the new plan showing means done; a cancel with no new plan means ABANDONED; an approval
+   * PayPal hasn't caught up with yet stays AWAITING_BUYER for the next sync.
+   */
+  async completeRevise(
+    merchantId: string,
+    actionId: string,
+    buyerCancelled: boolean,
+  ): Promise<ReviseOutcome> {
+    const [row] = await this.o.db.forMerchant(merchantId, (tx) =>
+      tx.select().from(actions).where(eq(actions.id, actionId)),
+    );
+    if (row?.type !== "revise") return "skipped";
+    if (row.state === "CONFIRMED") return "confirmed";
+    if (row.state !== "AWAITING_BUYER") return "skipped";
+    const { plan, params } = planFor(row.type, row.params);
+    const ctx = await this.subscriptionContext(merchantId, row);
+    if (ctx.paypalSubscriptionId === null || !plan.isDone) return "skipped";
+    const truth = truthFromPayPal(await this.o.paypal.getSubscription(merchantId, ctx.paypalSubscriptionId));
+    const done = plan.isDone(truth, params, ctx);
+    if (!done && !buyerCancelled) return "pending";
+    return this.o.db.forMerchant(merchantId, async (tx) => {
+      const current = await this.locked(tx, actionId);
+      if (current?.state !== "AWAITING_BUYER")
+        return current?.state === "CONFIRMED" ? "confirmed" : "skipped";
+      if (done) {
+        const applied = await this.move(tx, current, "APPLIED", {
+          result: { via: "buyer_return" },
+          error: null,
+        });
+        await this.move(tx, applied, "CONFIRMED", {});
+        return "confirmed";
+      }
+      await this.move(tx, current, "ABANDONED", {
+        error: { code: "BUYER_CANCELLED", message: "The subscriber cancelled on PayPal's approval page" },
+      });
+      return "abandoned";
+    });
+  }
+
+  /** Revises whose approval link has expired: ABANDONED, unless PayPal shows the change after all. */
+  async abandonStaleApprovals(): Promise<string[]> {
+    const before = new Date(this.clock().getTime() - this.approvalExpiresMs);
+    const stale = await this.o.db.acrossMerchants((tx) =>
+      tx
+        .select({ id: actions.id, merchantId: actions.merchantId })
+        .from(actions)
+        .where(and(eq(actions.state, "AWAITING_BUYER"), lt(actions.updatedAt, before))),
+    );
+    const abandoned: string[] = [];
+    for (const action of stale) {
+      if ((await this.completeRevise(action.merchantId, action.id, true)) === "abandoned")
+        abandoned.push(action.id);
+    }
+    return abandoned;
   }
 
   /** Scheduled resumes whose time has come become activate Actions (the resume.due job). */
@@ -387,16 +455,19 @@ export class DbActionEngine implements ActionEngine<Tx> {
     if (!started) return "skipped";
     const { row, retry } = started;
 
-    const paypalId = await this.paypalSubscriptionId(merchantId, row.subscriptionId);
+    const ctx = await this.subscriptionContext(merchantId, row);
     const outcome: PayPalOutcome =
-      paypalId === null || !isMutation(row.type)
+      ctx.paypalSubscriptionId === null && row.type !== "create_plan"
         ? {
             ok: false,
-            error: { code: "UNSUPPORTED", message: `No way to run ${row.type}` },
+            error: {
+              code: "NO_SUBSCRIPTION",
+              message: `Subscription ${row.subscriptionId ?? "?"} not found`,
+            },
             retryable: false,
             debugId: null,
           }
-        : await this.callPayPal(merchantId, row.type, paypalId, row.params, retry);
+        : await this.callPayPal(row, ctx, retry);
 
     return this.o.db.forMerchant(merchantId, async (tx) => {
       const current = await this.locked(tx, actionId);
@@ -406,13 +477,25 @@ export class DbActionEngine implements ActionEngine<Tx> {
       const debugIds =
         outcome.debugId === null ? current.paypalDebugIds : [...current.paypalDebugIds, outcome.debugId];
 
-      if (outcome.ok) {
-        await this.move(tx, current, "APPLIED", {
+      if (outcome.ok && outcome.approveUrl !== undefined) {
+        // A revise: PayPal changes nothing until the buyer approves on this link.
+        await this.move(tx, current, "AWAITING_BUYER", {
           paypalDebugIds: debugIds,
-          result: { via: outcome.via },
+          approveUrl: outcome.approveUrl,
+          error: null,
+        });
+        return "awaiting_buyer";
+      }
+      if (outcome.ok) {
+        const applied = await this.move(tx, current, "APPLIED", {
+          paypalDebugIds: debugIds,
+          result: { via: outcome.via, ...outcome.result },
           error: null,
         });
         if (current.type === "suspend") await this.settleResumes(tx, current.id, "scheduled");
+        // Refund, capture and create plan: a 2xx under our PayPal-Request-Id is final.
+        if (planFor(current.type, current.params).plan.confirmsOnApply)
+          await this.move(tx, applied, "CONFIRMED", {});
         return "applied";
       }
       if (outcome.retryable && current.attempts <= this.retryDelaysMs.length) {
@@ -437,30 +520,30 @@ export class DbActionEngine implements ActionEngine<Tx> {
     });
   }
 
-  private async callPayPal(
-    merchantId: string,
-    type: Mutation,
-    paypalId: string,
-    params: unknown,
-    retry: boolean,
-  ): Promise<PayPalOutcome> {
-    const target = TARGET[type];
-    const reason = (params as { reason: string }).reason;
+  private async callPayPal(row: ActionRow, ctx: RunContext, retry: boolean): Promise<PayPalOutcome> {
+    const { plan, params } = planFor(row.type, row.params);
+    const paypalId = ctx.paypalSubscriptionId;
+    const readBack = async () =>
+      plan.isDone !== null && paypalId !== null
+        ? plan.isDone(
+            truthFromPayPal(await this.o.paypal.getSubscription(ctx.merchantId, paypalId)),
+            params,
+            ctx,
+          )
+        : false;
     try {
-      if (retry) {
-        // Read-before-retry (§6.1): the earlier attempt may have worked and lost its response.
-        const current = await this.o.paypal.getSubscription(merchantId, paypalId);
-        if (current.status === target) return { ok: true, debugId: null, via: "read_before_retry" };
-      }
-      const { debugId } = await this.o.paypal[type](merchantId, paypalId, reason);
-      return { ok: true, debugId, via: "call" };
+      // Read-before-retry (§6.1): the earlier attempt may have worked and lost its response. Types
+      // with no read-back rely on PayPal-Request-Id instead.
+      if (retry && (await readBack())) return { ok: true, debugId: null, via: "read_before_retry" };
+      const result = await plan.run(this.o.paypal, ctx, params);
+      return result.kind === "awaiting_buyer"
+        ? { ok: true, debugId: result.debugId, via: "call", approveUrl: result.approveUrl }
+        : { ok: true, debugId: result.debugId, via: "call", ...(result.result && { result: result.result }) };
     } catch (err) {
       if (!(err instanceof PayPalGatewayError)) throw err;
-      if (err.kind === "unprocessable") {
-        // "Status invalid" may mean it's already there, e.g. a cancel that already happened.
-        const current = await this.o.paypal.getSubscription(merchantId, paypalId).catch(() => null);
-        if (current?.status === target)
-          return { ok: true, debugId: err.details.debugId, via: "read_after_422" };
+      // "Status invalid" may mean it's already there, e.g. a cancel that already happened.
+      if (err.kind === "unprocessable" && (await readBack().catch(() => false))) {
+        return { ok: true, debugId: err.details.debugId, via: "read_after_422" };
       }
       return {
         ok: false,
@@ -509,7 +592,9 @@ export class DbActionEngine implements ActionEngine<Tx> {
     tx: Tx,
     row: ActionRow,
     to: ActionState,
-    patch: Partial<Pick<ActionRow, "attempts" | "nextAttemptAt" | "paypalDebugIds" | "result" | "error">>,
+    patch: Partial<
+      Pick<ActionRow, "attempts" | "nextAttemptAt" | "paypalDebugIds" | "result" | "error" | "approveUrl">
+    >,
   ): Promise<ActionRow> {
     if (!canTransition(row.state, to)) throw new Error(`Illegal Action transition ${row.state} → ${to}`);
     const [updated] = await tx
@@ -575,18 +660,24 @@ export class DbActionEngine implements ActionEngine<Tx> {
     return row;
   }
 
-  private async paypalSubscriptionId(
-    merchantId: string,
-    subscriptionId: string | null,
-  ): Promise<string | null> {
-    if (subscriptionId === null) return null;
-    const [row] = await this.o.db.forMerchant(merchantId, (tx) =>
+  /** What running this Action needs to know about its subscription, and where a revise returns. */
+  private async subscriptionContext(merchantId: string, row: ActionRow): Promise<RunContext> {
+    const returnUrl = `${this.publicBaseUrl}/v1/revise/return?action=${row.id}`;
+    const base = { merchantId, actionId: row.id, returnUrl, cancelUrl: `${returnUrl}&cancelled=1` };
+    if (row.subscriptionId === null) return { ...base, paypalSubscriptionId: null, planPrice: null };
+    const subscriptionId = row.subscriptionId;
+    const [sub] = await this.o.db.forMerchant(merchantId, (tx) =>
       tx
-        .select({ id: subscriptions.paypalSubscriptionId })
+        .select({
+          paypalId: subscriptions.paypalSubscriptionId,
+          priceValue: subscriptions.priceValue,
+          priceCurrency: subscriptions.priceCurrency,
+        })
         .from(subscriptions)
         .where(eq(subscriptions.id, subscriptionId)),
     );
-    return row?.id ?? null;
+    const planPrice: Money | null = sub ? { value: sub.priceValue, currency: sub.priceCurrency } : null;
+    return { ...base, paypalSubscriptionId: sub?.paypalId ?? null, planPrice };
   }
 
   /** A session-level advisory lock on its own connection, or null when someone else holds it. */
@@ -618,10 +709,6 @@ export class DbActionEngine implements ActionEngine<Tx> {
       },
     };
   }
-}
-
-function isMutation(type: ActionType): type is Mutation {
-  return type === "suspend" || type === "activate" || type === "cancel";
 }
 
 function resumeStatusFor(suspendState: ActionState): "waiting" | "scheduled" | "cancelled" {
