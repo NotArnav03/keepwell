@@ -1,0 +1,53 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/billing/subscriptions",
+    "headers": {
+      "paypal-request-id": "keepwell-spike-subscription-1793530540994"
+    },
+    "body": {
+      "plan_id": "P-4PE44868E4826415MNLTRVKQ",
+      "custom_id": "keepwell-spike",
+      "application_context": {
+        "return_url": "https://example.com/?keepwell-spike=approved",
+        "cancel_url": "https://example.com/?keepwell-spike=cancelled",
+        "user_action": "SUBSCRIBE_NOW"
+      }
+    }
+  },
+  "response": {
+    "status": 201,
+    "debugId": "f2071205fd6fa",
+    "body": {
+      "status": "APPROVAL_PENDING",
+      "status_update_time": "2026-11-01T10:55:40Z",
+      "id": "I-KN5LRF5EU8E3",
+      "plan_id": "P-4PE44868E4826415MNLTRVKQ",
+      "start_time": "2026-11-01T10:55:40Z",
+      "quantity": "1",
+      "subscriber": {
+        "tenant": "PAYPAL"
+      },
+      "create_time": "2026-11-01T10:55:40Z",
+      "custom_id": "keepwell-spike",
+      "plan_overridden": false,
+      "links": [
+        {
+          "href": "https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=REDACTED",
+          "rel": "approve",
+          "method": "GET"
+        },
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-KN5LRF5EU8E3",
+          "rel": "edit",
+          "method": "PATCH"
+        },
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-KN5LRF5EU8E3",
+          "rel": "self",
+          "method": "GET"
+        }
+      ]
+    }
+  }
+}

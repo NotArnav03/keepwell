@@ -68,6 +68,8 @@ export class PayPalState {
   private tokens = new Map<string, { merchantId: string; expiresAt: number }>();
   private revisions = new Map<string, PendingRevision>();
   private signups = new Map<string, PendingSignup>();
+  /** next_billing_time of each suspended subscription: PayPal hides it until activation (Q2). */
+  private suspendedBilling = new Map<string, string>();
 
   constructor(
     fixtures: MerchantFixture[],
@@ -97,6 +99,7 @@ export class PayPalState {
     this.tokens.clear();
     this.revisions.clear();
     this.signups.clear();
+    this.suspendedBilling.clear();
   }
 
   // ---------- OAuth ----------
@@ -256,18 +259,27 @@ export class PayPalState {
   suspend(merchantId: string, id: string): void {
     const subscription = this.getSubscription(merchantId, id);
     requireStatus(subscription, ["ACTIVE"], "suspend");
+    // Spike Q2: a SUSPENDED subscription has no next_billing_time; activation brings it back.
+    const billing = subscription.billing_info;
+    if (billing?.next_billing_time !== undefined) {
+      this.suspendedBilling.set(id, billing.next_billing_time);
+      delete billing.next_billing_time;
+    }
     this.setStatus(merchantId, subscription, "SUSPENDED");
   }
 
   activate(merchantId: string, id: string): void {
     const subscription = this.getSubscription(merchantId, id);
     requireStatus(subscription, ["SUSPENDED"], "activate");
-    // Assumed (spike Q2): billing resumes on the original anchor; a date already passed moves
-    // forward whole intervals, so nothing is charged at the moment of activation.
+    // Spike Q2: a short pause keeps the original next_billing_time and charges nothing.
+    // Assumed until the long-pause run: a date passed while suspended moves forward whole
+    // intervals, so nothing is charged at the moment of activation either.
     const billing = subscription.billing_info;
-    if (billing?.next_billing_time !== undefined) {
+    const anchor = this.suspendedBilling.get(id) ?? billing?.last_payment?.time;
+    this.suspendedBilling.delete(id);
+    if (billing && anchor !== undefined) {
       const { interval_unit, interval_count } = this.cycleOf(merchantId, subscription).frequency;
-      let next = new Date(billing.next_billing_time);
+      let next = new Date(anchor);
       while (next <= this.clock()) next = addInterval(next, interval_unit, interval_count);
       billing.next_billing_time = paypalTime(next);
     }
@@ -278,6 +290,7 @@ export class PayPalState {
     const subscription = this.getSubscription(merchantId, id);
     requireStatus(subscription, ["ACTIVE", "SUSPENDED"], "cancel");
     if (subscription.billing_info) delete subscription.billing_info.next_billing_time;
+    this.suspendedBilling.delete(id);
     this.setStatus(merchantId, subscription, "CANCELLED");
   }
 

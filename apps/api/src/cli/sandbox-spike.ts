@@ -184,12 +184,10 @@ function subscriptionId(): string {
 const steps: Record<Step, () => Promise<void>> = {
   /** A $1.00/day plan (made once), then a new subscription for the buyer to approve. */
   async setup() {
-    if (!(await paypal.checkAuth(MERCHANT)))
-      throw new Error("PayPal OAuth failed: check the sandbox app credentials");
+    // The first call fetches the token: a refusal surfaces with PayPal's reason and debug id.
+    const plans = await paypal.listPlans(MERCHANT);
     out("OAuth ok");
-    const existing = (await paypal.listPlans(MERCHANT)).find(
-      (p) => p.name === PLAN_NAME && p.status === "ACTIVE",
-    );
+    const existing = plans.find((p) => p.name === PLAN_NAME && p.status === "ACTIVE");
     let planId = existing?.id;
     if (!planId) {
       const product = await paypal.createProduct(MERCHANT, {

@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/billing/subscriptions/I-KN5LRF5EU8E3/activate",
+    "headers": {},
+    "body": {
+      "reason": "Keepwell spike Q2: resume"
+    }
+  },
+  "response": {
+    "status": 204,
+    "debugId": "f8058092c730f",
+    "body": null
+  }
+}

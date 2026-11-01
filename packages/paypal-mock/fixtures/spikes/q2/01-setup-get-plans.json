@@ -1,0 +1,25 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/billing/plans?page_size=20&page=1&total_required=true",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "debugId": "f9687522e5bf8",
+    "body": {
+      "plans": [],
+      "total_items": 0,
+      "total_pages": 1,
+      "links": [
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/plans?page_size=20&page=1",
+          "rel": "self",
+          "method": "GET",
+          "encType": "application/json"
+        }
+      ]
+    }
+  }
+}

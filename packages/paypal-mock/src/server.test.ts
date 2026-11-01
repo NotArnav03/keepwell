@@ -126,6 +126,16 @@ describe("subscription status changes", () => {
     );
   });
 
+  it("hides next_billing_time while suspended and brings the same one back on activation (spike Q2)", async () => {
+    const billing = async () => (await subscription(MAYA))?.billing_info as Record<string, unknown>;
+    const before = (await billing()).next_billing_time;
+    expect(before).toBeDefined();
+    await call("POST", `/v1/billing/subscriptions/${MAYA}/suspend`, { reason: "Pause" });
+    expect((await billing()).next_billing_time).toBeUndefined();
+    await call("POST", `/v1/billing/subscriptions/${MAYA}/activate`, { reason: "Back" });
+    expect((await billing()).next_billing_time).toBe(before);
+  });
+
   it("creates a subscription that waits for the buyer, then charges the first cycle on approval", async () => {
     const created = await call("POST", "/v1/billing/subscriptions", {
       plan_id: "P-PANTRY-STANDARD",

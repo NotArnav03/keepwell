@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/catalogs/products",
+    "headers": {
+      "paypal-request-id": "keepwell-spike-product-1"
+    },
+    "body": {
+      "name": "Keepwell spike",
+      "type": "SERVICE"
+    }
+  },
+  "response": {
+    "status": 201,
+    "debugId": "f37888205d8a7",
+    "body": {
+      "id": "PROD-42L79598JT9734202",
+      "name": "Keepwell spike",
+      "type": "SERVICE",
+      "create_time": "2026-11-01T10:55:38Z",
+      "update_time": "2026-11-01T10:55:38Z",
+      "links": [
+        {
+          "href": "https://api.sandbox.paypal.com/v1/catalogs/products/PROD-42L79598JT9734202",
+          "rel": "self",
+          "method": "GET"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/catalogs/products/PROD-42L79598JT9734202",
+          "rel": "edit",
+          "method": "PATCH"
+        }
+      ]
+    }
+  }
+}
