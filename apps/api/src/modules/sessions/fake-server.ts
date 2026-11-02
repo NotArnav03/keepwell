@@ -133,9 +133,12 @@ app.post("/fake-paypal/approve/:actionId", async (request, reply) => {
   const { decision } = z.object({ decision: z.enum(["approve", "cancel"]) }).parse(request.query);
   const moved = await move(actionId, decision === "approve" ? "APPLIED" : "ABANDONED");
   if (moved && decision === "approve") later(actionId, 5000, "CONFIRMED");
+  // Like the real /v1/revise/return page (actions/revise-return.ts): tell the widget, then close.
+  const outcome = decision === "approve" ? "pending" : "abandoned";
+  const data = JSON.stringify({ type: "keepwell.revise", actionId, outcome });
   return reply.type("text/html; charset=utf-8")
     .send(`<!doctype html><p>${moved ? "Done" : "Nothing to do"}. You can close this window.</p>
-<script>window.close()</script>`);
+<script>if (window.opener) { window.opener.postMessage(${data}, "*"); window.close(); }</script>`);
 });
 
 app.get("/", () => ({

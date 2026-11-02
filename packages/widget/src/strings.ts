@@ -17,6 +17,10 @@ export const en = {
   applying: "Applying the change in PayPal…",
   awaitingPayPal: "Waiting for your approval in PayPal…",
   openPayPal: "Open PayPal",
+  openPayPalAgain: "Open PayPal again",
+  approvalClosed: "PayPal's window was closed before you approved. Nothing has changed yet.",
+  approvalAbandoned:
+    "You didn't approve the change in PayPal, so nothing was changed. You can cancel or keep your plan.",
   offerFailed: "That change didn't go through, so nothing was changed. You can cancel or keep your plan.",
   cancelFailed: "We couldn't cancel automatically. You can cancel directly in PayPal:",
   cancelInPayPal: "Cancel in PayPal",
