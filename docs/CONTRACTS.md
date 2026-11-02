@@ -376,7 +376,9 @@ These are TypeScript interfaces, so modules can be mocked before they exist.
 // As implemented in packages/contracts/src/platform/interfaces.ts
 interface PayPalGateway {
   getSubscription(merchantId: string, paypalSubscriptionId: string): Promise<PayPalSubscription>;
-  listSubscriptions(merchantId: string, q: { statusUpdatedAfter?: string; planIds?: string[]; page?: number }): Promise<Page<PayPalSubscription>>;
+  listSubscriptions(merchantId: string, q: { statusUpdatedAfter?: string; planIds?: string[]; page?: number }): Promise<Page<PayPalSubscriptionSummary>>;
+  // Summaries ({ id, status, create_time? }) and null totals: the sandbox's list has nothing more
+  // (fixtures/spikes/gateway). getSubscription for the rest; page on until a page comes back empty.
   // mutations are NOT exposed here; use ActionEngine. Errors: PayPalGatewayError.
 }
 interface ActionEngine {

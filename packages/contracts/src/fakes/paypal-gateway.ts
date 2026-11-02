@@ -1,5 +1,10 @@
 import type { ListSubscriptionsQuery, PayPalGateway } from "../platform/interfaces.js";
-import { PayPalGatewayError, PayPalSubscription, type Page } from "../platform/paypal.js";
+import {
+  PayPalGatewayError,
+  PayPalSubscription,
+  type Page,
+  type PayPalSubscriptionSummary,
+} from "../platform/paypal.js";
 
 const PAGE_SIZE = 20;
 
@@ -40,7 +45,11 @@ export class FakePayPalGateway implements PayPalGateway {
     });
   }
 
-  listSubscriptions(merchantId: string, query: ListSubscriptionsQuery): Promise<Page<PayPalSubscription>> {
+  /** Like the sandbox: summaries only, and no totals. */
+  listSubscriptions(
+    merchantId: string,
+    query: ListSubscriptionsQuery,
+  ): Promise<Page<PayPalSubscriptionSummary>> {
     return new Promise((resolve) => {
       this.calls.push({ method: "listSubscriptions", merchantId });
       this.throwPendingError();
@@ -55,12 +64,15 @@ export class FakePayPalGateway implements PayPalGateway {
             (sub.status_update_time !== undefined && Date.parse(sub.status_update_time) > after),
         );
       const page = query.page ?? 1;
-      const totalPages = Math.max(1, Math.ceil(matching.length / PAGE_SIZE));
       resolve({
-        items: structuredClone(matching.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)),
+        items: matching.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((sub) => ({
+          id: sub.id,
+          status: sub.status,
+          ...(sub.create_time !== undefined && { create_time: sub.create_time }),
+        })),
         page,
-        totalItems: matching.length,
-        totalPages,
+        totalItems: null,
+        totalPages: null,
       });
     });
   }

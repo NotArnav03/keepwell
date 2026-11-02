@@ -27,6 +27,7 @@ let testDb: TestDatabase;
 let db: Db;
 let mock: PayPalMock;
 let sync: SubscriptionSync;
+let paypal: PayPalClient;
 let engine: DbActionEngine;
 let reconciler: Reconciler;
 let now: Date;
@@ -57,7 +58,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
       tx.insert(merchants).values({ id: M, slug: "pantry-plan", name: "Pantry Plan" }),
     );
     mock = createPayPalMock();
-    const paypal = new PayPalClient({
+    paypal = new PayPalClient({
       baseUrl: await mock.listen(),
       credentials: singleAppCredentials(PANTRY_PLAN_CREDENTIALS),
       log: quiet,
@@ -107,6 +108,30 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
     const second = await reconciler.sweep(M);
     expect(second).toBe(1);
     expect((await ours("lena"))?.status).toBe("SUSPENDED");
+  });
+
+  it("pages on until PayPal sends an empty page, since its list has no totals", async () => {
+    // The sandbox's list sends no total_pages (fixtures/spikes/gateway). Pages of 5 here, so the
+    // 12 subscriptions take three pages and a fourth, empty one ends the sweep.
+    const all = (await paypal.listSubscriptions(M, {})).items;
+    const requested: number[] = [];
+    const paged = new Reconciler({
+      db,
+      paypal: {
+        listSubscriptions: (_merchantId, { page = 1 }) => {
+          requested.push(page);
+          const items = all.slice((page - 1) * 5, page * 5);
+          return Promise.resolve({ items, page, totalItems: null, totalPages: null });
+        },
+      },
+      sync,
+      engine,
+      jobs: { send: () => Promise.resolve("job") },
+      log: quiet,
+      clock: () => now,
+    });
+    expect(await paged.sweep(M)).toBe(12);
+    expect(requested).toEqual([1, 2, 3, 4]);
   });
 
   it("reports drift a missed webhook left, fixes it, and finds none the next night", async () => {

@@ -1,0 +1,36 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/billing/subscriptions?plan_ids=P-4PE44868E4826415MNLTRVKQ&page_size=20&page=1",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "debugId": "f263626511847",
+    "body": {
+      "subscriptions": [
+        {
+          "status": "ACTIVE",
+          "id": "I-KN5LRF5EU8E3",
+          "auto_renewal": false,
+          "create_time": "2026-11-01T11:09:31Z",
+          "links": [
+            {
+              "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-KN5LRF5EU8E3",
+              "rel": "self",
+              "method": "GET"
+            }
+          ]
+        }
+      ],
+      "links": [
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions?plan_ids=P-4PE44868E4826415MNLTRVKQ&page=1&page_size=20",
+          "rel": "self",
+          "method": "GET"
+        }
+      ]
+    }
+  }
+}

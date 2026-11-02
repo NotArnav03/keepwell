@@ -186,8 +186,8 @@ export class PayPalState {
   }
 
   /**
-   * GET /v1/billing/subscriptions, as ARCHITECTURE.md §6.3 uses it for the reconciler sweep.
-   * Assumed shape until the sandbox confirms the list endpoint and its filters.
+   * GET /v1/billing/subscriptions, as ARCHITECTURE.md §6.3 uses it for the reconciler sweep. The
+   * sandbox honours plan_ids, statuses and status_updated_after (fixtures/spikes/gateway).
    */
   listSubscriptions(
     merchantId: string,

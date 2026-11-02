@@ -2,6 +2,7 @@ import { z } from "zod";
 import {
   PayPalGatewayError,
   PayPalSubscription,
+  PayPalSubscriptionSummary,
   type ListSubscriptionsQuery,
   type Page,
   type PayPalErrorKind,
@@ -75,8 +76,9 @@ const ErrorBody = z.looseObject({
   details: z.array(z.looseObject({ issue: z.string().optional() })).optional(),
 });
 
+// The sandbox sends no totals here (fixtures/spikes/gateway); they stay optional in case it starts to.
 const SubscriptionList = z.looseObject({
-  subscriptions: z.array(PayPalSubscription).default([]),
+  subscriptions: z.array(PayPalSubscriptionSummary).default([]),
   total_items: z.number().int().optional(),
   total_pages: z.number().int().optional(),
 });
@@ -193,7 +195,7 @@ export class PayPalClient implements PayPalGateway {
   async listSubscriptions(
     merchantId: string,
     query: ListSubscriptionsQuery,
-  ): Promise<Page<PayPalSubscription>> {
+  ): Promise<Page<PayPalSubscriptionSummary>> {
     const page = query.page ?? 1;
     const { body } = await this.request(merchantId, {
       method: "GET",

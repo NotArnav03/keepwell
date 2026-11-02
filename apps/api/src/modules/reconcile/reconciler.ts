@@ -1,5 +1,5 @@
 import { and, eq, gt, gte, inArray, isNull, lt, ne, notExists, or, sql } from "drizzle-orm";
-import type { ListSubscriptionsQuery, Page, PayPalSubscription } from "@keepwell/contracts";
+import type { ListSubscriptionsQuery, Page, PayPalSubscriptionSummary } from "@keepwell/contracts";
 import { actions, driftReports, merchants, subscriptions, type Db } from "@keepwell/db";
 import type { DbActionEngine } from "../actions/engine.js";
 import type { Jobs } from "../jobs/jobs.js";
@@ -18,7 +18,10 @@ import type { SubscriptionSync } from "./sync.js";
 // doubles the work.
 
 export interface ReconcilePayPal {
-  listSubscriptions(merchantId: string, query: ListSubscriptionsQuery): Promise<Page<PayPalSubscription>>;
+  listSubscriptions(
+    merchantId: string,
+    query: ListSubscriptionsQuery,
+  ): Promise<Page<PayPalSubscriptionSummary>>;
 }
 
 export interface ReconcilerLogger {
@@ -130,7 +133,8 @@ export class Reconciler {
         await this.o.sync.sync(merchantId, subscription.id);
         synced++;
       }
-      if (result.items.length === 0 || page >= (result.totalPages ?? page)) break;
+      // PayPal's list has no totals, so page on until a page comes back empty.
+      if (result.items.length === 0 || (result.totalPages !== null && page >= result.totalPages)) break;
     }
     await this.o.db.forMerchant(merchantId, (tx) =>
       tx.update(merchants).set({ lastSweepAt: startedAt }).where(eq(merchants.id, merchantId)),

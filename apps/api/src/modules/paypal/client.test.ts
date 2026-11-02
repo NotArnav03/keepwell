@@ -1,4 +1,7 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { z } from "zod";
 import { PayPalGatewayError } from "@keepwell/contracts";
 import { PANTRY_PLAN } from "@keepwell/contracts/fakes";
 import {
@@ -17,6 +20,9 @@ import { TokenBuckets } from "./rate-limit.js";
 const M = PANTRY_PLAN.merchantId;
 const MAYA = fixtureSubscriptionId("maya");
 const ANA = fixtureSubscriptionId("ana");
+const SANDBOX_LIST =
+  "../../../../../packages/paypal-mock/fixtures/spikes/gateway/01-list-get-subscriptions.json";
+const Recorded = z.object({ response: z.object({ status: z.number(), body: z.unknown() }) });
 
 let mock: PayPalMock;
 let baseUrl: string;
@@ -143,13 +149,37 @@ describe("PayPalClient", () => {
   it("pages subscriptions and lists transactions", async () => {
     const paypal = client();
     const page = await paypal.listSubscriptions(M, { page: 1 });
-    expect(page).toMatchObject({ page: 1, totalItems: 12, totalPages: 1 });
+    expect(page).toMatchObject({ page: 1, totalItems: null, totalPages: null });
+    expect(page.items).toHaveLength(12);
     const transactions = await paypal.listTransactions(M, MAYA, {
       start: "2025-01-01T00:00:00Z",
       end: "2026-12-31T00:00:00Z",
     });
     expect(transactions).toHaveLength(8);
     expect(transactions[0]?.id).toMatch(/^[A-Z0-9]{17}$/);
+  });
+});
+
+describe("PayPalClient against recorded sandbox answers", () => {
+  it("reads the subscription list as the sandbox sends it: summaries, no totals", async () => {
+    const recorded = Recorded.parse(
+      JSON.parse(readFileSync(fileURLToPath(new URL(SANDBOX_LIST, import.meta.url)), "utf8")),
+    );
+    const paypal = client({
+      // OAuth still goes to the mock; the list answer is the sandbox's own.
+      fetch: (input, init) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+        if (!url.includes("/v1/billing/subscriptions?")) return fetch(input, init);
+        return Promise.resolve(Response.json(recorded.response.body, { status: recorded.response.status }));
+      },
+    });
+    const page = await paypal.listSubscriptions(M, { planIds: ["P-4PE44868E4826415MNLTRVKQ"] });
+    expect(page).toEqual({
+      items: [expect.objectContaining({ id: "I-KN5LRF5EU8E3", status: "ACTIVE" })],
+      page: 1,
+      totalItems: null,
+      totalPages: null,
+    });
   });
 });
 
