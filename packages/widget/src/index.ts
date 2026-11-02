@@ -59,6 +59,7 @@ export function open(config: WidgetConfig, onClosed?: () => void): () => void {
       autopayUrl: config.autopayUrl,
       supportContact: config.supportContact,
       locale: config.locale,
+      apiOrigin: new URL(config.apiBase).origin,
     },
     onClosed,
   );

@@ -4,6 +4,7 @@ import type { CreateSessionResponse, SessionStreamEvent } from "@keepwell/contra
 import { act } from "preact/test-utils";
 import { mount } from "./mount.js";
 import { ApiUnreachable, type Transport } from "./transport.js";
+import type { PopupHandle } from "./widget.js";
 
 const session: CreateSessionResponse = {
   sessionId: "0199a1b2-c3d4-7e5f-8a6b-000000000099",
@@ -70,7 +71,9 @@ afterEach(() => {
   unmount = null;
 });
 
-async function open(transport: Transport, openPopup?: (url: string) => boolean) {
+const API_ORIGIN = "http://localhost:3000";
+
+async function open(transport: Transport, openPopup?: (url: string) => PopupHandle | null) {
   await act(() => {
     unmount = mount({
       transport,
@@ -78,6 +81,7 @@ async function open(transport: Transport, openPopup?: (url: string) => boolean) 
       supportContact: "help@pantryplan.example",
       locale: "en-US",
       openPopup,
+      apiOrigin: API_ORIGIN,
     });
   });
   await flush();
@@ -166,11 +170,13 @@ describe("widget", () => {
     expect(button("Cancel now").getAttribute("href")).toBe(AUTOPAY);
   });
 
-  it("opens PayPal's approval page for a downgrade, with a link if the popup is blocked", async () => {
-    const { transport, emit } = fakeTransport();
-    const popup = vi.fn(() => false);
-    await open(transport, popup);
-    await emit({
+  const APPROVE_URL = "https://www.sandbox.paypal.com/approve?ba_token=BA-1";
+
+  /** Accepts a downgrade, then has PayPal's approval page opened for it (popup per `openPopup`). */
+  async function awaitApproval(openPopup: (url: string) => PopupHandle | null) {
+    const t = fakeTransport();
+    await open(t.transport, openPopup);
+    await t.emit({
       type: "offer.presented",
       offer: {
         id: "offer-downgrade",
@@ -186,19 +192,74 @@ describe("widget", () => {
     expect(text()).toContain("PayPal will ask you to approve the change.");
     await click("Yes, do that");
     await flush();
-    const approveUrl = "https://www.sandbox.paypal.com/approve?ba_token=BA-1";
-    await emit({
-      type: "action.update",
-      actionId: "a1",
-      actionType: "revise",
-      state: "AWAITING_BUYER",
-      approveUrl,
-      error: null,
-    });
+    const update = (state: "AWAITING_BUYER" | "ABANDONED") =>
+      t.emit({
+        type: "action.update",
+        actionId: "a1",
+        actionType: "revise",
+        state,
+        approveUrl: APPROVE_URL,
+        error: null,
+      });
+    await update("AWAITING_BUYER");
     await flush();
+    return { ...t, update };
+  }
+
+  const messageFrom = (origin: string, data: unknown) =>
+    act(() => {
+      window.dispatchEvent(new MessageEvent("message", { origin, data }));
+    });
+
+  it("opens PayPal's approval page for a downgrade, with a link if the popup is blocked", async () => {
+    const popup = vi.fn((_url: string) => null);
+    await awaitApproval(popup);
     expect(popup).toHaveBeenCalledTimes(1);
-    expect(popup).toHaveBeenCalledWith(approveUrl);
-    expect(button("Open PayPal").getAttribute("href")).toBe(approveUrl);
+    expect(popup).toHaveBeenCalledWith(APPROVE_URL);
+    expect(text()).toContain("Waiting for your approval in PayPal");
+    expect(button("Open PayPal").getAttribute("href")).toBe(APPROVE_URL);
+  });
+
+  it("notices the buyer closing PayPal's window without approving, and offers to open it again", async () => {
+    const handle = { closed: false };
+    await awaitApproval(() => handle);
+    expect(root().textContent).not.toContain("Open PayPal");
+
+    handle.closed = true;
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 700));
+    });
+    expect(text()).toContain("PayPal's window was closed before you approved. Nothing has changed yet.");
+    expect(button("Open PayPal again").getAttribute("href")).toBe(APPROVE_URL);
+    // Cancel is still one click away.
+    expect(button("Cancel now")).toBeTruthy();
+  });
+
+  it("reacts to the return page at once, but only when the message comes from our API", async () => {
+    const handle = { closed: false };
+    await awaitApproval(() => handle);
+    const revise = (outcome: string, actionId = "a1") => ({ type: "keepwell.revise", actionId, outcome });
+
+    await messageFrom("https://evil.example", revise("abandoned"));
+    await messageFrom(API_ORIGIN, revise("abandoned", "someone-elses-action"));
+    await messageFrom(API_ORIGIN, "keepwell.revise");
+    expect(text()).toContain("Waiting for your approval in PayPal");
+
+    await messageFrom(API_ORIGIN, revise("confirmed"));
+    expect(text()).toContain("Applying the change in PayPal");
+    expect(text()).not.toContain("Open PayPal");
+    await messageFrom(API_ORIGIN, revise("abandoned"));
+    expect(text()).toContain("You didn't approve the change in PayPal, so nothing was changed.");
+  });
+
+  it("says nothing changed when the approval was abandoned, and offers cancel or keep", async () => {
+    const t = await awaitApproval(() => ({ closed: false }));
+    await t.update("ABANDONED");
+    await flush();
+    expect(text()).toContain("You didn't approve the change in PayPal, so nothing was changed.");
+    expect(text()).not.toContain("didn't go through");
+    expect(button("Cancel now")).toBeTruthy();
+    expect(button("Keep my subscription")).toBeTruthy();
   });
 
   it("L1: reason chips instead of the text box", async () => {

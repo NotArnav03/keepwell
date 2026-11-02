@@ -13,14 +13,22 @@ export interface WidgetProps {
   supportContact: string | null;
   locale: string;
   onClose: () => void;
-  /** Opens PayPal's approval page; returns false when the popup was blocked. */
-  openPopup?: (url: string) => boolean;
+  /** Opens PayPal's approval page; returns null when the popup was blocked. */
+  openPopup?: (url: string) => PopupHandle | null;
+  /** The API's origin: the only one whose "keepwell.revise" message from the return page is believed. */
+  apiOrigin?: string;
+}
+
+/** What the widget needs of the approval window: to notice the buyer closing it. */
+export interface PopupHandle {
+  readonly closed: boolean;
 }
 
 const FOCUSABLE = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled])";
+const POPUP_POLL_MS = 500;
 
-function defaultPopup(url: string): boolean {
-  return window.open(url, "keepwell-paypal", "popup,width=480,height=720") !== null;
+function defaultPopup(url: string): PopupHandle | null {
+  return window.open(url, "keepwell-paypal", "popup,width=480,height=720");
 }
 
 export function Widget(props: WidgetProps) {
@@ -29,6 +37,10 @@ export function Widget(props: WidgetProps) {
   const [draft, setDraft] = useState("");
   const [cancelError, setCancelError] = useState(false);
   const [popupBlocked, setPopupBlocked] = useState(false);
+  const [popupClosed, setPopupClosed] = useState(false);
+  /** What /v1/revise/return told us when PayPal sent the buyer back ("confirmed", "abandoned", …). */
+  const [returned, setReturned] = useState<string | null>(null);
+  const popup = useRef<PopupHandle | null>(null);
   const closeStream = useRef<(() => void) | null>(null);
   const opened = useRef(new Set<string>());
   const dialog = useRef<HTMLDivElement>(null);
@@ -66,8 +78,40 @@ export function Widget(props: WidgetProps) {
   useEffect(() => {
     if (approveUrl === null || opened.current.has(approveUrl)) return;
     opened.current.add(approveUrl);
-    setPopupBlocked(!(props.openPopup ?? defaultPopup)(approveUrl));
+    popup.current = (props.openPopup ?? defaultPopup)(approveUrl);
+    setPopupBlocked(popup.current === null);
+    setPopupClosed(false);
+    setReturned(null);
   }, [approveUrl]);
+
+  // The buyer closing PayPal's window without approving sends us nothing, so watch for it.
+  useEffect(() => {
+    if (approveUrl === null || popup.current === null) return;
+    const timer = setInterval(() => {
+      if (popup.current?.closed) {
+        setPopupClosed(true);
+        clearInterval(timer);
+      }
+    }, POPUP_POLL_MS);
+    return () => clearInterval(timer);
+  }, [approveUrl]);
+
+  // The return page tells its opener how PayPal's approval went. The stream stays the source of
+  // truth; this only makes the widget react at once.
+  const pendingId = useRef<string | null>(null);
+  pendingId.current = pending?.id ?? null;
+  useEffect(() => {
+    const onMessage = (event: MessageEvent<unknown>) => {
+      const data = event.data;
+      if (props.apiOrigin === undefined || event.origin !== props.apiOrigin) return;
+      if (typeof data !== "object" || data === null) return;
+      const message = data as { type?: unknown; actionId?: unknown; outcome?: unknown };
+      if (message.type !== "keepwell.revise" || message.actionId !== pendingId.current) return;
+      if (typeof message.outcome === "string") setReturned(message.outcome);
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
 
   const session = state.session;
   const sessionId = session?.sessionId ?? null;
@@ -161,6 +205,17 @@ export function Widget(props: WidgetProps) {
     pending !== null &&
     !["APPLIED", "CONFIRMED", "FAILED", "ABANDONED", "SUPERSEDED"].includes(pending.state);
   const offerFailed = pending !== null && ["FAILED", "ABANDONED"].includes(pending.state);
+  // While PayPal's approval is pending, say what is known: it came back, was closed, or is open.
+  const waitingText =
+    pending?.state !== "AWAITING_BUYER"
+      ? en.applying
+      : returned === "abandoned"
+        ? en.approvalAbandoned
+        : returned !== null
+          ? en.applying
+          : popupClosed
+            ? `${en.awaitingPayPal} ${en.approvalClosed}`
+            : en.awaitingPayPal;
   const canType =
     state.phase === "chat" &&
     !state.inputClosed &&
@@ -250,18 +305,23 @@ export function Widget(props: WidgetProps) {
 
             {busy && (
               <p class="kw-status" role="status">
-                {pending.state === "AWAITING_BUYER" ? en.awaitingPayPal : en.applying}
-                {pending.state === "AWAITING_BUYER" && popupBlocked && pending.approveUrl && (
-                  <>
-                    {" "}
-                    <a href={pending.approveUrl} target="_blank" rel="noopener noreferrer">
-                      {en.openPayPal}
-                    </a>
-                  </>
-                )}
+                {waitingText}
+                {pending.state === "AWAITING_BUYER" &&
+                  returned === null &&
+                  (popupBlocked || popupClosed) &&
+                  pending.approveUrl && (
+                    <>
+                      {" "}
+                      <a href={pending.approveUrl} target="_blank" rel="noopener noreferrer">
+                        {popupClosed ? en.openPayPalAgain : en.openPayPal}
+                      </a>
+                    </>
+                  )}
               </p>
             )}
-            {offerFailed && state.phase === "chat" && <p role="status">{en.offerFailed}</p>}
+            {offerFailed && state.phase === "chat" && (
+              <p role="status">{pending.state === "ABANDONED" ? en.approvalAbandoned : en.offerFailed}</p>
+            )}
 
             {state.closed && (
               <p class="kw-done" role="status">

@@ -24,6 +24,12 @@ const STREAM_TYPES = new Set<string>([
   "error",
 ]);
 
+// A stream that EventSource gave up on is reopened up to 8 times, 1 s then doubling to 30 s
+// (about two minutes). After that the dialog still cancels through PayPal (design law 1).
+const STREAM_MAX_RETRIES = 8;
+const STREAM_RETRY_MS = 1000;
+const STREAM_RETRY_MAX_MS = 30_000;
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
@@ -154,18 +160,49 @@ export function httpTransport(options: HttpTransportOptions): Transport {
       return expect<CancelResponse>(data, ["actionId"], "cancel response");
     },
     stream(streamUrl, afterSeq, onEvent) {
-      const url = new URL(streamUrl);
-      if (afterSeq > 0) url.searchParams.set("after", String(afterSeq));
-      // EventSource sends Last-Event-ID itself when it reconnects.
-      const source = new EventSource(url);
-      source.onmessage = (message: MessageEvent<string>) => {
-        const event = readStreamEvent(message.data);
-        // An event this widget version doesn't know is skipped, not fatal.
-        if (event === null) return;
-        onEvent(Number(message.lastEventId), event);
-        if (event.type === "session.closed") source.close();
+      let seen = afterSeq;
+      let source: EventSource | null = null;
+      let retry: ReturnType<typeof setTimeout> | undefined;
+      let failures = 0;
+      let stopped = false;
+
+      const open = () => {
+        const url = new URL(streamUrl);
+        if (seen > 0) url.searchParams.set("after", String(seen));
+        const current = new EventSource(url);
+        source = current;
+        current.onopen = () => {
+          failures = 0;
+        };
+        current.onmessage = (message: MessageEvent<string>) => {
+          const event = readStreamEvent(message.data);
+          // An event this widget version doesn't know is skipped, not fatal.
+          if (event === null) return;
+          const seq = Number(message.lastEventId);
+          if (seq > seen) seen = seq;
+          onEvent(seq, event);
+          if (event.type === "session.closed") stop();
+        };
+        // While the browser is still CONNECTING it retries by itself (a dropped connection, a
+        // restart under way) and sends Last-Event-ID. It gives up for good on an error status, as
+        // a restarted API can answer, so reopen with backoff and replay from the last event seen.
+        current.onerror = () => {
+          if (stopped || current.readyState !== EventSource.CLOSED) return;
+          current.close();
+          if (failures >= STREAM_MAX_RETRIES) return;
+          retry = setTimeout(open, Math.min(STREAM_RETRY_MS * 2 ** failures, STREAM_RETRY_MAX_MS));
+          failures += 1;
+        };
       };
-      return () => source.close();
+
+      const stop = () => {
+        stopped = true;
+        clearTimeout(retry);
+        source?.close();
+      };
+
+      open();
+      return stop;
     },
   };
 }
