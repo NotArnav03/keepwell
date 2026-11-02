@@ -11,6 +11,7 @@ import {
   type PayPalGateway,
 } from "@keepwell/contracts";
 import { signJwt, signWidgetToken, verifyJwt } from "../portal/jwt.js";
+import type { RateLimiter } from "../portal/rate-limit.js";
 import { allowCors } from "../sessions/cors.js";
 
 // Pantry Plan's "backend" (CONTRACTS.md §4, Demo). The demo store is a static site, so the two
@@ -27,6 +28,8 @@ export interface DemoStoreRoutesOptions {
   /** Pantry Plan's Keepwell signing secret: what a real merchant keeps on its own server. */
   signingSecret: string;
   allowOrigin: (origin: string) => boolean;
+  /** Per client IP, shared by both routes: they sign tokens and call PayPal on a stranger's say-so. */
+  rateLimiter?: RateLimiter;
   clock?: () => Date;
 }
 
@@ -55,6 +58,14 @@ export const demoStoreRoutes: FastifyPluginCallback<DemoStoreRoutesOptions> = (a
   const clock = options.clock ?? (() => new Date());
 
   allowCors(app, { allowOrigin: options.allowOrigin, paths: ["/demo-store/*"], headers: "content-type" });
+
+  app.addHook("preHandler", (request, reply, next) => {
+    // A browser's CORS preflight comes before every POST; counting it would halve the limit.
+    const result = request.method === "OPTIONS" ? undefined : options.rateLimiter?.hit(request.ip);
+    if (result === undefined || result.allowed) return next();
+    reply.header("retry-after", result.retryAfterSeconds);
+    sendError(request, reply, 429, "rate_limited", "Too many attempts; try again later");
+  });
 
   app.setErrorHandler((error: unknown, request, reply) => {
     if (error instanceof DemoStoreError)
