@@ -41,6 +41,8 @@ export function configFrom(script: HTMLScriptElement): WidgetConfig {
 }
 
 async function fetchToken(config: WidgetConfig): Promise<string> {
+  // A page whose token route isn't a plain same-origin POST supplies its own (the demo store does).
+  if (typeof window.keepwellGetToken === "function") return window.keepwellGetToken();
   if (config.token !== null) return config.token;
   if (config.tokenEndpoint === null) throw new Error("Keepwell widget: data-token-endpoint is required");
   const res = await fetch(config.tokenEndpoint, { method: "POST", credentials: "same-origin" });
@@ -82,6 +84,8 @@ export function install(config: WidgetConfig, doc: Document = document): void {
 declare global {
   interface Window {
     Keepwell?: { open: () => void };
+    /** Optional, set by the page before the widget opens: returns a fresh widget token. */
+    keepwellGetToken?: () => Promise<string>;
   }
 }
 

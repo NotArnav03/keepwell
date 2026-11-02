@@ -14,6 +14,7 @@ export * from "./brain/policy.js";
 export * from "./brain/agent.js";
 export * from "./brain/policy-api.js";
 export * from "./surfaces/sessions.js";
+export * from "./surfaces/identity.js";
 export * from "./growth/insights.js";
 export * from "./growth/notifications.js";
 export * from "./growth/dunning.js";

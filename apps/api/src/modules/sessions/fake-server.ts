@@ -12,6 +12,7 @@ import {
   type SubscriberPrincipal,
 } from "@keepwell/contracts";
 import {
+  FakePayPalGateway,
   FakeSessionsApi,
   PANTRY_PLAN,
   pantryPlanSubscription,
@@ -19,12 +20,15 @@ import {
 } from "@keepwell/contracts/fakes";
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
+import { demoStoreRoutes } from "../demo/store-routes.js";
+import { verifyWidgetToken } from "../portal/jwt.js";
 import { sessionRoutes } from "./routes.js";
 
 // The sessions API on fakes, for building the widget before the real module (#32) exists:
 // `pnpm dev:fake-sessions`. FakeAgent talks, and a timer moves each Action the way PayPal would.
-// Nothing is stored and nothing leaves this process. There is no real auth: the bearer token
-// only picks a scenario, e.g. `Authorization: Bearer fake:downgrade` (see GET /).
+// Nothing is stored and nothing leaves this process. Auth is either a fake token that picks a
+// scenario (`Authorization: Bearer fake:downgrade`, see GET /) or a real HS256 widget token from
+// the demo store's routes, which are mounted here too on a fake PayPal holding I-FAKE-<SCENARIO>.
 
 const SCENARIOS = ["pause", "downgrade", "annual", "discount", "refund", "none", "l1"] as const;
 type Scenario = (typeof SCENARIOS)[number];
@@ -40,6 +44,8 @@ const publicUrl = z
   .url()
   .parse(process.env.API_PUBLIC_URL || `http://localhost:${env.PORT}`)
   .replace(/\/$/, "");
+// Local only, so a fixed fallback is fine; WIDGET_TOKEN_SECRET (in .env) wins when set.
+const signingSecret = process.env.WIDGET_TOKEN_SECRET || "local-fake-sessions-secret";
 
 // One subscription per scenario, all Maya on Standard, so sessions never cross scenarios.
 const now = new Date();
@@ -120,6 +126,24 @@ await app.register(sessionRoutes, {
   allowOrigin: () => true,
 });
 
+// Pantry Plan's backend, on a fake PayPal that knows each scenario's subscription as ACTIVE.
+const gateway = new FakePayPalGateway();
+for (const s of subscriptions) {
+  gateway.put(PANTRY_PLAN.merchantId, {
+    id: s.paypalSubscriptionId,
+    plan_id: s.paypalPlanId,
+    status: "ACTIVE",
+  });
+}
+await app.register(demoStoreRoutes, {
+  prefix: "/v1",
+  gateway,
+  merchantId: PANTRY_PLAN.merchantId,
+  plans: Object.fromEntries(PANTRY_PLAN.plans.map((p) => [p.planId, p.name])),
+  signingSecret,
+  allowOrigin: () => true,
+});
+
 // PayPal's approval page for downgrades and annual switches, faked: Approve or Cancel.
 app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) =>
   done(null, body),
@@ -184,6 +208,18 @@ async function move(actionId: string, to: ActionState, approveUrl?: string): Pro
 }
 
 function principalFor(request: FastifyRequest): SubscriberPrincipal {
+  const bearer = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
+  if (bearer !== undefined && !bearer.startsWith("fake:")) {
+    // A real widget token, as the demo store's backend signs it: bound to one PayPal subscription.
+    const verified = verifyWidgetToken(bearer, signingSecret, new Date());
+    const subscription = verified.ok
+      ? subscriptions.find((s) => s.paypalSubscriptionId === verified.claims.sid)
+      : undefined;
+    if (!verified.ok || !subscription || verified.claims.mid !== subscription.merchantId) {
+      throw new SessionError("unauthorized", "Invalid or expired widget token");
+    }
+    return { merchantId: subscription.merchantId, subscriptionId: subscription.id, channel: "widget" };
+  }
   const token = request.headers.authorization?.match(FakeToken);
   const query = FakeQuery.safeParse(request.query);
   const name = token?.[1] ?? (query.success ? query.data.fake : undefined) ?? "pause";
