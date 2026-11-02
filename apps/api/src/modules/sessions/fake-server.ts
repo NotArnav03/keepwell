@@ -21,7 +21,18 @@ import {
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
 import { demoStoreRoutes } from "../demo/store-routes.js";
+import { DelegationService } from "../portal/delegations.js";
 import { verifyWidgetToken } from "../portal/jwt.js";
+import { MagicLinkService } from "../portal/magic-link.js";
+import {
+  MemoryDelegationStore,
+  MemoryMagicLinkStore,
+  MemoryPortalDirectory,
+  RecordingMailer,
+} from "../portal/memory.js";
+import { RateLimiter } from "../portal/rate-limit.js";
+import { portalRoutes } from "../portal/routes.js";
+import { hashEmail } from "../portal/tokens.js";
 import { sessionRoutes } from "./routes.js";
 
 // The sessions API on fakes, for building the widget before the real module (#32) exists:
@@ -142,6 +153,29 @@ await app.register(demoStoreRoutes, {
   plans: Object.fromEntries(PANTRY_PLAN.plans.map((p) => [p.planId, p.name])),
   signingSecret,
   allowOrigin: () => true,
+  rateLimiter: new RateLimiter({ limit: 60, windowMs: 60_000 }),
+});
+
+// The portal's identity routes: ask for a link as maya@example.com, find it in this server's log,
+// open it, and POST /v1/delegations with the cookie it sets. Nothing is emailed.
+const portalDirectory = new MemoryPortalDirectory()
+  .addMerchant("pantry-plan", PANTRY_PLAN.merchantId)
+  .addSubscription(PANTRY_PLAN.merchantId, hashEmail("maya@example.com"), maya.id);
+const portalStores = { links: new MemoryMagicLinkStore(), delegations: new MemoryDelegationStore() };
+await app.register(portalRoutes, {
+  prefix: "/v1",
+  magicLinks: new MagicLinkService({
+    directory: portalDirectory,
+    store: portalStores.links,
+    mailer: new RecordingMailer((link) => app.log.info(`magic link for ${link.to}: ${link.url}`)),
+    verifyUrl: (token) => `${publicUrl}/v1/portal/verify?token=${token}`,
+  }),
+  delegations: new DelegationService({ store: portalStores.delegations, directory: portalDirectory }),
+  signingSecret,
+  portalUrl: process.env.PORTAL_URL || "http://localhost:5176/account.html",
+  allowOrigin: () => true,
+  // The fake runs on plain http, where browsers drop Secure cookies.
+  secureCookies: false,
 });
 
 // PayPal's approval page for downgrades and annual switches, faked: Approve or Cancel.

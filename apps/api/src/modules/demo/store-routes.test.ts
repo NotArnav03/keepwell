@@ -5,6 +5,7 @@ import { FakePayPalGateway, PANTRY_PLAN } from "@keepwell/contracts/fakes";
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
 import { signJwt, verifyWidgetToken } from "../portal/jwt.js";
+import { RateLimiter } from "../portal/rate-limit.js";
 import { demoStoreRoutes } from "./store-routes.js";
 
 const env = loadEnv({ NODE_ENV: "test", LOG_LEVEL: "silent" });
@@ -113,5 +114,40 @@ describe("demo store", () => {
       SECRET,
     );
     expect((await token(widget)).statusCode).toBe(401);
+  });
+
+  it("rate limits both routes per client, but not CORS preflights", async () => {
+    const rateLimiter = new RateLimiter({ limit: 2, windowMs: 60_000, clock: () => NOW });
+    app = buildServer(env);
+    await app.register(demoStoreRoutes, {
+      prefix: "/v1",
+      gateway: gatewayWith("ACTIVE"),
+      merchantId: PANTRY_PLAN.merchantId,
+      plans,
+      signingSecret: SECRET,
+      allowOrigin: (origin) => origin === STORE,
+      rateLimiter,
+      clock: () => NOW,
+    });
+    await app.ready();
+
+    for (let i = 0; i < 5; i++) {
+      const preflight = await app.inject({
+        method: "OPTIONS",
+        url: "/v1/demo-store/token",
+        headers: { origin: STORE, "access-control-request-method": "POST" },
+      });
+      expect(preflight.statusCode).toBe(204);
+    }
+    expect((await verify(app)).statusCode).toBe(200);
+    const shopperToken = (await verify(app)).json<{ shopperToken: string }>().shopperToken;
+    const limited = await app.inject({
+      method: "POST",
+      url: "/v1/demo-store/token",
+      payload: { shopperToken },
+    });
+    expect(limited.statusCode).toBe(429);
+    expect(limited.json()).toMatchObject({ error: { code: "rate_limited" } });
+    expect(Number(limited.headers["retry-after"])).toBeGreaterThan(0);
   });
 });
