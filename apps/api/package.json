@@ -10,15 +10,23 @@
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "lint": "eslint src",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run --passWithNoTests",
+    "seed": "node --env-file-if-exists=../../.env --import tsx src/cli/seed.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "0.135.0",
     "@keepwell/contracts": "workspace:*",
+    "@keepwell/db": "workspace:*",
+    "@keepwell/policy": "workspace:*",
+    "@sentry/node": "11.8.0",
+    "drizzle-orm": "0.45.4",
     "fastify": "5.12.7",
     "pg": "8.23.1",
+    "pg-boss": "12.38.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@keepwell/paypal-mock": "workspace:*",
     "@types/pg": "8.23.1",
     "pino-pretty": "13.2.0",
     "tsx": "4.23.15"

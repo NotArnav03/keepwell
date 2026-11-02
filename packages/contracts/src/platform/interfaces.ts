@@ -25,9 +25,14 @@ export interface ActionEngine<Tx = unknown> {
   create(input: ActionCreateInput, tx?: Tx): Promise<Action>;
   /** null if it doesn't exist or belongs to another merchant. */
   get(merchantId: string, actionId: string): Promise<Action | null>;
-  /** Writes a scheduled_resumes row; returns its id (the resume.due job and time machine use it). */
+  /**
+   * Writes a scheduled_resumes row; returns its id (the resume.due job and time machine use it).
+   * With `afterActionId` (a pause's suspend Action), write it in the same transaction as that
+   * Action: the resume only becomes due once the suspend is APPLIED, and is cancelled if the suspend
+   * fails or is superseded. So a pause never leaves a resume behind, and never loses one either.
+   */
   scheduleResume(
-    input: { merchantId: string; subscriptionId: string; dueAt: string },
+    input: { merchantId: string; subscriptionId: string; dueAt: string; afterActionId?: string },
     tx?: Tx,
   ): Promise<string>;
 }

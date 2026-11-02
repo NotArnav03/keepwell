@@ -9,6 +9,32 @@ describe("loadEnv", () => {
       HOST: "0.0.0.0",
       PORT: 3000,
       LOG_LEVEL: "info",
+      RUN_MIGRATIONS: true,
+      PAYPAL_API_BASE: "https://api-m.sandbox.paypal.com",
+      PAYPAL_USE_MOCK: false,
+      PAYPAL_MOCK_URL: "http://localhost:4010",
+    });
+  });
+
+  describe("PayPal", () => {
+    const db = { DATABASE_URL_UNPOOLED: "postgresql://u:p@ep-x.us-west-2.aws.neon.tech/neondb" };
+
+    it("reads boolean flags the way .env files write them", () => {
+      expect(loadEnv({ PAYPAL_USE_MOCK: "true", RUN_MIGRATIONS: "false" })).toMatchObject({
+        PAYPAL_USE_MOCK: true,
+        RUN_MIGRATIONS: false,
+      });
+    });
+
+    it("allows the mock only on a laptop", () => {
+      expect(() => loadEnv({ ...db, APP_ENV: "staging", PAYPAL_USE_MOCK: "true" })).toThrow(/local only/);
+    });
+
+    it("requires sandbox credentials on hosted environments", () => {
+      expect(() => loadEnv({ ...db, APP_ENV: "staging" })).toThrow(/PAYPAL_CLIENT_ID/);
+      expect(() =>
+        loadEnv({ ...db, APP_ENV: "staging", PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" }),
+      ).not.toThrow();
     });
   });
 

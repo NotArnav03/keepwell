@@ -36,6 +36,8 @@ Conventions:
 - `brainEventPayloads` (`session.offer_presented`, `policy.published`) are registered in `domainEventPayloads`; `brainJobs` has `llm.budget_reset` keyed by UTC day.
 - `reasonPreferences[reason]` is an allowlist as well as a ranking: unlisted kinds are not offered for that reason, and `"none"` ends the list. Unranked reasons use `DEFAULT_REASON_PREFERENCES` from `packages/policy`.
 - `FakeAgent` in `@keepwell/contracts/fakes`: one 1-cycle pause menu, scripted streamed reply, no-means-no on "cancel", one offer per session, card text from the offer.
+- Policy versions (`brain/policy-api.ts`, #27): `PolicyDraft` is a `PolicyDocument` without `version` (strict: sending one is a 400); publishing assigns it. `StoredPolicy` is one immutable version (`document.version === version`). `PolicyStore` (`current`, `get`, `list` newest first, `publish`) is append-only, and `publish` throws `PolicyError("version_conflict")` when `baseVersion` isn't the latest, so two editors can't overwrite each other. `FakePolicyStore` is in the fakes. `PolicyError` codes: `unauthorized` 401, `not_found` 404, `invalid_request` 400, `invalid_policy` 422 (with `details: { path, message }[]`), `version_conflict` 409, `internal` 500.
+- Dry-run returns, per sample, the fresh `PolicyContext` (reason `"unknown"`), the draft's `OfferMenu` and `offerIdsByReason`, so the editor can re-run `computeMenu` in the browser for any reason or edit. Up to 20 samples; ids that aren't the merchant's come back in `missingSubscriptionIds`. `problems` lists what publishing the draft would reject (`PolicyProblem { path, message }`), so the editor can flag it before Publish.
 
 **As implemented in `packages/contracts/src/surfaces/` (v1, owner M3).** Differences from the sketch below and §4:
 - `Channel` is in `shared.ts`. `Consent` hashes are `Sha256Hex`, with `offerHash = sha256(canonicalJson(offer))`; `ipPrefix` is the IP cut to /24 (IPv4) or /48 (IPv6).
@@ -218,6 +220,16 @@ export const InsightAction = z.object({
 });
 ```
 
+### M5 growth types, as implemented
+Code: `packages/contracts/src/growth/` (`InsightRecord`, `InsightAction`, `InsightActionProposal`, notifications, `DunningCase`, `growthJobs`, `growthEventPayloads`); `FakeNotifier` in `@keepwell/contracts/fakes`. Differences from the sketch above:
+
+- `InsightRecord` gains `replyId`; exactly the id matching `source` is set. `quote` is at most 20 words (and 160 characters).
+- `InsightAction` gains `merchantId`, `createdAt`, `decidedAt`. `InsightActionProposal` is a union on `kind` with typed `params` (checked before a row is written); the stored `params` stay a generic record.
+- Notifications: `Notification` (outbox row, status `queued|sending|sent|failed|suppressed`, `suppressedBecause` `frequency_cap|unsubscribed|superseded`) and `OutboxResponse` (Demo Inbox) are new.
+- `DunningCase`, `DunningPlaybook` and `DunningState` are new; `reasonCode` stays a free string.
+- Job `dunning.evaluate` payload is `{ subscriptionId, failedCount }` (the idempotency key needs the count). `insights.extract` takes exactly one of `sessionId` or `replyId`.
+- `notification.sent` payload is `{ notificationId, template, channel }`; `insight_action.proposed` is `{ insightActionId }`. Both are in `domainEventPayloads`.
+
 ---
 
 ## 2. Internal domain events
@@ -253,6 +265,7 @@ Emitted to the `domain_events` table and to Postgres `NOTIFY` (for the live feed
 | `action.confirm` | M1 | `{ actionId }` | actionId |
 | `reconcile.subscription` | M1 | `{ subscriptionId }` | subscriptionId + minute |
 | `reconcile.sweep` | M1 | `{ merchantId }` | merchantId + window |
+| `reconcile.drift` | M1 | `{ merchantId }` | merchantId + UTC day (nightly drift report, #14) |
 | `due.sweep` | M1 | `{}` | minute |
 | `resume.due` | M1 | `{ scheduledResumeId }` | scheduledResumeId |
 | `domain.dispatch` | M1 | `{ domainEventId, handler }` | domainEventId + handler |
@@ -314,9 +327,9 @@ export const SessionStreamEvent = z.discriminatedUnion("type", [
 | `GET /m/timeline?from&to` | MER | All subscribers for the scheduler view |
 | `GET /m/audit?cursor&kind&subject` | MER | Audit entries |
 | `GET /m/audit/verify` | MER | `{ ok, checked, brokenAtSeq? }` (owner M1) |
-| `GET /m/policies`, `GET /m/policies/:version` | MER | Policy history (owner M2) |
-| `POST /m/policies` | MER | Publish a new version (validated by `packages/policy`) |
-| `POST /m/policies/dry-run` | MER | `{ document, sampleSubscriptionIds[] }` → menus per sample |
+| `GET /m/policies`, `GET /m/policies/:version` | MER | Policy history (owner M2): `ListPoliciesResponse`, `PolicyVersionResponse` |
+| `POST /m/policies` | MER | `PublishPolicyRequest { baseVersion, document: PolicyDraft, changeNote? }` → `PolicyVersionResponse`. Validated by `packages/policy`; 409 `version_conflict` on a stale base (owner M2) |
+| `POST /m/policies/dry-run` | MER | `PolicyDryRunRequest { document: PolicyDraft, sampleSubscriptionIds[1..20] }` → `PolicyDryRunResponse` (owner M2) |
 | `GET /m/insights?from&to` | MER | Aggregates + top quotes (owner M5) |
 | `POST /m/copilot/messages` | MER | SSE chat (owner M5) |
 | `GET /m/insight-actions`, `POST /m/insight-actions/:id/approve`, `POST …/reject` | MER | (owner M5) |
@@ -371,7 +384,9 @@ interface PayPalGateway {
 interface ActionEngine {
   create(input: ActionCreateInput, tx?: Tx): Promise<Action>;          // typed params per type, optional idempotencyKey
   get(merchantId: string, actionId: string): Promise<Action | null>;   // merchant-scoped
-  scheduleResume(input: { merchantId; subscriptionId; dueAt }, tx?: Tx): Promise<string>; // scheduled resume id
+  scheduleResume(input: { merchantId; subscriptionId; dueAt; afterActionId? }, tx?: Tx): Promise<string>; // scheduled resume id
+  // afterActionId (#11): a pause's suspend, written in the same tx. The resume waits until that suspend
+  // is APPLIED and is cancelled if it fails or is superseded.
 }
 interface Audit {
   append(entry: AuditAppendInput, tx?: Tx): Promise<AuditEntry>;      // log sets seq, at, prevHash, hash
@@ -392,11 +407,25 @@ interface Agent {
 // packages/policy (pure)
 declare function computeMenu(policy: PolicyDocument, ctx: PolicyContext): OfferMenu;
 declare function evaluate(policy: PolicyDocument, ctx: PolicyContext, offerId: string, menu: OfferMenu): PolicyDecision;
+declare function evaluateAcceptance(policy: PolicyDocument, freshCtx: PolicyContext, presented: { offer: Offer; policyVersion: number }): PolicyDecision;
 
-// M5 → M4
-interface Notifier {
-  enqueue(n: { merchantId: string; to: string; template: TemplateId; payload: object; dueAt?: string }, tx?: Tx): Promise<string>;
+// M2 → M3 (current policy for sessions), M4 (editor). As implemented in packages/contracts/src/brain/policy-api.ts
+interface PolicyStore {
+  current(merchantId: string): Promise<StoredPolicy | null>;
+  get(merchantId: string, version: number): Promise<StoredPolicy | null>;
+  list(merchantId: string): Promise<PolicyVersionSummary[]>;          // newest first
+  publish(input: PublishPolicyInput, tx?: Tx): Promise<StoredPolicy>;  // append-only; PolicyError("version_conflict") on a stale base
 }
+
+// M5 → everyone (M1 job handlers, M4 cockpit)
+// As implemented in packages/contracts/src/growth/notifier.ts
+interface Notifier {
+  // Inserts an outbox row in the caller's transaction; notify.dispatch sends it later. Returns the notification id.
+  // Rejects (never throws synchronously) if the request breaks the contract.
+  enqueue(n: NotificationRequest, tx?: Tx): Promise<string>;
+}
+// NotificationRequest = { merchantId, subscriptionId | null, to, content: NotificationContent, dueAt?, simulated (default false) }
+// NotificationContent = discriminated union on `template`; each payload holds facts only (amounts, dates, links).
 ```
 
 ---

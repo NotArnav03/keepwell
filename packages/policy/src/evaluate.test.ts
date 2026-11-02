@@ -1,6 +1,6 @@
 import { PolicyDecision, PolicyDocument, type Offer } from "@keepwell/contracts";
 import { describe, expect, it } from "vitest";
-import { describeOffer, evaluate, explain } from "./evaluate.js";
+import { describeOffer, evaluate, evaluateAcceptance, explain } from "./evaluate.js";
 import { computeMenu } from "./menu.js";
 import { RULE } from "./rules.js";
 import { pantryPlanPolicy } from "./defaults.js";
@@ -69,6 +69,52 @@ describe("evaluate", () => {
   it("reports every violation at once", () => {
     const decision = evaluate({ ...policy, version: 2 }, context({ cancelIntent: true }), "nope", menu);
     expect(rules(decision)).toEqual([RULE.policyVersion, RULE.offerNotInMenu, RULE.cancelIntent]);
+  });
+});
+
+describe("evaluateAcceptance", () => {
+  const presented = (id: string, policyVersion = 1) => {
+    const offer = menu.offers.find((o) => o.id === id);
+    if (!offer) throw new Error(`fixture: ${id} is on Maya's menu`);
+    return { offer, policyVersion };
+  };
+  // Fresh truth at accept time: the offer was shown, and the session may hold a cancel click.
+  const atAccept = (overrides: Parameters<typeof context>[0] = {}) =>
+    context({ offersPresentedThisSession: 1, cancelIntent: true, ...overrides });
+
+  it("allows every offer when nothing changed, even though it was already shown", () => {
+    for (const offer of menu.offers) {
+      const decision = evaluateAcceptance(policy, atAccept(), { offer, policyVersion: 1 });
+      expect(decision).toMatchObject({ allowed: true, offer, violations: [] });
+    }
+  });
+
+  it("allows a card accepted days later when billing hasn't moved", () => {
+    const later = atAccept({ now: "2026-11-05T10:00:00.000Z" });
+    expect(evaluateAcceptance(policy, later, presented("pause-1")).allowed).toBe(true);
+  });
+
+  it("denies when the subscription stopped being active", () => {
+    const suspended = atAccept({ subscription: { status: "SUSPENDED" } });
+    expect(rules(evaluateAcceptance(policy, suspended, presented("pause-1")))).toEqual([RULE.notActive]);
+  });
+
+  it("denies a discount once the next bill is under 10 days away", () => {
+    const threeWeeksLater = atAccept({ now: "2026-11-20T10:00:00.000Z" });
+    expect(rules(evaluateAcceptance(policy, threeWeeksLater, presented("discount-25")))).toEqual([
+      RULE.priceChangeTooSoon,
+    ]);
+  });
+
+  it("denies when the merchant published a new policy version", () => {
+    const v2 = { ...policy, version: 2 };
+    expect(rules(evaluateAcceptance(v2, atAccept(), presented("pause-1")))).toEqual([RULE.policyVersion]);
+  });
+
+  it("denies an offer whose terms differ from what the policy allows now", () => {
+    const { offer } = presented("discount-25");
+    const tampered = { offer: { ...offer, percent: 90 }, policyVersion: 1 };
+    expect(rules(evaluateAcceptance(policy, atAccept(), tampered))).toEqual([RULE.offerNotAllowedNow]);
   });
 });
 

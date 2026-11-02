@@ -1,5 +1,6 @@
 import {
   canonicalJson,
+  ReasonCategory,
   type Offer,
   type OfferMenu,
   type PolicyContext,
@@ -67,6 +68,44 @@ function reasonNote(ctx: PolicyContext): string {
 }
 
 /** Human-readable lines for the audit log and the dashboard's "explain this decision". */
+/** What the subscriber saw on the card: the offer and the policy version it was shown under. */
+export interface PresentedOffer {
+  offer: Offer;
+  policyVersion: number;
+}
+
+/**
+ * Re-checks a presented offer when the subscriber clicks Accept (#73 review). The card may have
+ * sat open for hours: the subscription may have been suspended or cancelled, the 10-day price rule
+ * may have stopped holding, or the merchant may have published a new policy. Applying the decision
+ * stored at pick time would push an offer the policy now refuses.
+ *
+ * `ctx` is loaded fresh, with the reason the offer was shown for. Two fields are fixed here so
+ * callers can't get them wrong: the offer being accepted *is* the session's one offer, so it
+ * doesn't count against itself, and the click is the consent, so cancel intent doesn't apply.
+ * Offer terms come from billing dates and plans, not `now`, so if nothing changed the offer
+ * recomputes identically and is allowed; if anything changed it is denied with the rule.
+ */
+export function evaluateAcceptance(
+  policy: PolicyDocument,
+  ctx: PolicyContext,
+  presented: PresentedOffer,
+): PolicyDecision {
+  const menu: OfferMenu = {
+    policyVersion: presented.policyVersion,
+    computedAt: ctx.now,
+    offers: [presented.offer],
+    defaultByReason: NO_DEFAULTS,
+    excluded: [],
+  };
+  const atAccept: PolicyContext = { ...ctx, cancelIntent: false, offersPresentedThisSession: 0 };
+  return evaluate(policy, atAccept, presented.offer.id, menu);
+}
+
+const NO_DEFAULTS = Object.fromEntries(
+  ReasonCategory.options.map((r) => [r, null]),
+) as OfferMenu["defaultByReason"];
+
 export function explain(decision: PolicyDecision): string[] {
   const version = `policy v${decision.policyVersion}`;
   if (decision.allowed && decision.offer) {
