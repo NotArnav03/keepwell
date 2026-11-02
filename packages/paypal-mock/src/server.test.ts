@@ -238,14 +238,24 @@ describe("revise, price override, capture, transactions and refunds", () => {
 describe("lists and plans", () => {
   it("filters subscriptions by status and status_updated_after, and pages them", async () => {
     const suspended = await call("GET", "/v1/billing/subscriptions?statuses=SUSPENDED");
-    expect(suspended.body).toMatchObject({ total_items: 2 });
+    expect(suspended.body?.subscriptions).toHaveLength(2);
+    // The sandbox's shape: a summary per item and no totals.
+    expect(suspended.body).not.toHaveProperty("total_items");
+    expect(Object.keys((suspended.body?.subscriptions as object[])[0] ?? {}).sort()).toEqual([
+      "auto_renewal",
+      "create_time",
+      "id",
+      "links",
+      "status",
+    ]);
     const recent = await call("GET", `/v1/billing/subscriptions?status_updated_after=2026-10-29T00:00:00Z`);
     expect((recent.body?.subscriptions as { id: string }[]).map((s) => s.id).sort()).toEqual(
       [fixtureSubscriptionId("ben"), fixtureSubscriptionId("tom"), fixtureSubscriptionId("sara")].sort(),
     );
-    const page2 = await call("GET", "/v1/billing/subscriptions?page_size=5&page=3");
-    expect(page2.body).toMatchObject({ total_items: 12, total_pages: 3 });
-    expect(page2.body?.subscriptions).toHaveLength(2);
+    const page3 = await call("GET", "/v1/billing/subscriptions?page_size=5&page=3");
+    expect(page3.body?.subscriptions).toHaveLength(2);
+    const page4 = await call("GET", "/v1/billing/subscriptions?page_size=5&page=4");
+    expect(page4.body?.subscriptions).toEqual([]);
   });
 
   it("creates a plan once per PayPal-Request-Id", async () => {

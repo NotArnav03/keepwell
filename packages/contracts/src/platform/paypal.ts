@@ -47,10 +47,22 @@ export const PayPalSubscription = z.looseObject({
 });
 export type PayPalSubscription = z.infer<typeof PayPalSubscription>;
 
+/**
+ * One item of GET /v1/billing/subscriptions. The sandbox lists only these fields (spike: list
+ * check, fixtures/spikes/gateway): no plan_id, no billing_info. GET the subscription for the rest.
+ */
+export const PayPalSubscriptionSummary = z.looseObject({
+  id: z.string().min(1),
+  status: SubscriptionStatus,
+  create_time: PayPalTime.optional(),
+});
+export type PayPalSubscriptionSummary = z.infer<typeof PayPalSubscriptionSummary>;
+
 export interface Page<T> {
   items: T[];
   /** 1-based, like PayPal's `page` parameter. */
   page: number;
+  /** PayPal's subscription list sends no totals: null there. Page on until a page comes back empty. */
   totalItems: number | null;
   totalPages: number | null;
 }

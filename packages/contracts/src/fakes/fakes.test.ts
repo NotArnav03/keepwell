@@ -147,11 +147,14 @@ describe("FakePayPalGateway", () => {
       statusUpdatedAfter: "2026-10-01T00:00:00Z",
       planIds: ["P-STD"],
     });
-    expect(recent).toMatchObject({ page: 1, totalItems: 25, totalPages: 2 });
+    // Like the sandbox: no totals, and items carry only id and status.
+    expect(recent).toMatchObject({ page: 1, totalItems: null, totalPages: null });
     expect(recent.items).toHaveLength(20);
+    expect(recent.items[0]).toEqual({ id: "I-0", status: "ACTIVE" });
     expect((await gateway.listSubscriptions(MERCHANT, { planIds: ["P-STD"], page: 2 })).items).toHaveLength(
       6,
     );
+    expect((await gateway.listSubscriptions(MERCHANT, { planIds: ["P-STD"], page: 3 })).items).toEqual([]);
   });
 
   it("fails the next call with an injected error, once", async () => {

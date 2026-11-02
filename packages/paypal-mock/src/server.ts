@@ -258,10 +258,17 @@ export function createPayPalMock(options: PayPalMockOptions = {}): PayPalMock {
       },
       { page: query.page, pageSize: query.page_size },
     );
+    // As the sandbox lists them (fixtures/spikes/gateway): a summary per item and no totals.
+    const root = base(request);
     return {
-      subscriptions: page.items.map((s) => subscriptionBody(s, base(request), null)),
-      total_items: page.totalItems,
-      total_pages: page.totalPages,
+      subscriptions: page.items.map((s) => ({
+        status: s.status,
+        id: s.id,
+        auto_renewal: false,
+        create_time: s.create_time,
+        links: [link(root, `/v1/billing/subscriptions/${s.id}`, "self")],
+      })),
+      links: [link(root, request.url, "self")],
     };
   });
 

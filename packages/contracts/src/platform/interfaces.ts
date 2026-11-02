@@ -1,7 +1,7 @@
 import type { Action, ActionCreateInput } from "./actions.js";
 import type { AuditAppendInput, AuditEntry } from "./audit.js";
 import type { DomainEvent, DomainEventPayload, DomainEventType } from "./events.js";
-import type { Page, PayPalSubscription } from "./paypal.js";
+import type { Page, PayPalSubscription, PayPalSubscriptionSummary } from "./paypal.js";
 
 // M1 → everyone (CONTRACTS.md §5). `Tx` is the caller's database transaction, so a side effect
 // commits or rolls back with the caller's own writes. Fakes ignore it.
@@ -17,7 +17,11 @@ export interface ListSubscriptionsQuery {
 /** Reads only. Mutations go through ActionEngine. Throws PayPalGatewayError. */
 export interface PayPalGateway {
   getSubscription(merchantId: string, paypalSubscriptionId: string): Promise<PayPalSubscription>;
-  listSubscriptions(merchantId: string, query: ListSubscriptionsQuery): Promise<Page<PayPalSubscription>>;
+  /** Summaries only (id, status): PayPal's list has nothing else. */
+  listSubscriptions(
+    merchantId: string,
+    query: ListSubscriptionsQuery,
+  ): Promise<Page<PayPalSubscriptionSummary>>;
 }
 
 export interface ActionEngine<Tx = unknown> {
