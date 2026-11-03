@@ -20,6 +20,7 @@ coverage/
 
 # Test and tool output
 .spike/
+.pool-refill/
 playwright-report/
 test-results/
 *.log

@@ -12,7 +12,8 @@
     "lint": "eslint src",
     "test": "vitest run --passWithNoTests",
     "seed": "node --env-file-if-exists=../../.env --import tsx src/cli/seed.ts",
-    "spike": "node --env-file-if-exists=../../.env --import tsx src/cli/sandbox-spike.ts"
+    "spike": "node --env-file-if-exists=../../.env --import tsx src/cli/sandbox-spike.ts",
+    "pool:refill": "node --env-file-if-exists=../../.env --import tsx src/cli/pool-refill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
