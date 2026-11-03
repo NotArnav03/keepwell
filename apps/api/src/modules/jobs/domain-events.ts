@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import {
   parseDomainEventPayload,
   type DomainEvent,
@@ -16,6 +16,8 @@ import type { Jobs } from "./jobs.js";
 // (`eventId:handler`) stops a handler from receiving the same event twice.
 
 type Handler = (event: DomainEvent) => Promise<void>;
+
+export const MERCHANT_FEED_CHANNEL = "keepwell_domain_events";
 
 export interface DomainEventsLogger {
   warn(obj: object, msg: string): void;
@@ -48,6 +50,11 @@ export class DbDomainEvents implements DomainEvents<Tx> {
       })
       .returning({ id: domainEvents.id });
     if (!row) throw new Error("domain_events insert returned nothing");
+    // PostgreSQL delivers NOTIFY only after this transaction commits, so the dashboard never sees
+    // an event for state that rolled back. The small envelope carries no subscriber data.
+    await tx.execute(
+      sql`SELECT pg_notify(${MERCHANT_FEED_CHANNEL}, ${JSON.stringify({ merchantId: event.merchantId, eventId: row.id })})`,
+    );
     for (const handler of this.handlers.get(event.type)?.keys() ?? []) {
       await this.jobs.send("domain.dispatch", { domainEventId: row.id, handler }, { tx });
     }

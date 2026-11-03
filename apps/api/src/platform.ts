@@ -6,6 +6,19 @@ import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
 import { reviseReturn } from "./modules/actions/revise-return.js";
 import { DbAudit } from "./modules/audit/log.js";
+import { auditRoutes } from "./modules/audit/routes.js";
+import {
+  DbMerchantAuthStore,
+  MerchantAuthService,
+  MerchantAuthenticator,
+  merchantAuthRoutes,
+} from "./modules/merchant/auth.js";
+import { merchantDataRoutes } from "./modules/merchant/data-routes.js";
+import { merchantOnboardingRoutes } from "./modules/merchant/onboarding-routes.js";
+import { DbCredentialSource } from "./modules/merchant/credentials.js";
+import { policyRoutes } from "./modules/policy/routes.js";
+import { PolicyService } from "./modules/policy/service.js";
+import { DbMerchantCatalog, DbPolicyStore } from "./modules/policy/db-service.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
 import { PayPalClient } from "./modules/paypal/client.js";
@@ -42,7 +55,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   // Waking a suspended Neon compute can take a few seconds.
   const app = buildServer(env, { readinessChecks, readinessTimeoutMs: 5000 });
   const core = await createCore(env, url, app.log);
-  const { pool, db, paypal, jobs, events, engine, sync, reconciler } = core;
+  const { pool, db, paypal, jobs, events, engine, sync, reconciler, audit } = core;
   readinessChecks.push(postgresReadiness(pool), {
     name: "paypal",
     check: async () => {
@@ -83,6 +96,63 @@ export async function startPlatform(env: Env): Promise<Platform> {
 
   await app.register(webhookIntake, { db, jobs });
   await app.register(reviseReturn, { prefix: "/v1", db, engine });
+  if (env.SESSION_SECRET && env.DASHBOARD_URL) {
+    const authenticator = new MerchantAuthenticator(
+      new MerchantAuthService(new DbMerchantAuthStore(db)),
+      env.SESSION_SECRET,
+      env.DASHBOARD_URL,
+    );
+    await app.register(merchantAuthRoutes, {
+      prefix: "/v1/m",
+      authenticator,
+      secureCookies: env.NODE_ENV === "production",
+    });
+    await app.register(merchantDataRoutes, { prefix: "/v1/m", db, pool, authenticator });
+    await app.register(auditRoutes, {
+      prefix: "/v1/m",
+      audit,
+      authenticate: async (request) => authenticator.authenticate(request),
+    });
+    const policyService = new PolicyService({
+      store: new DbPolicyStore(db),
+      catalog: new DbMerchantCatalog(db),
+      events,
+      audit,
+    });
+    await app.register(policyRoutes, {
+      prefix: "/v1/m",
+      service: policyService,
+      authenticate: async (request) => {
+        const user = await authenticator.authenticate(request, request.method !== "GET");
+        return { merchantId: user.merchantId, userLabel: user.email };
+      },
+    });
+    if (!env.PAYPAL_USE_MOCK && env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY) {
+      await app.register(merchantOnboardingRoutes, {
+        prefix: "/v1/m",
+        db,
+        authenticator,
+        paypal,
+        audit,
+        jobs,
+        apiPublicUrl: env.API_PUBLIC_URL ?? `http://localhost:${env.PORT}`,
+        encryptionKey: env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY,
+        verifyCredentials: async (merchantId, credentials) => {
+          const verification = new PayPalClient({
+            baseUrl: env.PAYPAL_API_BASE,
+            credentials: singleAppCredentials(credentials),
+            log: {
+              info: (obj, msg) => app.log.info(obj, msg),
+              warn: (obj, msg) => app.log.warn(obj, msg),
+            },
+          });
+          return verification.checkAuth(merchantId);
+        },
+      });
+    }
+  } else {
+    app.log.warn("Merchant authentication is disabled: configure SESSION_SECRET and DASHBOARD_URL");
+  }
   await app.register(opsRoutes, {
     db,
     paypalCheck: () => paypal.checkAuth("status"),
@@ -131,13 +201,18 @@ export async function createCore(env: Env, url: string, log: CoreLogger) {
   const pool = createPool(url, onIdleError, { connectionOptions: APP_ROLE_OPTIONS });
   const db = createDb(pool);
   // The mock only knows its own app, so sandbox credentials in .env must not reach it.
-  const credentials =
+  const fallbackCredentials =
     !env.PAYPAL_USE_MOCK && env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET
       ? { clientId: env.PAYPAL_CLIENT_ID, clientSecret: env.PAYPAL_CLIENT_SECRET }
-      : MOCK_CREDENTIALS;
+      : undefined;
+  const credentials = env.PAYPAL_USE_MOCK
+    ? singleAppCredentials(MOCK_CREDENTIALS)
+    : env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY
+      ? new DbCredentialSource(db, env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY, fallbackCredentials)
+      : singleAppCredentials(fallbackCredentials ?? MOCK_CREDENTIALS);
   const paypal = new PayPalClient({
     baseUrl: env.PAYPAL_USE_MOCK ? env.PAYPAL_MOCK_URL : env.PAYPAL_API_BASE,
-    credentials: singleAppCredentials(credentials),
+    credentials,
     log: { info: (obj, msg) => log.debug(obj, msg), warn: (obj, msg) => log.warn(obj, msg) },
   });
   const jobs = await Jobs.start({ connectionString: withStrictSsl(url), log });

@@ -47,6 +47,26 @@ export function buildServer(env: Env, options: ServerOptions = {}): FastifyInsta
   // Echo the request id so a bug report or browser trace can be matched to our logs.
   app.addHook("onRequest", async (request, reply) => {
     reply.header("x-request-id", request.id);
+    const dashboardOrigin = env.DASHBOARD_URL ? new URL(env.DASHBOARD_URL).origin : null;
+    const requestOrigin = request.headers.origin;
+    if (dashboardOrigin && requestOrigin === dashboardOrigin) {
+      reply
+        .header("access-control-allow-origin", dashboardOrigin)
+        .header("access-control-allow-credentials", "true")
+        .header("access-control-expose-headers", "x-request-id")
+        .header("vary", "Origin");
+    }
+    if (request.method === "OPTIONS" && request.url.startsWith("/v1/m/")) {
+      if (!dashboardOrigin || requestOrigin !== dashboardOrigin) {
+        return reply.code(403).send();
+      }
+      return reply
+        .header("access-control-allow-methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
+        .header("access-control-allow-headers", "content-type, x-keepwell-csrf, last-event-id")
+        .header("access-control-max-age", "600")
+        .code(204)
+        .send();
+    }
   });
 
   // Liveness: the process is up. Never touches dependencies, so a database outage doesn't

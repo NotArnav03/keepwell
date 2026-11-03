@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { pantryPlanSubscription, PANTRY_PLAN } from "@keepwell/contracts/fakes";
 import type { AuditEntry, MerchantFeedEvent, MerchantTimelineResponse } from "@keepwell/contracts";
-import { renderAuditExplorer, renderLiveFeed, renderSubscribers, renderTimelineFallback } from "./views.js";
+import {
+  explainAuditEntry,
+  renderAuditExplorer,
+  renderLiveFeed,
+  renderSubscribers,
+  renderTimelineFallback,
+} from "./views.js";
 
 describe("merchant dashboard data views", () => {
   it("renders API-provided subscriber data and a cursor link safely", () => {
@@ -41,6 +47,23 @@ describe("merchant dashboard data views", () => {
     expect(html).toContain("#audit?subject=action-1");
     expect(html).toContain("I-FAKEMAYA00001");
     expect(html).not.toContain("payload");
+  });
+
+  it("uses the recorded policy explanation when present", () => {
+    const entry: AuditEntry = {
+      seq: 2,
+      merchantId: PANTRY_PLAN.merchantId,
+      at: "2026-11-03T12:00:00Z",
+      actor: "policy",
+      kind: "action.state_changed",
+      subjectIds: {},
+      payload: { explanation: ["Offer allowed.", "Subscriber consent recorded."] },
+      simulated: false,
+      prevHash: "0".repeat(64),
+      hash: "1".repeat(64),
+    };
+
+    expect(explainAuditEntry(entry)).toBe("Offer allowed. Subscriber consent recorded.");
   });
 
   it("renders the vendor-neutral timeline fallback with audit and PayPal links", () => {

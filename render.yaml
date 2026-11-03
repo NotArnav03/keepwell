@@ -30,6 +30,8 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
+      - key: PAYPAL_CREDENTIALS_ENCRYPTION_KEY
+        sync: false
       # No PAYPAL_WEBHOOK_ID: `pnpm seed` registers the webhook and stores its id on the merchant.
       # Read by the agent once it's wired in; blank until then.
       - key: ANTHROPIC_API_KEY
@@ -40,6 +42,12 @@ services:
       # The service's own URL: PayPal sends buyers back here after a revise.
       - key: API_PUBLIC_URL
         value: https://keepwell-api-staging.onrender.com
+      # Set the exact static-site origin so credentialed CORS and CSRF checks are restricted to it.
+      - key: DASHBOARD_URL
+        sync: false
+      # Random 32+ byte secret generated separately for each environment.
+      - key: SESSION_SECRET
+        sync: false
       - key: OPS_TOKEN
         sync: false
       - key: SENTRY_DSN
