@@ -74,7 +74,9 @@ export async function seedDemoMerchant(deps: SeedDeps, options: SeedOptions): Pr
   // Plans: reuse any with the right name; otherwise create them on one product.
   const existing = await paypal.listPlans(merchantId);
   const byName = new Map(existing.filter((p) => p.status === "ACTIVE").map((p) => [p.name, p]));
-  let productId = existing[0]?.productId ?? null;
+  // Only a Pantry Plan plan's product counts: the sandbox app can hold other products (spike Q2's).
+  const ours = new Set<string>(PANTRY_PLANS.map((p) => p.name));
+  let productId = existing.find((p) => ours.has(p.name))?.productId ?? null;
   const planIds = {} as SeedResult["planIds"];
   const createdPlans: string[] = [];
   for (const plan of PANTRY_PLANS) {
