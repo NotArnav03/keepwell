@@ -40,9 +40,10 @@ services:
       # The service's own URL: PayPal sends buyers back here after a revise.
       - key: API_PUBLIC_URL
         value: https://keepwell-api-staging.onrender.com
-      # Render's proxy is the one hop in front of the service: request.ip is the address it saw.
+      # Two proxies sit in front of the service: Render's edge, then an internal one (10.x). Checked
+      # on staging 3 Nov: with 1, request.ip was the internal proxy's 10.x address.
       - key: TRUST_PROXY_HOPS
-        value: "1"
+        value: "2"
       - key: OPS_TOKEN
         sync: false
       # Email (modules/notify, #91). Signs unsubscribe links: 32+ random characters, and it must be
