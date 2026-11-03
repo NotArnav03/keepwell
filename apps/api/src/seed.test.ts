@@ -22,15 +22,22 @@ const EMPTY = {
   clientSecret: "empty-secret",
 };
 
+/** A second empty PayPal app, so its seed's idempotency keys are its own. */
+const OTHER_APP = { ...EMPTY, id: "0199f000-0000-7000-8000-00000000000f", clientId: "other-client" };
+
 let testDb: TestDatabase;
 let db: Db;
 
-async function setUp(credentials: { clientId: string; clientSecret: string }, withFixtures: boolean) {
+async function setUp(
+  credentials: { clientId: string; clientSecret: string },
+  withFixtures: boolean,
+  empty = EMPTY,
+) {
   const mock = createPayPalMock({
     fixtures: (now) =>
       withFixtures
         ? [pantryPlanFixture(now)]
-        : [{ merchant: EMPTY, plans: [], subscriptions: [], transactions: [] }],
+        : [{ merchant: empty, plans: [], subscriptions: [], transactions: [] }],
   });
   const paypal = new PayPalClient({
     baseUrl: await mock.listen(),
@@ -134,6 +141,45 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("pnpm seed", { timeout: 120_000
       const second = await seedDemoMerchant(deps, options);
       expect(second.createdPlans).toEqual([]);
       expect(mock.state.listPlans(EMPTY.id, null, { page: 1, pageSize: 20 }).items).toHaveLength(3);
+    } finally {
+      await mock.close();
+    }
+  });
+
+  it("makes its own product when the PayPal app only has someone else's plans", async () => {
+    const { mock, deps } = await setUp(OTHER_APP, false, OTHER_APP);
+    // The sandbox app as spike Q2 left it: one unrelated plan on its own product.
+    const other = mock.state.createProduct(OTHER_APP.id, "Keepwell spike");
+    mock.state.createPlan(OTHER_APP.id, {
+      product_id: other.id,
+      name: "Keepwell spike: $1.00 a day",
+      description: "",
+      usage_type: "LICENSED",
+      billing_cycles: [
+        {
+          frequency: { interval_unit: "DAY", interval_count: 1 },
+          tenure_type: "REGULAR",
+          sequence: 1,
+          total_cycles: 0,
+          pricing_scheme: { fixed_price: { currency_code: "USD", value: "1.00" }, version: 1 },
+        },
+      ],
+      payment_preferences: {
+        auto_bill_outstanding: true,
+        setup_fee_failure_action: "CANCEL",
+        payment_failure_threshold: 0,
+      },
+    });
+    try {
+      await seedDemoMerchant(deps, {
+        merchantId: OTHER_APP.id,
+        slug: "other-app",
+        webhookUrl: `http://localhost:3000/webhooks/paypal/${OTHER_APP.id}`,
+      });
+      const pantry = mock.state
+        .listPlans(OTHER_APP.id, null, { page: 1, pageSize: 20 })
+        .items.filter((p) => p.product_id !== other.id);
+      expect(pantry.map((p) => p.name).sort()).toEqual(["Lite", "Standard", "Standard Annual"]);
     } finally {
       await mock.close();
     }
