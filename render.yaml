@@ -30,8 +30,8 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
-      - key: PAYPAL_WEBHOOK_ID
-        sync: false
+      # No PAYPAL_WEBHOOK_ID: `pnpm seed` registers the webhook and stores its id on the merchant.
+      # Read by the agent once it's wired in; blank until then.
       - key: ANTHROPIC_API_KEY
         sync: false
       # The whole AI budget is a $5 prepaid credit that must last until judging ends (21 Dec).
