@@ -25,6 +25,7 @@ describe("MerchantApi", () => {
         JSON.stringify({
           merchant: { id: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b", slug: "pantry-plan", name: "Pantry Plan" },
           user: { id: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2c", email: "owner@example.test", role: "owner" },
+          csrfToken: "a-csrf-token-that-is-at-least-thirty-two-characters",
         }),
         { status: 200 },
       ),
@@ -59,6 +60,33 @@ describe("MerchantApi", () => {
       status: 401,
       message: "Sign in required",
     });
+  });
+
+  it("sends the session CSRF token on unsafe requests", async () => {
+    const csrfToken = "a-csrf-token-that-is-at-least-thirty-two-characters";
+    const fetcher = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            merchant: {
+              id: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b",
+              slug: "pantry-plan",
+              name: "Pantry Plan",
+            },
+            user: { id: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2c", email: "owner@example.test", role: "owner" },
+            csrfToken,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const api = new MerchantApi("https://keepwell.example/v1", fetcher);
+
+    await api.login({ email: "owner@example.test", password: "not-logged" });
+    await api.logout();
+
+    expect(fetcher.mock.calls[1]?.[1]?.headers).toMatchObject({ "x-keepwell-csrf": csrfToken });
   });
 
   it("rejects malformed successful response bodies", async () => {

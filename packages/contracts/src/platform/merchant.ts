@@ -4,13 +4,15 @@ import { AuditEntry, AuditKind, AuditVerifyResult } from "./audit.js";
 import { DomainEventEnvelope } from "./events.js";
 import { Id, IsoDateTime, Money, ReasonCategory } from "../shared.js";
 import { OfferKind } from "../brain/offers.js";
-import { Session } from "../surfaces/sessions.js";
+import { Session, SessionStreamEvent } from "../surfaces/sessions.js";
 import { SubscriptionSnapshot, SubscriptionStatus } from "./subscriptions.js";
 
 // Merchant-facing dashboard API contracts (CONTRACTS.md §4, owner M4).
 
 export const MerchantLoginRequest = z.strictObject({
   email: z.email(),
+  /** Optional when the email uniquely identifies a merchant account. */
+  merchantSlug: z.string().trim().min(1).max(80).optional(),
   // Passwords are intentionally not trimmed or normalized at the API boundary.
   password: z.string().min(1),
 });
@@ -19,6 +21,8 @@ export type MerchantLoginRequest = z.infer<typeof MerchantLoginRequest>;
 export const MerchantMeResponse = z.object({
   merchant: z.object({ id: Id, slug: z.string().min(1), name: z.string().min(1) }),
   user: z.object({ id: Id, email: z.email(), role: z.enum(["owner", "admin", "viewer"]) }),
+  /** Sent in the JSON response, never in a cookie, and required as a header on unsafe requests. */
+  csrfToken: z.string().min(32),
 });
 export type MerchantMeResponse = z.infer<typeof MerchantMeResponse>;
 
@@ -64,9 +68,12 @@ export const MerchantSubscriptionListResponse = z.object({
 });
 export type MerchantSubscriptionListResponse = z.infer<typeof MerchantSubscriptionListResponse>;
 
+export const MerchantSessionDetail = Session.extend({ events: z.array(SessionStreamEvent) });
+export type MerchantSessionDetail = z.infer<typeof MerchantSessionDetail>;
+
 export const MerchantSubscriptionDetailResponse = z.object({
   subscription: SubscriptionSnapshot,
-  sessions: z.array(Session),
+  sessions: z.array(MerchantSessionDetail),
   actions: z.array(Action),
 });
 export type MerchantSubscriptionDetailResponse = z.infer<typeof MerchantSubscriptionDetailResponse>;
@@ -103,7 +110,7 @@ export const MerchantTimelineResponse = z.object({
   resources: z.array(z.object({ id: Id, name: z.string(), subscriptionId: Id })),
   events: z.array(
     z.object({
-      id: Id,
+      id: z.string().min(1),
       resourceId: Id,
       startDate: IsoDateTime,
       endDate: IsoDateTime.nullable(),
@@ -118,7 +125,7 @@ export const MerchantTimelineResponse = z.object({
 export type MerchantTimelineResponse = z.infer<typeof MerchantTimelineResponse>;
 
 export const MerchantOnboardingCredentialsRequest = z.strictObject({
-  clientId: z.string().trim().min(1).max(256),
+  clientId: z.string().trim().min(4).max(256),
   // Never trim, log, or return the secret; PayPal client secrets are opaque values.
   clientSecret: z.string().min(1).max(512),
 });

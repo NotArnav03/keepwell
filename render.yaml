@@ -31,6 +31,8 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
+      - key: PAYPAL_CREDENTIALS_ENCRYPTION_KEY
+        sync: false
       # No PAYPAL_WEBHOOK_ID: `pnpm seed` registers the webhook and stores its id on the merchant.
       # Read by the agent once it's wired in; blank until then.
       - key: ANTHROPIC_API_KEY
@@ -51,6 +53,12 @@ services:
       # shares one rate limit, too many lets a client pick its own address.
       - key: TRUST_PROXY_HOPS
         value: "3"
+      # Set the exact static-site origin so credentialed CORS and CSRF checks are restricted to it.
+      - key: DASHBOARD_URL
+        sync: false
+      # Random 32+ byte secret generated separately for each environment.
+      - key: SESSION_SECRET
+        sync: false
       - key: OPS_TOKEN
         sync: false
       # Email (modules/notify, #91). Signs unsubscribe links: 32+ random characters, and it must be

@@ -328,7 +328,9 @@ and the policy routes reuse the policy API schemas below the brain contracts. Me
 overview aggregates, subscriber filters/risk summaries/details, domain-event feed envelopes, audit
 and timeline results, onboarding credential/webhook/backfill responses, and one-time API-key output.
 The PayPal client secret is request-only and is explicitly rejected if echoed in a successful
-credential response.
+credential response. Merchant login sets an HttpOnly session cookie and returns a CSRF token in the
+JSON identity response; unsafe authenticated requests echo it in `X-Keepwell-CSRF`. The token is
+never placed in a cookie accessible to JavaScript.
 
 | Method + path | Auth | Purpose |
 |---|---|---|

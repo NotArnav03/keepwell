@@ -85,6 +85,12 @@ const auditExplanations: Record<string, string> = {
 };
 
 export function explainAuditEntry(entry: AuditEntry): string {
+  const recorded = entry.payload.explanation;
+  if (typeof recorded === "string" && recorded.trim()) return recorded;
+  if (Array.isArray(recorded) && recorded.every((item): item is string => typeof item === "string")) {
+    const explanation = recorded.filter((item) => item.trim()).join(" ");
+    if (explanation) return explanation;
+  }
   return auditExplanations[entry.kind] ?? `Recorded event: ${entry.kind}.`;
 }
 

@@ -11,7 +11,7 @@ import {
   type Money,
 } from "@keepwell/contracts";
 import type { CredentialSource } from "./credentials.js";
-import { toPayPalMoney } from "./money.js";
+import { toMoney, toPayPalMoney } from "./money.js";
 import { TokenBuckets, type RateLimit } from "./rate-limit.js";
 
 // The only code that calls PayPal (ARCHITECTURE.md §6.1, apps/api/CLAUDE.md). Other modules get the
@@ -96,6 +96,25 @@ const TransactionList = z.looseObject({
       }),
     )
     .default([]),
+});
+
+const PlanDetailsBody = z.looseObject({
+  id: z.string().min(1),
+  product_id: z.string().min(1),
+  name: z.string().min(1),
+  status: z.string().min(1),
+  billing_cycles: z.array(
+    z.looseObject({
+      tenure_type: z.enum(["TRIAL", "REGULAR"]),
+      frequency: z.looseObject({
+        interval_unit: z.enum(["DAY", "WEEK", "MONTH", "YEAR"]),
+        interval_count: z.number().int().min(1),
+      }),
+      pricing_scheme: z.looseObject({
+        fixed_price: z.looseObject({ currency_code: z.string().length(3), value: z.string() }),
+      }),
+    }),
+  ),
 });
 
 /** The parts of a billing plan the snapshot needs. */
@@ -183,6 +202,12 @@ export class PayPalClient implements PayPalGateway {
       // The reason is already in PayPalGatewayError's log line; here only up or down matters.
       return false;
     }
+  }
+
+  /** Drop a cached OAuth token after this merchant's stored PayPal credentials change. */
+  invalidateToken(merchantId: string): void {
+    this.tokens.delete(merchantId);
+    this.pendingTokens.delete(merchantId);
   }
 
   // ---------- reads: the PayPalGateway contract ----------
@@ -432,6 +457,42 @@ export class PayPalClient implements PayPalGateway {
       if (list.plans.length < 20 || page >= (list.total_pages ?? page)) break;
     }
     return plans;
+  }
+
+  /** The plan catalogue details onboarding needs to populate the merchant's plan read model. */
+  async getPlanDetails(
+    merchantId: string,
+    paypalPlanId: string,
+  ): Promise<{
+    id: string;
+    productId: string;
+    name: string;
+    status: string;
+    intervalUnit: "DAY" | "WEEK" | "MONTH" | "YEAR";
+    intervalCount: number;
+    priceValue: string;
+    priceCurrency: string;
+  }> {
+    const { body } = await this.request(merchantId, {
+      method: "GET",
+      path: `/v1/billing/plans/${encodeURIComponent(paypalPlanId)}`,
+    });
+    const plan = PlanDetailsBody.parse(body);
+    const regular = plan.billing_cycles.find((cycle) => cycle.tenure_type === "REGULAR");
+    if (!regular) {
+      throw new PayPalGatewayError("invalid_request", "PayPal plan has no regular billing cycle");
+    }
+    const price = toMoney(regular.pricing_scheme.fixed_price);
+    return {
+      id: plan.id,
+      productId: plan.product_id,
+      name: plan.name,
+      status: plan.status,
+      intervalUnit: regular.frequency.interval_unit,
+      intervalCount: regular.frequency.interval_count,
+      priceValue: price.value,
+      priceCurrency: price.currency,
+    };
   }
 
   async createProduct(

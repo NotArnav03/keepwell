@@ -59,9 +59,10 @@ type Fetcher = typeof fetch;
 /** Typed same-origin client. Every network response is validated at the boundary. */
 export class MerchantApi {
   private readonly base: URL;
+  private csrfToken: string | null = null;
 
   constructor(
-    baseUrl = "/v1",
+    baseUrl = import.meta.env.VITE_API_BASE_URL || "/v1",
     private readonly fetcher: Fetcher = fetch,
   ) {
     this.base = new URL(baseUrl, globalThis.location?.origin ?? "http://localhost");
@@ -69,15 +70,24 @@ export class MerchantApi {
 
   async login(input: MerchantLoginRequestType): Promise<MerchantMeResponse> {
     const body = MerchantLoginRequest.parse(input);
-    return this.request("/m/auth/login", { method: "POST", body: JSON.stringify(body) }, MerchantMeResponse);
+    const identity = await this.request(
+      "/m/auth/login",
+      { method: "POST", body: JSON.stringify(body) },
+      MerchantMeResponse,
+    );
+    this.csrfToken = identity.csrfToken;
+    return identity;
   }
 
   async logout(): Promise<void> {
     await this.request("/m/auth/logout", { method: "POST" });
+    this.csrfToken = null;
   }
 
-  me(): Promise<MerchantMeResponse> {
-    return this.request("/m/me", { method: "GET" }, MerchantMeResponse);
+  async me(): Promise<MerchantMeResponse> {
+    const identity = await this.request("/m/me", { method: "GET" }, MerchantMeResponse);
+    this.csrfToken = identity.csrfToken;
+    return identity;
   }
 
   overview(query: MerchantOverviewQueryType): Promise<MerchantOverviewResponse> {
@@ -217,6 +227,9 @@ export class MerchantApi {
         credentials: "include",
         headers: {
           ...(init.body ? { "content-type": "application/json" } : {}),
+          ...(init.method && !["GET", "HEAD", "OPTIONS"].includes(init.method.toUpperCase()) && this.csrfToken
+            ? { "x-keepwell-csrf": this.csrfToken }
+            : {}),
           ...init.headers,
         },
       },

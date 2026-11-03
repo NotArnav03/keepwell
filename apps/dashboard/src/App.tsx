@@ -7,12 +7,15 @@ import {
   type MerchantSubscriptionDetailResponse,
   type MerchantSubscriptionListQuery,
   type MerchantTimelineResponse,
+  type SessionStreamEvent,
+  PolicyDraft,
+  type PolicyDraft as PolicyDraftType,
   type PolicyDryRunResponse,
   type PolicyVersionResponse,
 } from "@keepwell/contracts";
 import { MerchantApi, MerchantApiError } from "./api.js";
 import { explainAuditEntry } from "./views.js";
-import { parsePolicyDraft, previewPolicyDraft } from "./policy-editor.js";
+import { previewPolicyDraft } from "./policy-editor.js";
 import { themeStyles, type Theme } from "@keepwell/ui";
 
 type Page = "overview" | "subscribers" | "timeline" | "audit" | "policies" | "onboarding";
@@ -66,10 +69,15 @@ function Login({ onSignedIn }: { onSignedIn: (identity: MerchantMeResponse) => v
     try {
       const email = values.get("email");
       const password = values.get("password");
+      const merchantSlug = values.get("merchantSlug");
       if (typeof email !== "string" || typeof password !== "string") {
         throw new TypeError("Enter an email and password.");
       }
-      const identity = await api.login({ email, password });
+      const identity = await api.login({
+        email,
+        password,
+        ...(typeof merchantSlug === "string" && merchantSlug.trim() ? { merchantSlug } : {}),
+      });
       form.reset();
       onSignedIn(identity);
     } catch (cause) {
@@ -90,6 +98,8 @@ function Login({ onSignedIn }: { onSignedIn: (identity: MerchantMeResponse) => v
         <p className="eyebrow">MERCHANT WORKSPACE</p>
         <h1>Sign in to Keepwell</h1>
         {error && <ErrorMessage message={error} />}
+        <label htmlFor="merchantSlug">Merchant slug (if provided by your administrator)</label>
+        <input id="merchantSlug" name="merchantSlug" autoComplete="organization" />
         <label htmlFor="email">Email</label>
         <input id="email" name="email" type="email" autoComplete="username" required />
         <label htmlFor="password">Password</label>
@@ -550,8 +560,19 @@ function SubscriberDetail({ api: client, id }: { api: MerchantApi; id: string })
           <ul>
             {detail.sessions.map((session) => (
               <li key={session.id}>
-                {session.channel} · {session.state} · {session.outcome ?? "in progress"}{" "}
-                {session.simulated && <Badge>SIMULATED</Badge>}
+                <strong>
+                  {session.channel} · {session.state} · {session.outcome ?? "in progress"}{" "}
+                  {session.simulated && <Badge>SIMULATED</Badge>}
+                </strong>
+                {session.events.length > 0 && (
+                  <ol className="transcript">
+                    {session.events.map((event, index) => (
+                      <li key={`${session.id}-${index}`}>
+                        <strong>{event.type}</strong>: {describeSessionEvent(event)}
+                      </li>
+                    ))}
+                  </ol>
+                )}
               </li>
             ))}
           </ul>
@@ -631,6 +652,17 @@ function AuditExplorer({ api: client }: { api: MerchantApi }) {
             </h2>
             <time dateTime={entry.at}>{entry.at}</time>
             <p>{explainAuditEntry(entry)}</p>
+            {typeof entry.payload.policyVersion === "number" && (
+              <p>Policy version {entry.payload.policyVersion}</p>
+            )}
+            {entry.subjectIds.paypalSubscriptionId && (
+              <p>
+                PayPal subscription:{" "}
+                <a href={`#paypal/${encodeURIComponent(entry.subjectIds.paypalSubscriptionId)}`}>
+                  {entry.subjectIds.paypalSubscriptionId}
+                </a>
+              </p>
+            )}
             <p>
               {Object.entries(entry.subjectIds).map(([label, value]) => (
                 <span key={label} className="subject-link">
@@ -707,7 +739,7 @@ function Timeline({ api: client }: { api: MerchantApi }) {
 
 function PolicyEditor({ api: client }: { api: MerchantApi }) {
   const [stored, setStored] = useState<PolicyVersionResponse | null>(null);
-  const [source, setSource] = useState("");
+  const [draft, setDraft] = useState<PolicyDraftType | null>(null);
   const [sampleIds, setSampleIds] = useState("");
   const [changeNote, setChangeNote] = useState("");
   const [dryRun, setDryRun] = useState<PolicyDryRunResponse | null>(null);
@@ -724,8 +756,8 @@ function PolicyEditor({ api: client }: { api: MerchantApi }) {
         const version = await client.policy(list.currentVersion);
         if (!active) return;
         setStored(version);
-        const { version: _version, ...draft } = version.document;
-        setSource(JSON.stringify(draft, null, 2));
+        const { version: _version, ...policyDraft } = version.document;
+        setDraft(PolicyDraft.parse(policyDraft));
       })
       .catch((cause: unknown) => {
         if (active) setError(cause instanceof Error ? cause.message : "Policy unavailable.");
@@ -737,13 +769,36 @@ function PolicyEditor({ api: client }: { api: MerchantApi }) {
       active = false;
     };
   }, [client]);
+
+  function updateDraft(update: (current: PolicyDraftType) => unknown) {
+    if (!draft) return;
+    const parsed = PolicyDraft.safeParse(update(draft));
+    if (!parsed.success) {
+      setError("That value is invalid for the policy schema.");
+      return;
+    }
+    setDraft(parsed.data);
+    setDryRun(null);
+    setPreview([]);
+    setError("");
+  }
+
+  function updateJson(update: (current: PolicyDraftType, value: unknown) => unknown, text: string) {
+    try {
+      const value: unknown = JSON.parse(text);
+      updateDraft((current) => update(current, value));
+    } catch {
+      setError("Enter valid JSON for this field.");
+    }
+  }
+
   async function runDryRun() {
     setError("");
     setMessage("");
     setDryRun(null);
     setPreview([]);
     try {
-      const draft = parsePolicyDraft(source);
+      if (!draft) throw new Error("A policy document is not loaded.");
       const ids = sampleIds
         .split(/[\s,]+/)
         .map((value) => value.trim())
@@ -764,10 +819,10 @@ function PolicyEditor({ api: client }: { api: MerchantApi }) {
     setError("");
     setMessage("");
     try {
-      const document = parsePolicyDraft(source);
+      if (!draft) throw new Error("A policy document is not loaded.");
       const result = await client.publishPolicy({
         baseVersion: stored?.version ?? null,
-        document,
+        document: draft,
         ...(changeNote && { changeNote }),
       });
       setStored(result);
@@ -800,14 +855,356 @@ function PolicyEditor({ api: client }: { api: MerchantApi }) {
         </p>
       )}
       <section className="panel policy-form">
-        <label htmlFor="policy-json">Policy document (JSON)</label>
-        <textarea
-          id="policy-json"
-          rows={22}
-          spellCheck={false}
-          value={source}
-          onChange={(event) => setSource(event.currentTarget.value)}
-        />
+        {!draft ? (
+          <p>No published policy is available yet. Publish an initial policy before editing.</p>
+        ) : (
+          <div className="policy-grid">
+            <fieldset>
+              <legend>Pause offer</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.offers.pause.enabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        pause: { ...current.offers.pause, enabled: event.currentTarget.checked },
+                      },
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label>
+                Maximum cycles
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={draft.offers.pause.maxCycles}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        pause: { ...current.offers.pause, maxCycles: Number(event.currentTarget.value) },
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Cooldown days
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.offers.pause.cooldownDays}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        pause: { ...current.offers.pause, cooldownDays: Number(event.currentTarget.value) },
+                      },
+                    }))
+                  }
+                />
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend>Discount offer</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.offers.discount.enabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        discount: { ...current.offers.discount, enabled: event.currentTarget.checked },
+                      },
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label>
+                Maximum percent
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={draft.offers.discount.maxPercent}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        discount: {
+                          ...current.offers.discount,
+                          maxPercent: Number(event.currentTarget.value),
+                        },
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Maximum cycles
+                <input
+                  type="number"
+                  min={1}
+                  value={draft.offers.discount.maxCycles}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        discount: { ...current.offers, maxCycles: Number(event.currentTarget.value) },
+                      },
+                    }))
+                  }
+                />
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend>Downgrade offer</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.offers.downgrade.enabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        downgrade: { ...current.offers.downgrade, enabled: event.currentTarget.checked },
+                      },
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label>
+                Plan targets (JSON)
+                <textarea
+                  rows={5}
+                  spellCheck={false}
+                  value={JSON.stringify(draft.offers.downgrade.targets, null, 2)}
+                  onChange={(event) =>
+                    updateJson(
+                      (current, value) => ({
+                        ...current,
+                        offers: {
+                          ...current.offers,
+                          downgrade: {
+                            ...current.offers.downgrade,
+                            targets: value as PolicyDraftType["offers"]["downgrade"]["targets"],
+                          },
+                        },
+                      }),
+                      event.currentTarget.value,
+                    )
+                  }
+                />
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend>Switch to annual</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.offers.switch_annual.enabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        switch_annual: {
+                          ...current.offers.switch_annual,
+                          enabled: event.currentTarget.checked,
+                        },
+                      },
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label>
+                Monthly → annual plan IDs (JSON)
+                <textarea
+                  rows={5}
+                  spellCheck={false}
+                  value={JSON.stringify(draft.offers.switch_annual.targets, null, 2)}
+                  onChange={(event) =>
+                    updateJson(
+                      (current, value) => ({
+                        ...current,
+                        offers: {
+                          ...current.offers,
+                          switch_annual: {
+                            ...current.offers.switch_annual,
+                            targets: value as PolicyDraftType["offers"]["switch_annual"]["targets"],
+                          },
+                        },
+                      }),
+                      event.currentTarget.value,
+                    )
+                  }
+                />
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend>Partial refund</legend>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={draft.offers.refund_partial.enabled}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        refund_partial: {
+                          ...current.offers.refund_partial,
+                          enabled: event.currentTarget.checked,
+                        },
+                      },
+                    }))
+                  }
+                />
+                Enabled
+              </label>
+              <label>
+                Maximum percent of last payment
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={draft.offers.refund_partial.maxPercentOfLastPayment}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        refund_partial: {
+                          ...current.offers.refund_partial,
+                          maxPercentOfLastPayment: Number(event.currentTarget.value),
+                        },
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Monthly refund cap
+                <input
+                  value={draft.offers.refund_partial.maxPerMonth.value}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      offers: {
+                        ...current.offers,
+                        refund_partial: {
+                          ...current.offers.refund_partial,
+                          maxPerMonth: {
+                            ...current.offers.refund_partial.maxPerMonth,
+                            value: event.currentTarget.value,
+                          },
+                        },
+                      },
+                    }))
+                  }
+                />
+              </label>
+            </fieldset>
+            <fieldset>
+              <legend>Eligibility and tone</legend>
+              <label>
+                Minimum tenure days for discount
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.eligibility.minTenureDaysForDiscount}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      eligibility: {
+                        ...current.eligibility,
+                        minTenureDaysForDiscount: Number(event.currentTarget.value),
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Maximum saves per subscriber / 365 days
+                <input
+                  type="number"
+                  min={0}
+                  value={draft.eligibility.maxSavesPerSubscriberPer365d}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      eligibility: {
+                        ...current.eligibility,
+                        maxSavesPerSubscriberPer365d: Number(event.currentTarget.value),
+                      },
+                    }))
+                  }
+                />
+              </label>
+              <label>
+                Tone
+                <select
+                  value={draft.tone}
+                  onChange={(event) =>
+                    updateDraft((current) => ({
+                      ...current,
+                      tone: event.currentTarget.value as PolicyDraftType["tone"],
+                    }))
+                  }
+                >
+                  <option value="warm">Warm</option>
+                  <option value="neutral">Neutral</option>
+                  <option value="brief">Brief</option>
+                </select>
+              </label>
+              <label>
+                Support contact
+                <input
+                  value={draft.supportContact}
+                  onChange={(event) =>
+                    updateDraft((current) => ({ ...current, supportContact: event.currentTarget.value }))
+                  }
+                />
+              </label>
+            </fieldset>
+            <fieldset className="reason-preferences">
+              <legend>Offer ordering by cancellation reason</legend>
+              <label>
+                Reason preferences (JSON)
+                <textarea
+                  rows={7}
+                  spellCheck={false}
+                  value={JSON.stringify(draft.reasonPreferences, null, 2)}
+                  onChange={(event) =>
+                    updateJson(
+                      (current, value) => ({
+                        ...current,
+                        reasonPreferences: value as PolicyDraftType["reasonPreferences"],
+                      }),
+                      event.currentTarget.value,
+                    )
+                  }
+                />
+              </label>
+            </fieldset>
+          </div>
+        )}
         <label htmlFor="sample-ids">Sample subscriber IDs (comma or space separated)</label>
         <input
           id="sample-ids"
@@ -992,4 +1389,25 @@ function PageHeading({ title, subtitle }: { title: string; subtitle?: string }) 
 
 function Badge({ children }: { children: string }) {
   return <span className="badge">{children}</span>;
+}
+
+function describeSessionEvent(event: SessionStreamEvent): string {
+  switch (event.type) {
+    case "agent.delta":
+      return event.text;
+    case "offer.presented":
+      return event.cardText;
+    case "reason.chips":
+      return event.reasons.join(", ");
+    case "fallback.changed":
+      return `Fallback changed to ${event.level}.`;
+    case "action.update":
+      return `Action ${event.actionId} is ${event.state}.`;
+    case "session.closed":
+      return event.summary;
+    case "agent.done":
+      return "Reply complete.";
+    case "error":
+      return `${event.code}: ${event.message}`;
+  }
 }

@@ -8,8 +8,8 @@ const env = loadEnv({ NODE_ENV: "test", LOG_LEVEL: "silent", RENDER_GIT_COMMIT: 
 
 let app: FastifyInstance | undefined;
 
-function start(options?: ServerOptions): FastifyInstance {
-  app = buildServer(env, options);
+function start(options?: ServerOptions, serverEnv = env): FastifyInstance {
+  app = buildServer(serverEnv, options);
   return app;
 }
 
@@ -136,5 +136,37 @@ describe("client IP behind Render's proxy", () => {
 
   it("ignores X-Forwarded-For entirely when no proxy is trusted (local)", async () => {
     expect(await ipSeen("0", "203.0.113.9")).toBe("127.0.0.1");
+  });
+});
+
+describe("dashboard credentialed CORS", () => {
+  const dashboardEnv = loadEnv({
+    NODE_ENV: "test",
+    LOG_LEVEL: "silent",
+    DASHBOARD_URL: "https://dashboard.example.test",
+  });
+
+  it("allows preflight only from the configured dashboard origin", async () => {
+    const server = start(undefined, dashboardEnv);
+    const allowed = await server.inject({
+      method: "OPTIONS",
+      url: "/v1/m/auth/login",
+      headers: {
+        origin: "https://dashboard.example.test",
+        "access-control-request-method": "POST",
+        "access-control-request-headers": "content-type,x-keepwell-csrf",
+      },
+    });
+    expect(allowed.statusCode).toBe(204);
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://dashboard.example.test");
+    expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
+    expect(allowed.headers["access-control-allow-headers"]).toContain("x-keepwell-csrf");
+
+    const denied = await server.inject({
+      method: "OPTIONS",
+      url: "/v1/m/auth/login",
+      headers: { origin: "https://attacker.example.test" },
+    });
+    expect(denied.statusCode).toBe(403);
   });
 });

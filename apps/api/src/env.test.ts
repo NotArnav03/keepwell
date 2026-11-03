@@ -42,8 +42,29 @@ describe("loadEnv", () => {
     it("requires sandbox credentials on hosted environments", () => {
       expect(() => loadEnv({ ...db, APP_ENV: "staging" })).toThrow(/PAYPAL_CLIENT_ID/);
       expect(() =>
-        loadEnv({ ...db, APP_ENV: "staging", PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" }),
+        loadEnv({
+          ...db,
+          APP_ENV: "staging",
+          PAYPAL_CLIENT_ID: "id",
+          PAYPAL_CLIENT_SECRET: "secret",
+          SESSION_SECRET: "a-session-secret-with-at-least-32-bytes",
+          DASHBOARD_URL: "https://dashboard.example.test",
+          PAYPAL_CREDENTIALS_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        }),
       ).not.toThrow();
+    });
+
+    it("requires a sufficiently long session secret and a dashboard origin when hosted", () => {
+      expect(() => loadEnv({ ...db, APP_ENV: "staging", SESSION_SECRET: "short" })).toThrow(/DASHBOARD_URL/);
+      expect(() =>
+        loadEnv({
+          ...db,
+          APP_ENV: "staging",
+          SESSION_SECRET: "short",
+          DASHBOARD_URL: "https://dashboard.example.test",
+          PAYPAL_CREDENTIALS_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
+        }),
+      ).toThrow(/32 bytes/);
     });
   });
 
