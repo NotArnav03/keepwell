@@ -33,6 +33,9 @@ const EnvSchema = z
     PAYPAL_MOCK_URL: z.preprocess(blank, z.url().default("http://localhost:4010")),
     // Where PayPal sends a buyer back after approving a revise, and the base of other links.
     API_PUBLIC_URL: optionalUrl,
+    // How many proxies sit in front of the API: 1 on Render. request.ip is then the address the
+    // nearest proxy appended to X-Forwarded-For, which a client can't forge. 0 (local) ignores it.
+    TRUST_PROXY_HOPS: z.preprocess(blank, z.coerce.number().int().min(0).max(5).default(0)),
     // Bearer token for GET /ops. Unset: /ops answers 404.
     OPS_TOKEN: z.preprocess(blank, z.string().min(16).optional()),
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
