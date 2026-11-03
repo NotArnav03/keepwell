@@ -2,6 +2,7 @@
 export { FakeActionEngine, type ScheduledResume } from "./action-engine.js";
 export { FakeAudit } from "./audit.js";
 export { FakeDomainEvents } from "./domain-events.js";
+export { FakeJudgePool } from "./judge-pool.js";
 export { FakeAgent } from "./agent.js";
 export { FakeNotifier } from "./notifier.js";
 export { FakePayPalGateway } from "./paypal-gateway.js";

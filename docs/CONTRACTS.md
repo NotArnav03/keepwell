@@ -399,6 +399,16 @@ interface DomainEvents {
   on<T extends DomainEventType>(type: T, handlerName: string, fn: (e: DomainEvent<T>) => Promise<void>): void;
 }
 
+// M1 → M3 (Judge Mode, §6.17). As implemented in packages/contracts/src/platform/interfaces.ts; FakeJudgePool in fakes.
+interface JudgePool {
+  lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;  // 30 min default; null = pool empty, show the fallback
+  release(merchantId: string, poolEntryId: string): Promise<PoolReturn>;              // "available" | "restoring" | "consumed", decided from PayPal's state
+  counts(merchantId: string): Promise<Record<PoolState, number>>;                     // available, leased, restoring, consumed
+}
+// PoolLease = { poolEntryId, subscriptionId, paypalSubscriptionId, leasedUntil }. Leases end on their own at
+// leasedUntil (pool.health, every 5 min). On return: cancelled or another plan → consumed; paused → activate;
+// discounted → plan price back (both as Actions, "restoring" until PayPal shows it whole); the judge's pending resumes are cancelled.
+
 // M2 → M3, M4, evals
 // As implemented in packages/contracts/src/brain/agent.ts (stream: AgentStreamEvent)
 interface Agent {

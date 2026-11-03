@@ -142,7 +142,7 @@ export const poolSubscriptions = pgTable(
       .notNull()
       .unique()
       .references(() => subscriptions.id),
-    state: text({ enum: ["available", "leased", "consumed"] })
+    state: text({ enum: ["available", "leased", "restoring", "consumed"] })
       .notNull()
       .default("available"),
     leasedUntil: at(),

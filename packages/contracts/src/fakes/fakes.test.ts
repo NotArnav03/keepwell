@@ -3,6 +3,7 @@ import { PayPalGatewayError } from "../platform/paypal.js";
 import { FakeActionEngine } from "./action-engine.js";
 import { FakeAudit } from "./audit.js";
 import { FakeDomainEvents } from "./domain-events.js";
+import { FakeJudgePool } from "./judge-pool.js";
 import { FakePayPalGateway } from "./paypal-gateway.js";
 import { uuidv7 } from "./uuidv7.js";
 
@@ -247,5 +248,25 @@ describe("FakeActionEngine", () => {
         afterActionId: null,
       },
     ]);
+  });
+});
+
+describe("FakeJudgePool", () => {
+  it("lends each entry once, empties, and takes entries back as told", async () => {
+    const pool = new FakeJudgePool(clock);
+    const id = pool.add(MERCHANT, SUB, "I-POOL1");
+    const lease = await pool.lease(MERCHANT);
+    expect(lease).toEqual({
+      poolEntryId: id,
+      subscriptionId: SUB,
+      paypalSubscriptionId: "I-POOL1",
+      leasedUntil: "2026-10-29T10:30:00.000Z",
+    });
+    expect(await pool.lease(MERCHANT)).toBeNull();
+    expect(await pool.lease(OTHER_MERCHANT)).toBeNull();
+    pool.nextReturn = "restoring";
+    expect(await pool.release(MERCHANT, id)).toBe("restoring");
+    expect(await pool.counts(MERCHANT)).toEqual({ available: 0, leased: 0, restoring: 1, consumed: 0 });
+    await expect(pool.release(OTHER_MERCHANT, id)).rejects.toThrow();
   });
 });
