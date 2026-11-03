@@ -13,6 +13,7 @@ describe("loadEnv", () => {
       PAYPAL_API_BASE: "https://api-m.sandbox.paypal.com",
       PAYPAL_USE_MOCK: false,
       PAYPAL_MOCK_URL: "http://localhost:4010",
+      TRUST_PROXY_HOPS: 0,
     });
   });
 

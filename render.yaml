@@ -40,7 +40,21 @@ services:
       # The service's own URL: PayPal sends buyers back here after a revise.
       - key: API_PUBLIC_URL
         value: https://keepwell-api-staging.onrender.com
+      # Render's proxy is the one hop in front of the service: request.ip is the address it saw.
+      - key: TRUST_PROXY_HOPS
+        value: "1"
       - key: OPS_TOKEN
+        sync: false
+      # Email (modules/notify, #91). Signs unsubscribe links: 32+ random characters, and it must be
+      # set, because this plan restarts on every wake and an unset secret gets a new random key each
+      # time, which breaks every link already sent.
+      - key: UNSUBSCRIBE_TOKEN_SECRET
+        sync: false
+      # Leave blank on staging: sandbox buyers' addresses (sb-...@personal.example.com) can't receive
+      # mail, so real sends would only bounce. Messages still show in the Demo Inbox.
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
         sync: false
       - key: SENTRY_DSN
         sync: false

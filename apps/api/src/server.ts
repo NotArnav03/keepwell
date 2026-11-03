@@ -1,4 +1,5 @@
 import Fastify, { LogController, type FastifyInstance } from "fastify";
+import { ErrorEnvelope } from "@keepwell/contracts";
 import type { Env } from "./env.js";
 
 /** A dependency the API needs before it can serve traffic (database, job queue, ...). */
@@ -11,6 +12,33 @@ export interface ServerOptions {
   readinessChecks?: ReadinessCheck[];
   /** A check slower than this counts as failed, so /readyz never hangs a load balancer. */
   readinessTimeoutMs?: number;
+  /** Tests only: where log lines go, and at what level (default: stdout at LOG_LEVEL). */
+  logDestination?: NodeJS.WritableStream;
+  logLevel?: string;
+}
+
+/**
+ * The URL as the request log records it: the path, and each query parameter's name but not its
+ * value. Query strings here carry signed tokens (unsubscribe, magic links) and PayPal's return
+ * parameters, none of which belong in Render's logs.
+ */
+export function logSafeUrl(url: string): string {
+  const at = url.indexOf("?");
+  if (at === -1) return url;
+  const names = url
+    .slice(at + 1)
+    .split("&")
+    .filter((pair) => pair !== "")
+    .map((pair) => `${pair.split("=")[0]}=[redacted]`);
+  return `${url.slice(0, at)}?${names.join("&")}`;
+}
+
+interface LoggedRequest {
+  method: string;
+  url: string;
+  host?: string;
+  ip?: string;
+  socket?: { remotePort?: number };
 }
 
 async function runCheck(check: ReadinessCheck, timeoutMs: number): Promise<void> {
@@ -28,20 +56,47 @@ async function runCheck(check: ReadinessCheck, timeoutMs: number): Promise<void>
 }
 
 export function buildServer(env: Env, options: ServerOptions = {}): FastifyInstance {
-  const { readinessChecks = [], readinessTimeoutMs = 2000 } = options;
+  const { readinessChecks = [], readinessTimeoutMs = 2000, logDestination, logLevel } = options;
 
   const app = Fastify({
     logger: {
-      level: env.LOG_LEVEL,
+      level: logLevel ?? env.LOG_LEVEL,
       redact: ["req.headers.authorization", "req.headers.cookie", "req.headers['paypal-auth-algo']"],
-      ...(env.NODE_ENV === "development" && { transport: { target: "pino-pretty" } }),
+      // Fastify's own request serializer, except that the URL goes through logSafeUrl.
+      serializers: {
+        req: (req: LoggedRequest) => ({
+          method: req.method,
+          url: logSafeUrl(req.url),
+          host: req.host,
+          remoteAddress: req.ip,
+          remotePort: req.socket?.remotePort,
+        }),
+      },
+      ...(logDestination && { stream: logDestination }),
+      ...(env.NODE_ENV === "development" && !logDestination && { transport: { target: "pino-pretty" } }),
     },
     requestIdHeader: "x-request-id",
+    // Trust the nearest TRUST_PROXY_HOPS hops, never `true`: Render keeps a client-sent
+    // X-Forwarded-For and appends to it. A plain number would do, but Fastify 5.12 fails closed on
+    // one, since it can't tell a proxy from a direct client. On Render nothing reaches the service
+    // except through its proxy, so counting hops is sound there.
+    trustProxy: (_address: string, hop: number) => hop < env.TRUST_PROXY_HOPS,
     logController: new LogController({
       requestIdLogLabel: "requestId",
       // Render polls these every few seconds; logging each poll would bury real traffic.
       disableRequestLogging: (request) => request.url === "/healthz" || request.url === "/readyz",
     }),
+  });
+
+  // Fastify's default 404 puts the full URL, query string included, in its log message.
+  app.setNotFoundHandler((request, reply) => {
+    const url = logSafeUrl(request.url);
+    request.log.info({ method: request.method, url }, "route not found");
+    return reply.code(404).send(
+      ErrorEnvelope.parse({
+        error: { code: "not_found", message: `No route for ${request.method} ${url}`, requestId: request.id },
+      }),
+    );
   });
 
   // Echo the request id so a bug report or browser trace can be matched to our logs.
