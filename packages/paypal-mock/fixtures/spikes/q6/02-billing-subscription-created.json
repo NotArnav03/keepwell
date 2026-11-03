@@ -1,0 +1,59 @@
+{
+  "headerNames": [
+    "content-type",
+    "paypal-auth-algo",
+    "paypal-cert-url",
+    "paypal-transmission-id",
+    "paypal-transmission-sig",
+    "paypal-transmission-time",
+    "user-agent"
+  ],
+  "body": {
+    "id": "WH-1C697072L2596022F-4TT99696BV929925S",
+    "event_version": "1.0",
+    "create_time": "2026-11-03T08:37:33.836Z",
+    "resource_type": "subscription",
+    "resource_version": "2.0",
+    "event_type": "BILLING.SUBSCRIPTION.CREATED",
+    "summary": "Subscription created",
+    "resource": {
+      "start_time": "2026-11-03T08:37:33Z",
+      "quantity": "1",
+      "create_time": "2026-11-03T08:37:33Z",
+      "custom_id": "keepwell-pool",
+      "links": [
+        {
+          "href": "https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=REDACTED",
+          "rel": "approve",
+          "method": "GET"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-R531EESFN85L",
+          "rel": "edit",
+          "method": "PATCH"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-R531EESFN85L",
+          "rel": "self",
+          "method": "GET"
+        }
+      ],
+      "id": "I-R531EESFN85L",
+      "plan_overridden": false,
+      "plan_id": "P-69G29329HW956041TNLUZXUA",
+      "status": "APPROVAL_PENDING"
+    },
+    "links": [
+      {
+        "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-1C697072L2596022F-4TT99696BV929925S",
+        "rel": "self",
+        "method": "GET"
+      },
+      {
+        "href": "https://api.sandbox.paypal.com/v1/notifications/webhooks-events/WH-1C697072L2596022F-4TT99696BV929925S/resend",
+        "rel": "resend",
+        "method": "POST"
+      }
+    ]
+  }
+}

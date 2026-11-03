@@ -70,7 +70,7 @@ export interface WebhookDelivery {
 }
 
 /**
- * Sends events to registered webhook URLs after `delayMs` (sandbox takes 10–75 s; spike Q6).
+ * Sends events to registered webhook URLs after `delayMs` (sandbox: 6–16 s, median 11; spike Q6).
  * No automatic retries: tests call `resend` the way the dashboard calls PayPal's resend.
  */
 export class WebhookDispatcher {
