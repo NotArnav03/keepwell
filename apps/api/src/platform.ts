@@ -10,6 +10,7 @@ import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
 import { PayPalClient } from "./modules/paypal/client.js";
 import { MOCK_CREDENTIALS, singleAppCredentials } from "./modules/paypal/credentials.js";
+import { DbJudgePool } from "./modules/pool/pool.js";
 import { opsRoutes } from "./modules/reconcile/ops.js";
 import { Reconciler } from "./modules/reconcile/reconciler.js";
 import { SubscriptionSync } from "./modules/reconcile/sync.js";
@@ -77,6 +78,8 @@ export async function startPlatform(env: Env): Promise<Platform> {
   });
   await jobs.work("due.sweep", () => reconciler.dueSweep());
   await jobs.schedule("due.sweep", "* * * * *", {});
+  await jobs.work("pool.health", () => core.judgePool.health());
+  await jobs.schedule("pool.health", "*/5 * * * *", {});
 
   await app.register(webhookIntake, { db, jobs });
   await app.register(reviseReturn, { prefix: "/v1", db, engine });
@@ -154,5 +157,6 @@ export async function createCore(env: Env, url: string, log: CoreLogger) {
   });
   const sync = new SubscriptionSync(db, paypal, events);
   const reconciler = new Reconciler({ db, paypal, sync, engine, jobs, log });
-  return { pool, db, paypal, jobs, audit, events, engine, sync, reconciler };
+  const judgePool = new DbJudgePool({ db, engine, sync, audit, log });
+  return { pool, db, paypal, jobs, audit, events, engine, sync, reconciler, judgePool };
 }

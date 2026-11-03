@@ -57,3 +57,31 @@ export interface DomainEvents<Tx = unknown> {
     fn: (event: DomainEvent<T>) => Promise<void>,
   ): void;
 }
+
+/** A pooled subscription lent to one judge (ARCHITECTURE.md §6.17). */
+export interface PoolLease {
+  poolEntryId: string;
+  /** Our subscription id; Judge Mode binds its widget token to it. */
+  subscriptionId: string;
+  paypalSubscriptionId: string;
+  /** ISO-8601. After this the pool takes it back on its own. */
+  leasedUntil: string;
+}
+
+/**
+ * What became of a returned subscription. "restoring": PayPal is being put back (a paused one
+ * activated, a discount removed), and it rejoins the pool once that is done. "consumed": it can't
+ * go back (cancelled, or moved to another plan).
+ */
+export type PoolReturn = "available" | "restoring" | "consumed";
+
+export type PoolState = "available" | "leased" | "restoring" | "consumed";
+
+/** M1 → M3 (Judge Mode). */
+export interface JudgePool {
+  /** Leases the oldest available ACTIVE subscription. null when the pool is empty: show the fallback. */
+  lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;
+  /** Ends a lease early: the judge is done. Leases also end on their own at leasedUntil. */
+  release(merchantId: string, poolEntryId: string): Promise<PoolReturn>;
+  counts(merchantId: string): Promise<Record<PoolState, number>>;
+}
