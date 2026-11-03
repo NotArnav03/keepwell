@@ -3,9 +3,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
-import { PayPalGatewayError } from "@keepwell/contracts";
 import { PANTRY_PLAN } from "@keepwell/contracts/fakes";
 import { databaseUrl, loadEnv } from "../env.js";
+import { checkApproval } from "../modules/pool/refill.js";
 import { createCore } from "../platform.js";
 
 // `pnpm pool:refill [count] [--wait <minutes>]`: tops up the judge pool (#15, ARCHITECTURE.md
@@ -104,21 +104,17 @@ try {
   while (pending.length > 0) {
     const still: Pending = [];
     for (const entry of pending) {
-      try {
-        const { status } = await core.paypal.getSubscription(merchantId, entry.id);
-        if (status === "ACTIVE") {
-          if (await core.judgePool.enroll(merchantId, entry.id)) enrolled++;
-          out(`  ${new Date().toISOString()}  ${entry.id} approved, in the pool`);
-        } else if (status === "APPROVAL_PENDING" || status === "APPROVED") {
-          still.push(entry);
-        } else {
-          out(`  ${entry.id} is ${status}: dropped`);
-        }
-      } catch (err) {
-        // PayPal slow or briefly down: keep it and look again next round.
-        if (!(err instanceof PayPalGatewayError) || !err.retryable) throw err;
+      const check = await checkApproval(core.paypal, merchantId, entry.id);
+      if (check.kind === "active") {
+        if (await core.judgePool.enroll(merchantId, entry.id)) enrolled++;
+        out(`  ${new Date().toISOString()}  ${entry.id} approved, in the pool`);
+      } else if (check.kind === "waiting") {
         still.push(entry);
+      } else {
+        out(`  ${entry.id} is ${check.why}: dropped`);
       }
+      // Saved after each one, so a crash mid-round doesn't make the next run redo the round.
+      savePending([...still, ...pending.slice(pending.indexOf(entry) + 1)]);
     }
     pending = still;
     savePending(pending);
