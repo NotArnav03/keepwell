@@ -19,6 +19,7 @@
     "db:migrate": "turbo run build --filter=@keepwell/contracts && pnpm --filter @keepwell/db db:migrate",
     "seed": "turbo run build --filter=@keepwell/api^... && pnpm --filter @keepwell/api seed",
     "spike": "turbo run build --filter=@keepwell/api^... && pnpm --filter @keepwell/api spike",
+    "pool:refill": "turbo run build --filter=@keepwell/api^... && pnpm --filter @keepwell/api pool:refill",
     "dev:fake-sessions": "turbo run build --filter=@keepwell/contracts && pnpm --filter @keepwell/api dev:fake-sessions",
     "dev:paypal-mock": "turbo run build --filter=@keepwell/contracts && pnpm --filter @keepwell/paypal-mock dev",
     "dev:widget": "pnpm --filter @keepwell/widget dev",
