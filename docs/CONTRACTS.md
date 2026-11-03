@@ -316,6 +316,16 @@ export const SessionStreamEvent = z.discriminatedUnion("type", [
 
 ### Merchant (owner M4 unless noted)
 
+The shared request/response schemas for merchant dashboard routes live in
+`packages/contracts/src/platform/merchant.ts` and are exported from `@keepwell/contracts`.
+They are the boundary types for the dashboard and merchant API; they do not implement
+authentication, persistence, or route behavior. The audit verify result reuses `AuditVerifyResult`,
+and the policy routes reuse the policy API schemas below the brain contracts. Merchant schemas cover
+overview aggregates, subscriber filters/risk summaries/details, domain-event feed envelopes, audit
+and timeline results, onboarding credential/webhook/backfill responses, and one-time API-key output.
+The PayPal client secret is request-only and is explicitly rejected if echoed in a successful
+credential response.
+
 | Method + path | Auth | Purpose |
 |---|---|---|
 | `POST /m/auth/login`, `POST /m/auth/logout`, `GET /m/me` | – / MER | Session |
