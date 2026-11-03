@@ -7,7 +7,7 @@ import { createPayPalMock } from "./server.js";
 const env = z
   .object({
     PAYPAL_MOCK_PORT: z.coerce.number().int().min(1).max(65_535).default(4010),
-    // Sandbox delivers webhooks 10–75 s late; a few seconds keeps the async path visible.
+    // Sandbox delivers webhooks 6–16 s late (spike Q6); a few seconds keeps the async path visible.
     PAYPAL_MOCK_WEBHOOK_DELAY_MS: z.coerce.number().int().min(0).default(2000),
   })
   .parse(process.env);

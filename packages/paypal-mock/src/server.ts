@@ -18,7 +18,7 @@ export interface PayPalMockOptions {
   /** Default: the Pantry Plan merchant and its 12 subscribers. */
   fixtures?: (now: Date) => MerchantFixture[];
   clock?: () => Date;
-  /** How long PayPal takes to send a webhook. Sandbox takes 10–75 s; tests want 0. */
+  /** How long PayPal takes to send a webhook. Sandbox takes 6–16 s, median 11 (spike Q6); tests want 0. */
   webhookDelayMs?: number;
   logger?: boolean;
 }

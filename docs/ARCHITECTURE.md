@@ -505,7 +505,7 @@ sequenceDiagram
   AE->>PP: POST /subscriptions/{id}/suspend
   PP-->>AE: 204
   AE-->>W: SSE action.applied ("Paused")
-  PP-->>WH: BILLING.SUBSCRIPTION.SUSPENDED (10–75 s later)
+  PP-->>WH: BILLING.SUBSCRIPTION.SUSPENDED (6–16 s later, spike Q6)
   WH->>PP: GET subscription → status SUSPENDED
   WH->>AE: confirm Action → CONFIRMED
   Note over AE: due_at reached (or time machine)
