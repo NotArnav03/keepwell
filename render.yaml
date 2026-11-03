@@ -40,10 +40,13 @@ services:
       # The service's own URL: PayPal sends buyers back here after a revise.
       - key: API_PUBLIC_URL
         value: https://keepwell-api-staging.onrender.com
-      # Two proxies sit in front of the service: Render's edge, then an internal one (10.x). Checked
-      # on staging 3 Nov: with 1, request.ip was the internal proxy's 10.x address.
+      # Three proxies sit in front of the service (seen with /ops/whoami on 3 Nov): Cloudflare, then
+      # Render's edge, then an internal 10.x proxy, and the socket itself is a proxy at 127.0.0.1.
+      # X-Forwarded-For arrives as "<anything the client sent>, <client>, <cloudflare>, <10.x>", so
+      # the client is 3 hops back. Re-check with /ops/whoami if Render changes its setup: too few hops
+      # shares one rate limit, too many lets a client pick its own address.
       - key: TRUST_PROXY_HOPS
-        value: "2"
+        value: "3"
       - key: OPS_TOKEN
         sync: false
       # Email (modules/notify, #91). Signs unsubscribe links: 32+ random characters, and it must be
