@@ -30,6 +30,7 @@ interface StatusBody {
 }
 
 const CACHE_MS = 30_000;
+const FORWARDING_HEADERS = ["x-forwarded-for", "cf-connecting-ip", "true-client-ip", "x-real-ip"];
 /** Webhooks normally process in seconds; minutes means the job queue is stuck. */
 const LAG_DEGRADED_SECONDS = 300;
 /** Sweeps run every 30 minutes; well past that means the scheduler stopped. */
@@ -47,12 +48,35 @@ export const opsRoutes: FastifyPluginCallback<OpsOptions> = (app, options, done)
     return reply.header("cache-control", "public, max-age=30").send(cached.body);
   });
 
-  app.get("/ops", async (request, reply) => {
-    if (!options.opsToken) return reply.code(404).send();
-    const given = Buffer.from(request.headers.authorization ?? "");
+  /** 404 when ops is off, 401 without the token; null when the caller may go on. */
+  const refuse = (authorization: string | undefined): 404 | 401 | null => {
+    if (!options.opsToken) return 404;
+    const given = Buffer.from(authorization ?? "");
     const expected = Buffer.from(`Bearer ${options.opsToken}`);
-    if (given.length !== expected.length || !timingSafeEqual(given, expected)) return reply.code(401).send();
+    return given.length === expected.length && timingSafeEqual(given, expected) ? null : 401;
+  };
+
+  app.get("/ops", async (request, reply) => {
+    const refused = refuse(request.headers.authorization);
+    if (refused) return reply.code(refused).send();
     return reply.send(await metrics(options.db, clock()));
+  });
+
+  // What the API takes as the caller's address (request.ip, which per-IP rate limits use), the
+  // chain it was picked from, and the forwarding headers as received: for checking TRUST_PROXY_HOPS
+  // against whatever proxies the host puts in front.
+  app.get("/ops/whoami", (request, reply) => {
+    const refused = refuse(request.headers.authorization);
+    if (refused) return reply.code(refused).send();
+    const header = (name: string): string | null => {
+      const value = request.headers[name];
+      return Array.isArray(value) ? value.join(", ") : (value ?? null);
+    };
+    return reply.send({
+      ip: request.ip,
+      ips: request.ips ?? [request.ip],
+      headers: Object.fromEntries(FORWARDING_HEADERS.map((name) => [name, header(name)])),
+    });
   });
 
   done();
