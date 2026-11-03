@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/billing/subscriptions/I-KN5LRF5EU8E3/suspend",
+    "headers": {},
+    "body": {
+      "reason": "Keepwell spike Q2: pause across a billing date"
+    }
+  },
+  "response": {
+    "status": 204,
+    "debugId": "f48318330718f",
+    "body": null
+  }
+}

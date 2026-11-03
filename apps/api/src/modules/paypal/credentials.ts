@@ -14,3 +14,9 @@ export interface CredentialSource {
 export function singleAppCredentials(credentials: PayPalCredentials): CredentialSource {
   return { forMerchant: () => Promise.resolve(credentials) };
 }
+
+/** paypal-mock's Pantry Plan app (see its README): not secrets, and only used against the mock. */
+export const MOCK_CREDENTIALS: PayPalCredentials = {
+  clientId: "pantry-plan-mock-client",
+  clientSecret: "mock-secret",
+};

@@ -23,4 +23,6 @@ const subscription = await paypal.getSubscription(merchantId, "I-…"); // field
 
 Credentials come from `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET` for now. Onboarding (#54) will store them per merchant, encrypted.
 
+`recorder.ts` wraps the gateway's `fetch` and hands back each call as a scrubbed request/response pair in paypal-mock's fixture shape (no OAuth calls, emails, payer or merchant ids, addresses, buyer names or approval tokens). `pnpm spike` (docs/spikes/README.md) uses it to record the sandbox.
+
 Tests run against `@keepwell/paypal-mock` over HTTP, with failures injected the way PayPal fails.

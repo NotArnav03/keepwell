@@ -84,7 +84,7 @@ export function registerControlRoutes(app: FastifyInstance, deps: ControlDeps): 
   app.post("/__mock/approvals/:token", (request) => {
     const { token } = z.object({ token: z.string().min(1) }).parse(request.params);
     const { decision } = z.object({ decision: z.enum(["approve", "cancel"]) }).parse(request.body);
-    return { redirect: state.decideRevision(token, decision === "approve") };
+    return { redirect: state.decide(token, decision === "approve") };
   });
 
   app.post("/__mock/tokens/expire", (_request, reply) => {

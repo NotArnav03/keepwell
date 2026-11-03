@@ -19,6 +19,7 @@ coverage/
 *.tsbuildinfo
 
 # Test and tool output
+.spike/
 playwright-report/
 test-results/
 *.log

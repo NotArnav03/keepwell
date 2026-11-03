@@ -9,7 +9,7 @@ import { DbAudit } from "./modules/audit/log.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
 import { PayPalClient } from "./modules/paypal/client.js";
-import { singleAppCredentials } from "./modules/paypal/credentials.js";
+import { MOCK_CREDENTIALS, singleAppCredentials } from "./modules/paypal/credentials.js";
 import { opsRoutes } from "./modules/reconcile/ops.js";
 import { Reconciler } from "./modules/reconcile/reconciler.js";
 import { SubscriptionSync } from "./modules/reconcile/sync.js";
@@ -21,9 +21,6 @@ import { buildServer, type ReadinessCheck } from "./server.js";
 // pools, the PayPal gateway, jobs and their workers, domain events, the action engine, the
 // webhook pipeline, the reconciler's every-minute schedule, and the routes they serve. Other
 // workstreams' modules plug in here as they land (sessions, merchant APIs, growth).
-
-/** paypal-mock's Pantry Plan app (see its README): not secrets, and only used with PAYPAL_USE_MOCK. */
-const MOCK_CREDENTIALS = { clientId: "pantry-plan-mock-client", clientSecret: "mock-secret" };
 
 export interface Platform {
   app: FastifyInstance;
@@ -130,8 +127,9 @@ export async function createCore(env: Env, url: string, log: CoreLogger) {
   // Every app query runs as keepwell_app, which row-level security binds.
   const pool = createPool(url, onIdleError, { connectionOptions: APP_ROLE_OPTIONS });
   const db = createDb(pool);
+  // The mock only knows its own app, so sandbox credentials in .env must not reach it.
   const credentials =
-    env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET
+    !env.PAYPAL_USE_MOCK && env.PAYPAL_CLIENT_ID && env.PAYPAL_CLIENT_SECRET
       ? { clientId: env.PAYPAL_CLIENT_ID, clientSecret: env.PAYPAL_CLIENT_SECRET }
       : MOCK_CREDENTIALS;
   const paypal = new PayPalClient({

@@ -26,11 +26,11 @@ await mock.close();
 | Area | Endpoints |
 |---|---|
 | OAuth | `POST /v1/oauth2/token` (client credentials, Basic auth) |
-| Subscriptions | `GET /v1/billing/subscriptions[/:id]` (`fields=plan` shows a price override), `POST …/suspend`, `…/activate`, `…/cancel`, `…/revise`, `…/capture`, `PATCH …/:id`, `GET …/:id/transactions` |
+| Subscriptions | `POST /v1/billing/subscriptions` (APPROVAL_PENDING plus an `approve` link), `GET /v1/billing/subscriptions[/:id]` (`fields=plan` shows a price override), `POST …/suspend`, `…/activate`, `…/cancel`, `…/revise`, `…/capture`, `PATCH …/:id`, `GET …/:id/transactions` |
 | Plans | `GET /v1/billing/plans[/:id]`, `POST /v1/billing/plans` |
 | Refunds | `POST /v2/payments/captures/:id/refund` is the one Keepwell uses (spike Q1, docs/spikes/Q1.md); `POST /v1/payments/sale/:id/refund` also works, as in real sandbox |
 | Webhooks | `POST/GET/DELETE /v1/notifications/webhooks`, `POST /v1/notifications/verify-webhook-signature`, `GET /v1/notifications/webhooks-events/:id`, `POST …/:id/resend` |
-| Buyer approval | `GET/POST /webapps/billing/subscriptions/update?ba_token=…`: the page a revise's `approve` link opens |
+| Buyer approval | `GET/POST /webapps/billing/subscriptions?ba_token=…` (a new subscription: the first cycle is charged, then ACTIVE) and `…/subscriptions/update?ba_token=…` (a revise): the pages the `approve` links open |
 
 Rules it follows: suspend only from ACTIVE, activate only from SUSPENDED, cancel from ACTIVE or SUSPENDED (otherwise 422 `SUBSCRIPTION_STATUS_INVALID`); a revise changes nothing until the buyer approves; `PayPal-Request-Id` makes create plan, capture and refunds idempotent; the plan's `payment_failure_threshold` suspends after that many failed renewals.
 
@@ -42,7 +42,7 @@ Rules it follows: suspend only from ACTIVE, activate only from SUSPENDED, cancel
 |---|---|---|
 | A renewal, or a failed one | `POST /__mock/subscriptions/:id/renew {"failReason":"PAYER_CANNOT_PAY"}` | `mock.state.renew(id, reason?)` |
 | Subscriber cancels in their PayPal account | `POST /__mock/subscriptions/:id/cancel-in-paypal` | `mock.state.cancelInPayPal(id)` |
-| Buyer answers a revise | `POST /__mock/approvals/:ba_token {"decision":"approve"}` | `mock.state.decideRevision(token, true)` |
+| Buyer answers a new subscription or a revise | `POST /__mock/approvals/:ba_token {"decision":"approve"}` | `mock.state.decide(token, true)` |
 | Failures | `POST /__mock/failures {"path":"/\\/suspend$/","status":500,"apply":true}` | `mock.failures.add({...})` |
 | Expire OAuth tokens | `POST /__mock/tokens/expire` | `mock.state.expireTokens()` |
 | See webhook deliveries | `GET /__mock/webhooks/deliveries` | `mock.webhooks.deliveries` |

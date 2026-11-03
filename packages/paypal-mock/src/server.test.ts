@@ -126,6 +126,48 @@ describe("subscription status changes", () => {
     );
   });
 
+  it("hides next_billing_time while suspended and brings the same one back on activation (spike Q2)", async () => {
+    const billing = async () => (await subscription(MAYA))?.billing_info as Record<string, unknown>;
+    const before = (await billing()).next_billing_time;
+    expect(before).toBeDefined();
+    await call("POST", `/v1/billing/subscriptions/${MAYA}/suspend`, { reason: "Pause" });
+    expect((await billing()).next_billing_time).toBeUndefined();
+    await call("POST", `/v1/billing/subscriptions/${MAYA}/activate`, { reason: "Back" });
+    expect((await billing()).next_billing_time).toBe(before);
+  });
+
+  it("creates a subscription that waits for the buyer, then charges the first cycle on approval", async () => {
+    const created = await call("POST", "/v1/billing/subscriptions", {
+      plan_id: "P-PANTRY-STANDARD",
+      custom_id: "pool-1",
+      application_context: {
+        return_url: "http://localhost:3000/done",
+        cancel_url: "http://localhost:3000/no",
+      },
+    });
+    expect(created.status).toBe(201);
+    const id = String(created.body?.id);
+    expect(created.body).toMatchObject({ status: "APPROVAL_PENDING", custom_id: "pool-1" });
+    expect(await subscription(id)).toMatchObject({ status: "APPROVAL_PENDING" });
+    const approve = (created.body?.links as { rel: string; href: string }[]).find((l) => l.rel === "approve");
+    const baToken = new URL(approve?.href ?? "").searchParams.get("ba_token") ?? "";
+    expect(await (await fetch(approve?.href ?? "")).text()).toContain("Subscribe");
+
+    const decided = await call("POST", `/__mock/approvals/${baToken}`, { decision: "approve" });
+    expect(decided.body?.redirect).toBe(
+      `http://localhost:3000/done?subscription_id=${id}&ba_token=${baToken}`,
+    );
+    const active = await subscription(id);
+    expect(PayPalSubscription.parse(active)).toMatchObject({
+      status: "ACTIVE",
+      billing_info: { next_billing_time: "2026-12-01T12:00:00Z", failed_payments_count: 0 },
+    });
+    const range = "start_time=2026-11-01T00:00:00Z&end_time=2026-11-02T00:00:00Z";
+    const paid = await call("GET", `/v1/billing/subscriptions/${id}/transactions?${range}`);
+    expect(paid.body?.transactions).toHaveLength(1);
+    expect((await call("POST", `/__mock/approvals/${baToken}`, { decision: "approve" })).status).toBe(404);
+  });
+
   it("requires a reason, like PayPal", async () => {
     const res = await call("POST", `/v1/billing/subscriptions/${MAYA}/suspend`, {});
     expect(res.status).toBe(400);
