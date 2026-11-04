@@ -29,6 +29,13 @@
       "when": 1793446422089,
       "tag": "0003_drift_reports",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1793794844431,
+      "tag": "0004_magic_links",
+      "breakpoints": true
     }
   ]
 }

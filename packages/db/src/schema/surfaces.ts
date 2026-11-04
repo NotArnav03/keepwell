@@ -44,6 +44,24 @@ export const sessionEvents = pgTable(
   (t) => [primaryKey({ columns: [t.sessionId, t.seq] })],
 );
 
+/**
+ * Hosted-portal sign-in links (§6.7): single use, 15 minutes. Only the token's sha256 is kept, so
+ * a database leak hands out no working link, and the email only as its hash.
+ */
+export const magicLinks = pgTable(
+  "magic_links",
+  {
+    tokenHash: text().primaryKey(),
+    merchantId: merchantId().references(() => merchants.id),
+    emailHash: text().notNull(),
+    expiresAt: at().notNull(),
+    /** Set when the link is spent; a spent link never works again, even inside its 15 minutes. */
+    usedAt: at(),
+    createdAt: createdAt(),
+  },
+  (t) => [index().on(t.expiresAt)],
+);
+
 export const delegations = pgTable("delegations", {
   id: id(),
   merchantId: merchantId().references(() => merchants.id),
