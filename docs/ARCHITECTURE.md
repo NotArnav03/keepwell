@@ -105,11 +105,11 @@ flowchart LR
 
 | Piece | Where | Tier | Why |
 |---|---|---|---|
-| `apps/api`: API, webhooks, workers, SSE, MCP | Render Web Service | Free | Sleeps after 15 idle minutes. `.github/workflows/keep-awake.yml` pings prod-demo every 10 minutes. The free 750 hours a month cover one always-on service, so staging may sleep. |
+| `apps/api`: API, webhooks, workers, SSE, MCP | Render Web Service | Free | Sleeps after 15 idle minutes. `.github/workflows/keep-awake.yml` pings prod-demo every 10 minutes, 1–21 Dec only. The free 750 instance-hours a month are shared by the workspace (all free services are suspended when they run out), so staging may sleep. |
 | `apps/dashboard`, `apps/portal`, `apps/judge` | Render Static Sites | Free | |
 | `apps/demo-store` (Pantry Plan) | Render Static Site, **separate origin** | Free | Proves the widget works on a third-party site |
 | `packages/widget` bundle | Render Static Site (acts as CDN) | Free | Loads even if the API is down (law 1) |
-| Postgres | **Neon** free tier | Free | Doesn't expire. Each member gets their own Neon **branch** for development. |
+| Postgres | **Neon** free tier | Free | Doesn't expire. Each member gets their own Neon **branch** for development. prod-demo has its own Neon **project**, because the 100 compute-hours a month are per project. |
 | Email | Resend free tier | Free | Plus an in-app "demo inbox" so judges can see emails without receiving them |
 | Errors | Sentry free tier | Free | |
 | Uptime + status page | Render health checks + a free uptime monitor | Free | |
@@ -127,7 +127,7 @@ flowchart LR
 Environments:
 - `local`: each member's laptop, their own Neon branch, mock PayPal or sandbox.
 - `staging`: Render, sandbox app "Keepwell-Staging", deployed on every merge to `main`.
-- `prod-demo`: Render, sandbox app "Keepwell-Demo", deployed only by a manual promote. **Judges use this one.** It is never used for experiments.
+- `prod-demo`: Render, sandbox app "Keepwell-Demo", its own Neon project, deployed only by a manual promote. **Judges use this one.** It is never used for experiments. Setup and operation: [RUNBOOK-prod-demo.md](RUNBOOK-prod-demo.md).
 
 Both hosted environments use the PayPal **sandbox**. Nothing in this project touches live PayPal.
 
