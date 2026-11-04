@@ -37,6 +37,7 @@ button, .kw-cancel {
   font: inherit; font-size: 14px; padding: 7px 12px; border-radius: 8px; cursor: pointer;
   border: 1px solid #94a3b8; background: #fff; color: #0f172a; text-decoration: none;
 }
+button[aria-pressed="true"] { background: #dbeafe; border-color: #1d4ed8; }
 button:disabled { opacity: 0.6; cursor: default; }
 .kw-primary { background: #1d4ed8; border-color: #1d4ed8; color: #fff; }
 .kw-cancel { border-color: #0f172a; font-weight: 600; }

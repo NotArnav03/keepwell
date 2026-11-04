@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from "preact/hooks";
 import type { ReasonCategory, SessionStreamEvent } from "@keepwell/contracts";
 import { acceptNote, offerHeadline, planLine } from "./format.js";
+import { finalTranscript, speechSupport, type Recognition, type RecognitionCtor } from "./speech.js";
 import { en } from "./strings.js";
 import { ApiError, ApiUnreachable, type Transport } from "./transport.js";
 import { cancelFailed, cancelling, initialState, offerAction, reduce } from "./state.js";
@@ -17,6 +18,8 @@ export interface WidgetProps {
   openPopup?: (url: string) => PopupHandle | null;
   /** The API's origin: the only one whose "keepwell.revise" message from the return page is believed. */
   apiOrigin?: string;
+  /** The browser's speech recognition, or null where there is none (default: detected). */
+  speech?: RecognitionCtor | null;
 }
 
 /** What the widget needs of the approval window: to notice the buyer closing it. */
@@ -24,6 +27,7 @@ export interface PopupHandle {
   readonly closed: boolean;
 }
 
+const newTab = (label: string) => `${label} (${en.newTab})`;
 const FOCUSABLE = "a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled])";
 const POPUP_POLL_MS = 500;
 
@@ -38,6 +42,9 @@ export function Widget(props: WidgetProps) {
   const [cancelError, setCancelError] = useState(false);
   const [popupBlocked, setPopupBlocked] = useState(false);
   const [popupClosed, setPopupClosed] = useState(false);
+  const [listening, setListening] = useState(false);
+  const recognition = useRef<Recognition | null>(null);
+  const Speech = props.speech === undefined ? speechSupport() : props.speech;
   /** What /v1/revise/return told us when PayPal sent the buyer back ("confirmed", "abandoned", …). */
   const [returned, setReturned] = useState<string | null>(null);
   const popup = useRef<PopupHandle | null>(null);
@@ -67,10 +74,40 @@ export function Widget(props: WidgetProps) {
     // Runs once per open; the transport is fixed for the widget's life.
   }, []);
 
+  // Voice input is one press, one phrase: it stops itself, and when the dialog closes.
+  useEffect(() => () => recognition.current?.stop(), []);
+  const toggleListening = () => {
+    if (listening) {
+      recognition.current?.stop();
+      return;
+    }
+    if (Speech === null) return;
+    const next = new Speech();
+    next.lang = locale;
+    next.interimResults = false;
+    next.continuous = false;
+    next.onresult = (event) => {
+      const said = finalTranscript(event);
+      if (said !== "") setDraft((before) => (before === "" ? said : `${before} ${said}`).slice(0, 1000));
+    };
+    next.onend = () => setListening(false);
+    next.onerror = () => setListening(false);
+    recognition.current = next;
+    setListening(true);
+    next.start();
+  };
+
   // Focus the dialog on open, so keyboard and screen-reader users start inside it.
   useEffect(() => {
     dialog.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
   }, []);
+
+  // Buttons come and go as the conversation moves (Yes/No vanish once answered). When the focused
+  // one goes, the browser drops focus to the page behind the dialog, so bring it back to the dialog.
+  useEffect(() => {
+    const box = dialog.current;
+    if (box && !box.contains((box.getRootNode() as ShadowRoot).activeElement)) box.focus();
+  });
 
   // A downgrade waits on PayPal's approval page: open it once, in a popup if the browser allows.
   const pending = offerAction(state);
@@ -189,7 +226,7 @@ export function Widget(props: WidgetProps) {
     const first = items[0];
     const last = items.at(-1);
     const active = (dialog.current.getRootNode() as Document | ShadowRoot).activeElement;
-    if (event.shiftKey && active === first) {
+    if (event.shiftKey && (active === first || active === dialog.current)) {
       event.preventDefault();
       last?.focus();
     } else if (!event.shiftKey && active === last) {
@@ -230,6 +267,7 @@ export function Widget(props: WidgetProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="kw-title"
+        tabIndex={-1}
         ref={dialog}
         onKeyDown={onKeyDown}
       >
@@ -241,7 +279,13 @@ export function Widget(props: WidgetProps) {
           <div class="kw-header-actions">
             {!cancelled &&
               (session === null ? (
-                <a class="kw-cancel" href={props.autopayUrl} target="_blank" rel="noopener noreferrer">
+                <a
+                  class="kw-cancel"
+                  href={props.autopayUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={newTab(en.cancelNow)}
+                >
                   {en.cancelNow}
                 </a>
               ) : (
@@ -250,7 +294,7 @@ export function Widget(props: WidgetProps) {
                 </button>
               ))}
             <button type="button" class="kw-close" aria-label={en.close} onClick={props.onClose}>
-              ×
+              <span aria-hidden="true">×</span>
             </button>
           </div>
         </header>
@@ -286,7 +330,7 @@ export function Widget(props: WidgetProps) {
             )}
 
             {offer && (
-              <div class="kw-offer" aria-label={offerHeadline(offer.offer, locale)}>
+              <div class="kw-offer" role="group" aria-label={offerHeadline(offer.offer, locale)}>
                 <p class="kw-offer-title">{offerHeadline(offer.offer, locale)}</p>
                 <p>{offer.cardText}</p>
                 {note && <p class="kw-small">{note}</p>}
@@ -312,7 +356,12 @@ export function Widget(props: WidgetProps) {
                   pending.approveUrl && (
                     <>
                       {" "}
-                      <a href={pending.approveUrl} target="_blank" rel="noopener noreferrer">
+                      <a
+                        href={pending.approveUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={newTab(popupClosed ? en.openPayPalAgain : en.openPayPal)}
+                      >
                         {popupClosed ? en.openPayPalAgain : en.openPayPal}
                       </a>
                     </>
@@ -342,6 +391,11 @@ export function Widget(props: WidgetProps) {
                   value={draft}
                   onInput={(e) => setDraft(e.currentTarget.value)}
                 />
+                {Speech !== null && (
+                  <button type="button" aria-pressed={listening} onClick={toggleListening}>
+                    {en.speak}
+                  </button>
+                )}
                 <button type="submit" disabled={draft.trim() === ""}>
                   {en.send}
                 </button>
@@ -367,11 +421,20 @@ export function Widget(props: WidgetProps) {
           </section>
         )}
 
-        {state.notice && <p class="kw-notice">{state.notice}</p>}
+        {state.notice && (
+          <p class="kw-notice" role="alert">
+            {state.notice}
+          </p>
+        )}
         {showPayPalCancel && !cancelled && (
-          <p class="kw-notice">
+          <p class="kw-notice" role="alert">
             {state.phase === "offline" ? null : en.cancelFailed}{" "}
-            <a href={props.autopayUrl} target="_blank" rel="noopener noreferrer">
+            <a
+              href={props.autopayUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={newTab(en.cancelInPayPal)}
+            >
               {en.cancelInPayPal}
             </a>
           </p>
