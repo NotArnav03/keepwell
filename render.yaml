@@ -1,4 +1,4 @@
-# Render Blueprint for the staging API. Arnav (M1) applies it by hand in the Render dashboard.
+# Render Blueprint for staging: the API and the merchant dashboard. Arnav (M1) applies it by hand.
 # Secrets use `sync: false`, so Render asks for them; they never live in this file.
 # Free plan (the project runs on ₹0): it sleeps after 15 idle minutes and wakes on the next request
 # in under a minute. Staging is allowed to sleep; see ARCHITECTURE.md §4 for keeping prod-demo awake.
@@ -62,3 +62,38 @@ services:
         sync: false
       - key: SENTRY_DSN
         sync: false
+
+  # The merchant dashboard (apps/dashboard, M4) as a free static site on Render's CDN. /v1/* is
+  # rewritten to the staging API, so the browser sees one origin: the session cookie stays
+  # first-party (SameSite=Lax) and needs no CORS. Two *.onrender.com hosts would be different sites,
+  # since onrender.com is a public suffix, and Safari blocks such cookies.
+  # Until #124 lands, apps/dashboard builds no index.html, so the site itself shows a 404.
+  - type: web
+    name: keepwell-dashboard-staging
+    runtime: static
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/dashboard
+    staticPublishPath: apps/dashboard/dist
+    # Build only when the dashboard or a package it imports changes (the free plan's build minutes).
+    buildFilter:
+      paths:
+        - apps/dashboard/**
+        - packages/contracts/**
+        - packages/policy/**
+        - packages/ui/**
+        - pnpm-lock.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+    routes:
+      # First match wins: the API before the single-page-app fallback.
+      - type: rewrite
+        source: /v1/*
+        destination: https://keepwell-api-staging.onrender.com/v1/*
+      # For checking TRUST_PROXY_HOPS through the rewrite (behind OPS_TOKEN, as on the API).
+      - type: rewrite
+        source: /ops/whoami
+        destination: https://keepwell-api-staging.onrender.com/ops/whoami
+      - type: rewrite
+        source: /*
+        destination: /index.html
