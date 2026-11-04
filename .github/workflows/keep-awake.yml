@@ -1,14 +1,18 @@
 name: Keep demo awake
 
 # Render's free plan sleeps a web service after 15 idle minutes, and the first request then waits
-# up to a minute while it wakes. Judges shouldn't see that, so this pings the hosted API every
-# 10 minutes. GitHub may delay scheduled runs, so a sleep can still happen now and then.
+# up to a minute while it wakes. Judges shouldn't see that, so this pings prod-demo every 10 minutes
+# during judging. GitHub may delay scheduled runs, so a sleep can still happen now and then.
 #
-# The free plan has 750 instance-hours a month, enough for ONE always-on service. Set the repo
-# variable KEEPWELL_PING_URLS (Settings → Secrets and variables → Actions → Variables) to the
-# prod-demo health URL only, e.g. https://keepwell-api-demo.onrender.com/healthz. Staging may sleep.
-# With the variable unset, this does nothing. Only set it once the repo is public: on a private repo
-# each ping is billed as a full Actions minute, about 4,300 a month.
+# Repo variables (Settings → Secrets and variables → Actions → Variables):
+# - KEEPWELL_PING_URLS: the prod-demo health URLs, space-separated, e.g.
+#   https://keepwell-api-demo.onrender.com/healthz. Unset: this does nothing.
+# - KEEPWELL_PING_FROM / KEEPWELL_PING_UNTIL: optional UTC dates (YYYY-MM-DD, inclusive). Outside
+#   that window nothing is pinged, so it switches itself on and off for judging (1–21 Dec).
+#
+# Why a window: Render's free 750 instance-hours a month are shared by every free service in the
+# workspace, and running out suspends all of them until the next month. An always-awake service
+# uses 744 in December, which would leave staging almost nothing. 1–21 Dec is 504 hours.
 
 on:
   schedule:
@@ -26,7 +30,15 @@ jobs:
       - name: Ping
         env:
           URLS: ${{ vars.KEEPWELL_PING_URLS }}
+          FROM: ${{ vars.KEEPWELL_PING_FROM }}
+          UNTIL: ${{ vars.KEEPWELL_PING_UNTIL }}
         run: |
+          today=$(date -u +%F)
+          # ISO dates compare correctly as strings.
+          if [[ -n "$FROM" && "$today" < "$FROM" ]] || [[ -n "$UNTIL" && "$today" > "$UNTIL" ]]; then
+            echo "outside the keep-awake window (${FROM:-any} to ${UNTIL:-any}); not pinging"
+            exit 0
+          fi
           for url in $URLS; do
             # A waking instance can take up to a minute; a failed ping is reported, not retried.
             curl --silent --show-error --fail --max-time 90 --output /dev/null "$url" && echo "awake: $url" || echo "::warning::no answer from $url"

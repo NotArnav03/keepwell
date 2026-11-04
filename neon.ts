@@ -1,6 +1,7 @@
 import { defineConfig } from "@neon/config/v1";
 
-// Branches that must live until judging ends (21 Dec): staging, prod-demo's source and one per member.
+// Branches that must live until judging ends (21 Dec): staging and one per member. prod-demo has its
+// own Neon project (docs/RUNBOOK-prod-demo.md).
 const LONG_LIVED = new Set(["staging", "arnav", "ishan", "aditya", "ayush", "om"]);
 
 export default defineConfig({

@@ -1,4 +1,5 @@
-# Render Blueprint for staging: the API and the merchant dashboard. Arnav (M1) applies it by hand.
+# Render Blueprint for staging and prod-demo: the API and the merchant dashboard for each.
+# Arnav (M1) applies it by hand.
 # Secrets use `sync: false`, so Render asks for them; they never live in this file.
 # Free plan (the project runs on ₹0): it sleeps after 15 idle minutes and wakes on the next request
 # in under a minute. Staging is allowed to sleep; see ARCHITECTURE.md §4 for keeping prod-demo awake.
@@ -94,6 +95,84 @@ services:
       - type: rewrite
         source: /ops/whoami
         destination: https://keepwell-api-staging.onrender.com/ops/whoami
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # ── prod-demo: what judges use (ARCHITECTURE.md §4, docs/RUNBOOK-prod-demo.md) ──────────────────
+  # The same build as staging, but deployed only by hand: auto-deploy is off, and Arnav deploys
+  # the tagged commit with "Manual Deploy → Deploy a specific commit". Its database is a separate
+  # Neon project (keepwell-prod-demo), so dev branches can't use up its free compute hours, and its
+  # PayPal credentials are the sandbox app "Keepwell-Demo", never the staging app's.
+  - type: web
+    name: keepwell-api-demo
+    runtime: node
+    plan: free
+    region: oregon
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/api
+    startCommand: node apps/api/dist/index.js
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: NODE_ENV
+        value: production
+      - key: APP_ENV
+        value: prod-demo
+      - key: LOG_LEVEL
+        value: info
+      - key: PAYPAL_API_BASE
+        value: https://api-m.sandbox.paypal.com
+      # Neon project keepwell-prod-demo, DIRECT connection string (host without -pooler).
+      - key: DATABASE_URL_UNPOOLED
+        sync: false
+      # Sandbox app "Keepwell-Demo".
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      # Shares the $5 credit with staging. From 1 Dec, staging's cap drops so judging gets the rest.
+      - key: LLM_DAILY_BUDGET_USD
+        value: "0.10"
+      # If Render gives the service a different hostname, change this and the dashboard rewrites.
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-demo.onrender.com
+      # Same proxy chain as staging; check with /ops/whoami after the first deploy.
+      - key: TRUST_PROXY_HOPS
+        value: "3"
+      # Generate each secret fresh for prod-demo; never reuse staging's.
+      - key: OPS_TOKEN
+        sync: false
+      - key: UNSUBSCRIBE_TOKEN_SECRET
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: SENTRY_DSN
+        sync: false
+
+  - type: web
+    name: keepwell-dashboard-demo
+    runtime: static
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/dashboard
+    staticPublishPath: apps/dashboard/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+    routes:
+      - type: rewrite
+        source: /v1/*
+        destination: https://keepwell-api-demo.onrender.com/v1/*
+      - type: rewrite
+        source: /ops/whoami
+        destination: https://keepwell-api-demo.onrender.com/ops/whoami
       - type: rewrite
         source: /*
         destination: /index.html
