@@ -22,7 +22,7 @@ import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
 import { demoStoreRoutes } from "../demo/store-routes.js";
 import { DelegationService } from "../portal/delegations.js";
-import { verifyWidgetToken } from "../portal/jwt.js";
+import { verifyPortalSessionToken, verifyWidgetToken } from "../portal/jwt.js";
 import { MagicLinkService } from "../portal/magic-link.js";
 import {
   MemoryDelegationStore,
@@ -160,10 +160,18 @@ await app.register(demoStoreRoutes, {
 // open it, and POST /v1/delegations with the cookie it sets. Nothing is emailed.
 const portalDirectory = new MemoryPortalDirectory()
   .addMerchant("pantry-plan", PANTRY_PLAN.merchantId)
-  .addSubscription(PANTRY_PLAN.merchantId, hashEmail("maya@example.com"), maya.id);
+  .addSubscription(PANTRY_PLAN.merchantId, hashEmail("maya@example.com"), maya.id, {
+    id: maya.id,
+    planName: maya.planName,
+    price: maya.price,
+    interval: maya.interval,
+    status: maya.status,
+    nextBillingTime: maya.nextBillingTime,
+  });
 const portalStores = { links: new MemoryMagicLinkStore(), delegations: new MemoryDelegationStore() };
 await app.register(portalRoutes, {
   prefix: "/v1",
+  directory: portalDirectory,
   magicLinks: new MagicLinkService({
     directory: portalDirectory,
     store: portalStores.links,
@@ -172,7 +180,7 @@ await app.register(portalRoutes, {
   }),
   delegations: new DelegationService({ store: portalStores.delegations, directory: portalDirectory }),
   signingSecret,
-  portalUrl: process.env.PORTAL_URL || "http://localhost:5176/account.html",
+  portalUrl: process.env.PORTAL_URL || "http://localhost:5178/",
   allowOrigin: () => true,
   // The fake runs on plain http, where browsers drop Secure cookies.
   secureCookies: false,
@@ -247,6 +255,15 @@ async function move(actionId: string, to: ActionState, approveUrl?: string): Pro
 function principalFor(request: FastifyRequest): SubscriberPrincipal {
   const bearer = request.headers.authorization?.match(/^Bearer (.+)$/)?.[1];
   if (bearer !== undefined && !bearer.startsWith("fake:")) {
+    // The hosted portal's token (POST /v1/portal/token): our subscription id, the PORTAL channel.
+    const portal = verifyPortalSessionToken(bearer, signingSecret, new Date());
+    if (portal.ok) {
+      const owned = subscriptions.find((s) => s.id === portal.claims.sub);
+      if (!owned || owned.merchantId !== portal.claims.mid) {
+        throw new SessionError("unauthorized", "Invalid or expired portal token");
+      }
+      return { merchantId: owned.merchantId, subscriptionId: owned.id, channel: "portal" };
+    }
     // A real widget token, as the demo store's backend signs it: bound to one PayPal subscription.
     const verified = verifyWidgetToken(bearer, signingSecret, new Date());
     const subscription = verified.ok

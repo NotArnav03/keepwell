@@ -286,3 +286,39 @@ describe("widget", () => {
     unmount = null;
   });
 });
+
+describe("full page (the hosted portal)", () => {
+  it("renders inside the given element as a region, without trapping focus or closing on Escape", async () => {
+    const { transport } = fakeTransport();
+    const container = document.createElement("div");
+    document.body.append(container);
+    const closed = vi.fn();
+    await act(() => {
+      unmount = mount(
+        {
+          transport,
+          autopayUrl: AUTOPAY,
+          supportContact: null,
+          locale: "en-US",
+          apiOrigin: API_ORIGIN,
+          fullPage: true,
+        },
+        closed,
+        container,
+      );
+    });
+    await flush();
+    const host = container.querySelector("[data-keepwell-widget]");
+    expect(host?.shadowRoot).not.toBeNull();
+    const region = host?.shadowRoot?.querySelector(".kw-dialog");
+    expect(region?.getAttribute("role")).toBe("region");
+    expect(region?.hasAttribute("aria-modal")).toBe(false);
+    expect(host?.shadowRoot?.querySelector(".kw-backdrop")?.classList.contains("kw-page")).toBe(true);
+    // It doesn't take focus on load, so the portal's own heading and controls stay first.
+    expect(host?.shadowRoot?.activeElement).toBeNull();
+
+    region?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(closed).not.toHaveBeenCalled();
+    container.remove();
+  });
+});

@@ -1,10 +1,16 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
-import { CreateDelegationResponse, DELEGATION_TTL_SECONDS } from "@keepwell/contracts";
+import {
+  CreateDelegationResponse,
+  DELEGATION_TTL_SECONDS,
+  PortalMe,
+  PortalTokenResponse,
+  type PortalSubscription,
+} from "@keepwell/contracts";
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
 import { DelegationService } from "./delegations.js";
-import { signJwt } from "./jwt.js";
+import { signJwt, verifyPortalSessionToken } from "./jwt.js";
 import { MagicLinkService } from "./magic-link.js";
 import {
   MemoryDelegationStore,
@@ -22,6 +28,14 @@ const MERCHANT = "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b";
 const MAYA_SUB = "0199a1b2-0000-7000-8000-000000000001";
 const OTHER_SUB = "0199a1b2-0000-7000-8000-000000000002";
 const MAYA = "maya@example.com";
+const MAYA_PLAN: PortalSubscription = {
+  id: MAYA_SUB,
+  planName: "Standard",
+  price: { value: "12.00", currency: "USD" },
+  interval: { unit: "MONTH", count: 1 },
+  status: "ACTIVE",
+  nextBillingTime: "2026-11-19T10:00:00.000Z",
+};
 
 let app: FastifyInstance | undefined;
 afterEach(async () => {
@@ -33,7 +47,7 @@ async function start(options: { limiters?: Partial<Limiters>; failMail?: boolean
   let now = new Date("2026-11-02T10:00:00.000Z");
   const directory = new MemoryPortalDirectory()
     .addMerchant("pantry-plan", MERCHANT)
-    .addSubscription(MERCHANT, hashEmail(MAYA), MAYA_SUB);
+    .addSubscription(MERCHANT, hashEmail(MAYA), MAYA_SUB, MAYA_PLAN);
   const delegationStore = new MemoryDelegationStore();
   const mailer = new RecordingMailer(() => {
     if (options.failMail) throw new Error("smtp down");
@@ -50,6 +64,7 @@ async function start(options: { limiters?: Partial<Limiters>; failMail?: boolean
   app = buildServer(env);
   await app.register(portalRoutes, {
     prefix: "/v1",
+    directory,
     magicLinks,
     delegations,
     signingSecret: SECRET,
@@ -287,3 +302,105 @@ function signJwtFor(emailHash: string, secret = SECRET): string {
   const iat = Math.floor(Date.parse("2026-11-02T10:00:00.000Z") / 1000);
   return signJwt({ kind: "portal", mid: MERCHANT, eh: emailHash, iat, exp: iat + 3600 }, secret);
 }
+
+const asPortal = (s: Server, method: "GET" | "POST", url: string, cookie: string | null, payload?: object) =>
+  s.server.inject({
+    method,
+    url,
+    ...(payload === undefined ? {} : { payload }),
+    headers: { origin: PORTAL, ...(cookie ? { cookie } : {}) },
+  });
+
+describe("the signed-in portal page", () => {
+  it("shows the subscriptions on the email and only the live delegations", async () => {
+    const s = await start();
+    const cookie = await signIn(s);
+    const kept = CreateDelegationResponse.parse((await createDelegation(s, cookie)).json());
+    const gone = CreateDelegationResponse.parse((await createDelegation(s, cookie)).json());
+    await s.server.inject({
+      method: "DELETE",
+      url: `/v1/delegations/${gone.id}`,
+      headers: { cookie, origin: PORTAL },
+    });
+
+    const res = await asPortal(s, "GET", "/v1/portal/me", cookie);
+    expect(res.statusCode).toBe(200);
+    expect(res.headers["cache-control"]).toBe("no-store");
+    const me = PortalMe.parse(res.json());
+    expect(me.subscriptions).toEqual([MAYA_PLAN]);
+    expect(me.delegations.map((d) => d.id)).toEqual([kept.id]);
+    expect(JSON.stringify(me)).not.toContain(kept.token);
+
+    s.advance((DELEGATION_TTL_SECONDS + 1) * 1000);
+    // The session cookie is gone by then too; the expiry rule is the delegation's own.
+    expect(await s.delegations.list({ merchantId: MERCHANT, emailHash: hashEmail(MAYA) })).toEqual([]);
+  });
+
+  it("needs the cookie and the portal's origin", async () => {
+    const s = await start();
+    expect((await asPortal(s, "GET", "/v1/portal/me", null)).statusCode).toBe(401);
+    const cookie = await signIn(s);
+    const noOrigin = await s.server.inject({ method: "GET", url: "/v1/portal/me", headers: { cookie } });
+    expect(noOrigin.statusCode).toBe(403);
+  });
+
+  it("mints a 10-minute token for one subscription the email owns, and refuses others", async () => {
+    const s = await start();
+    const cookie = await signIn(s);
+    const res = await asPortal(s, "POST", "/v1/portal/token", cookie, { subscriptionId: MAYA_SUB });
+    expect(res.statusCode).toBe(200);
+    const { token, expiresAt } = PortalTokenResponse.parse(res.json());
+    expect(expiresAt).toBe("2026-11-02T10:10:00.000Z");
+    const verified = verifyPortalSessionToken(token, SECRET, new Date("2026-11-02T10:05:00.000Z"));
+    expect(verified.ok && verified.claims).toMatchObject({ mid: MERCHANT, sub: MAYA_SUB });
+    expect(verifyPortalSessionToken(token, SECRET, new Date("2026-11-02T10:11:00.000Z"))).toMatchObject({
+      ok: false,
+      failure: "expired",
+    });
+    expect(verifyPortalSessionToken(token, "another-secret-of-decent-length", new Date()).ok).toBe(false);
+
+    const foreign = await asPortal(s, "POST", "/v1/portal/token", cookie, { subscriptionId: OTHER_SUB });
+    expect(foreign.statusCode).toBe(403);
+    expect(
+      (await asPortal(s, "POST", "/v1/portal/token", null, { subscriptionId: MAYA_SUB })).statusCode,
+    ).toBe(401);
+  });
+
+  it("signs out by clearing the cookie", async () => {
+    const s = await start();
+    const res = await asPortal(s, "POST", "/v1/portal/logout", null);
+    expect(res.statusCode).toBe(204);
+    expect(String(res.headers["set-cookie"])).toMatch(/kw_portal=;.*Max-Age=0/);
+    const foreign = await s.server.inject({
+      method: "POST",
+      url: "/v1/portal/logout",
+      headers: { origin: "https://evil.example" },
+    });
+    expect(foreign.statusCode).toBe(403);
+  });
+});
+
+describe("CORS for the portal's origin", () => {
+  it("answers the preflight and allows credentials for the portal only", async () => {
+    const s = await start();
+    const pre = await s.server.inject({
+      method: "OPTIONS",
+      url: "/v1/delegations/0199a1b2-0000-7000-8000-000000000009",
+      headers: { origin: PORTAL, "access-control-request-method": "DELETE" },
+    });
+    expect(pre.statusCode).toBe(204);
+    expect(pre.headers["access-control-allow-origin"]).toBe(PORTAL);
+    expect(pre.headers["access-control-allow-credentials"]).toBe("true");
+    expect(pre.headers["access-control-allow-methods"]).toContain("DELETE");
+
+    const res = await asPortal(s, "GET", "/v1/portal/me", null);
+    expect(res.headers["access-control-allow-origin"]).toBe(PORTAL);
+    const other = await s.server.inject({
+      method: "GET",
+      url: "/v1/portal/me",
+      headers: { origin: "https://evil.example" },
+    });
+    expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+    expect(other.headers["access-control-allow-credentials"]).toBeUndefined();
+  });
+});

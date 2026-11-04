@@ -17,6 +17,8 @@ export interface WidgetProps {
   openPopup?: (url: string) => PopupHandle | null;
   /** The API's origin: the only one whose "keepwell.revise" message from the return page is believed. */
   apiOrigin?: string;
+  /** Rendered in the page (the hosted portal) rather than as a modal over it: no trap, no Escape. */
+  fullPage?: boolean;
 }
 
 /** What the widget needs of the approval window: to notice the buyer closing it. */
@@ -69,7 +71,7 @@ export function Widget(props: WidgetProps) {
 
   // Focus the dialog on open, so keyboard and screen-reader users start inside it.
   useEffect(() => {
-    dialog.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    if (!props.fullPage) dialog.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
   }, []);
 
   // A downgrade waits on PayPal's approval page: open it once, in a popup if the browser allows.
@@ -224,14 +226,14 @@ export function Widget(props: WidgetProps) {
   const note = offer ? acceptNote(offer.offer) : null;
 
   return (
-    <div class="kw-backdrop">
+    <div class={props.fullPage ? "kw-backdrop kw-page" : "kw-backdrop"}>
       <div
         class="kw-dialog"
-        role="dialog"
-        aria-modal="true"
+        role={props.fullPage ? "region" : "dialog"}
+        aria-modal={props.fullPage ? undefined : "true"}
         aria-labelledby="kw-title"
         ref={dialog}
-        onKeyDown={onKeyDown}
+        onKeyDown={props.fullPage ? undefined : onKeyDown}
       >
         <header class="kw-header">
           <div>

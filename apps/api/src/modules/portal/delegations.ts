@@ -3,6 +3,7 @@ import {
   CreateDelegationRequest,
   DELEGATION_TTL_SECONDS,
   type CreateDelegationResponse,
+  type DelegationSummary,
   type DelegationScope,
 } from "@keepwell/contracts";
 import type { DelegationStore, PortalDirectory } from "./ports.js";
@@ -64,6 +65,22 @@ export class DelegationService {
     };
     await this.deps.store.insert(record);
     return { id: record.id, token, scopes, expiresAt: record.expiresAt.toISOString() };
+  }
+
+  /** The live delegations (not revoked, not expired) on the subscriptions this email owns. */
+  async list(who: PortalPrincipal): Promise<DelegationSummary[]> {
+    const owned = await this.deps.directory.subscriptionsFor(who.merchantId, who.emailHash);
+    const now = this.clock().getTime();
+    const rows = await this.deps.store.listFor(who.merchantId, owned);
+    return rows
+      .filter((row) => row.revokedAt === null && row.expiresAt.getTime() > now)
+      .map((row) => ({
+        id: row.id,
+        subscriptionId: row.subscriptionId,
+        scopes: row.scopes,
+        expiresAt: row.expiresAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+      }));
   }
 
   /** Someone else's delegation is "not found", not "forbidden", so ids can't be probed. */

@@ -1,5 +1,6 @@
 import type { FastifyPluginCallback, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
+import { randomBytes } from "node:crypto";
 import {
   CreateDelegationRequest,
   CreateDelegationResponse,
@@ -7,9 +8,18 @@ import {
   Id,
   MagicLinkRequest,
   PORTAL_SESSION_TTL_SECONDS,
+  PortalMe,
+  PortalSessionTokenClaims,
+  PortalTokenRequest,
+  PortalTokenResponse,
+  WIDGET_TOKEN_TTL_SECONDS,
+  type PortalSubscription,
 } from "@keepwell/contracts";
+import { allowCors } from "../sessions/cors.js";
+import { signJwt } from "./jwt.js";
 import { DelegationError, type DelegationService, type PortalPrincipal } from "./delegations.js";
 import type { MagicLinkService } from "./magic-link.js";
+import type { PortalDirectory } from "./ports.js";
 import { RateLimiter } from "./rate-limit.js";
 import { PORTAL_COOKIE, signPortalSession, verifyPortalSession } from "./session.js";
 import { hashEmail } from "./tokens.js";
@@ -28,6 +38,7 @@ export interface Limiters {
 
 export interface PortalRoutesOptions {
   magicLinks: MagicLinkService;
+  directory: PortalDirectory;
   delegations: DelegationService;
   /** Signs the PORTAL cookie. */
   signingSecret: string;
@@ -66,6 +77,15 @@ export const portalRoutes: FastifyPluginCallback<PortalRoutesOptions> = (app, op
   const clock = options.clock ?? (() => new Date());
   const limiters = { ...defaultLimiters(clock), ...options.limiters };
 
+  // The portal is another origin and sends its cookie: answer only the origins we trust, with credentials.
+  allowCors(app, {
+    allowOrigin: options.allowOrigin,
+    paths: ["/portal/*", "/delegations", "/delegations/*"],
+    headers: "content-type",
+    methods: "GET, POST, DELETE",
+    credentials: true,
+  });
+
   app.setErrorHandler((error: unknown, request, reply) => {
     if (error instanceof PortalHttpError) {
       if (error.retryAfterSeconds !== undefined) reply.header("retry-after", error.retryAfterSeconds);
@@ -102,6 +122,53 @@ export const portalRoutes: FastifyPluginCallback<PortalRoutesOptions> = (app, op
     const session = signPortalSession(who, options.signingSecret, clock());
     reply.header("set-cookie", sessionCookie(session, options.secureCookies ?? true));
     return reply.redirect(options.portalUrl);
+  });
+
+  // Everything the signed-in portal page shows: the subscriptions on this email, and the live delegations.
+  app.get("/portal/me", async (request, reply) => {
+    const who = portalPrincipal(request, options, clock());
+    const ids = await options.directory.subscriptionsFor(who.merchantId, who.emailHash);
+    const found = await Promise.all(ids.map((id) => options.directory.summary(who.merchantId, id)));
+    const subscriptions = found.filter((s): s is PortalSubscription => s !== null);
+    const delegations = await options.delegations.list(who);
+    return reply.header("cache-control", "no-store").send(PortalMe.parse({ subscriptions, delegations }));
+  });
+
+  // A short-lived token for the widget on this page, bound to one subscription this email owns.
+  app.post("/portal/token", { bodyLimit: 1024 }, async (request, reply) => {
+    const who = portalPrincipal(request, options, clock());
+    const { subscriptionId } = parse(PortalTokenRequest, request.body);
+    limit(limiters.delegationsPerSession, `token:${who.merchantId}:${who.emailHash}`);
+    const owned = await options.directory.subscriptionsFor(who.merchantId, who.emailHash);
+    if (!owned.includes(subscriptionId)) {
+      throw new PortalHttpError(403, "forbidden", "That subscription isn't on your account");
+    }
+    const iat = Math.floor(clock().getTime() / 1000);
+    const claims = PortalSessionTokenClaims.parse({
+      kind: "portal_session",
+      mid: who.merchantId,
+      sub: subscriptionId,
+      iat,
+      exp: iat + WIDGET_TOKEN_TTL_SECONDS,
+      nonce: randomBytes(16).toString("hex"),
+    });
+    return reply.header("cache-control", "no-store").send(
+      PortalTokenResponse.parse({
+        token: signJwt(claims, options.signingSecret),
+        expiresAt: new Date(claims.exp * 1000).toISOString(),
+      }),
+    );
+  });
+
+  // Signing out clears the cookie. A link or cookie that leaked is still good until it expires.
+  app.post("/portal/logout", (request, reply) => {
+    if (request.headers.origin === undefined || !options.allowOrigin(request.headers.origin)) {
+      throw new PortalHttpError(403, "forbidden", "This request must come from the portal");
+    }
+    return reply
+      .header("set-cookie", sessionCookie("", options.secureCookies ?? true, 0))
+      .code(204)
+      .send();
   });
 
   app.post("/delegations", { bodyLimit: 4096 }, async (request, reply) => {
@@ -148,14 +215,8 @@ function limit(limiter: RateLimiter, key: string): void {
   }
 }
 
-function sessionCookie(value: string, secure: boolean): string {
-  const parts = [
-    `${PORTAL_COOKIE}=${value}`,
-    "HttpOnly",
-    "SameSite=Lax",
-    "Path=/",
-    `Max-Age=${PORTAL_SESSION_TTL_SECONDS}`,
-  ];
+function sessionCookie(value: string, secure: boolean, maxAge = PORTAL_SESSION_TTL_SECONDS): string {
+  const parts = [`${PORTAL_COOKIE}=${value}`, "HttpOnly", "SameSite=Lax", "Path=/", `Max-Age=${maxAge}`];
   if (secure) parts.push("Secure");
   return parts.join("; ");
 }

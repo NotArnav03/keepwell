@@ -8,6 +8,9 @@ export const css = `
   display: flex; align-items: center; justify-content: center; padding: 16px;
   font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f172a;
 }
+/* In the hosted portal the widget is the page, not a layer over it. */
+.kw-page.kw-backdrop { position: static; z-index: auto; background: none; padding: 0; display: block; }
+.kw-page .kw-dialog { width: min(640px, 100%); max-height: none; box-shadow: none; border: 1px solid #cbd5e1; margin: 0 auto; }
 .kw-dialog {
   background: #fff; border-radius: 12px; width: min(480px, 100%); max-height: 90vh;
   display: flex; flex-direction: column; box-shadow: 0 20px 50px rgb(0 0 0 / 0.25); overflow: hidden;

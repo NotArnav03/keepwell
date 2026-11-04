@@ -5,13 +5,22 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
 export function allowCors(
   app: FastifyInstance,
-  options: { allowOrigin: (origin: string) => boolean; paths: string[]; headers: string },
+  options: {
+    allowOrigin: (origin: string) => boolean;
+    paths: string[];
+    headers: string;
+    /** Default "GET, POST". */
+    methods?: string;
+    /** The browser may send cookies (the portal). Never combine with an allowOrigin that accepts everyone. */
+    credentials?: boolean;
+  },
 ): void {
   app.addHook("onRequest", (request, reply, next) => {
     const { origin } = request.headers;
     if (origin !== undefined && options.allowOrigin(origin)) {
       reply.header("access-control-allow-origin", origin);
       reply.header("access-control-expose-headers", "x-request-id");
+      if (options.credentials === true) reply.header("access-control-allow-credentials", "true");
       reply.header("vary", "Origin");
     }
     next();
@@ -19,7 +28,7 @@ export function allowCors(
   const preflight = (_request: FastifyRequest, reply: FastifyReply) =>
     reply
       .code(204)
-      .header("access-control-allow-methods", "GET, POST")
+      .header("access-control-allow-methods", options.methods ?? "GET, POST")
       .header("access-control-allow-headers", options.headers)
       .header("access-control-max-age", "600")
       .send();

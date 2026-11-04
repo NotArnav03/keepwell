@@ -1,3 +1,4 @@
+import type { PortalSubscription } from "@keepwell/contracts";
 import type {
   DelegationRecord,
   DelegationStore,
@@ -44,6 +45,13 @@ export class MemoryDelegationStore implements DelegationStore {
     return Promise.resolve(null);
   }
 
+  listFor(merchantId: string, subscriptionIds: string[]): Promise<DelegationRecord[]> {
+    const rows = [...this.rows.values()].filter(
+      (row) => row.merchantId === merchantId && subscriptionIds.includes(row.subscriptionId),
+    );
+    return Promise.resolve(rows.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime()));
+  }
+
   revoke(id: string, at: Date): Promise<void> {
     const row = this.rows.get(id);
     if (row !== undefined && row.revokedAt === null) row.revokedAt = at;
@@ -54,13 +62,20 @@ export class MemoryDelegationStore implements DelegationStore {
 export class MemoryPortalDirectory implements PortalDirectory {
   private readonly merchants = new Map<string, string>();
   private readonly subscriptions = new Map<string, string[]>();
+  private readonly summaries = new Map<string, PortalSubscription>();
 
   addMerchant(slug: string, merchantId: string): this {
     this.merchants.set(slug, merchantId);
     return this;
   }
 
-  addSubscription(merchantId: string, emailHash: string, subscriptionId: string): this {
+  addSubscription(
+    merchantId: string,
+    emailHash: string,
+    subscriptionId: string,
+    summary?: PortalSubscription,
+  ): this {
+    if (summary !== undefined) this.summaries.set(`${merchantId}:${subscriptionId}`, summary);
     const key = `${merchantId}:${emailHash}`;
     this.subscriptions.set(key, [...(this.subscriptions.get(key) ?? []), subscriptionId]);
     return this;
@@ -68,6 +83,10 @@ export class MemoryPortalDirectory implements PortalDirectory {
 
   merchantBySlug(slug: string): Promise<string | null> {
     return Promise.resolve(this.merchants.get(slug) ?? null);
+  }
+
+  summary(merchantId: string, subscriptionId: string): Promise<PortalSubscription | null> {
+    return Promise.resolve(this.summaries.get(`${merchantId}:${subscriptionId}`) ?? null);
   }
 
   subscriptionsFor(merchantId: string, emailHash: string): Promise<string[]> {
