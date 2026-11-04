@@ -7,10 +7,12 @@ export const en = {
   cancelNow: "Cancel now",
   cancelling: "Cancelling…",
   close: "Close",
+  newTab: "opens in a new tab",
   greeting:
     "Sorry to see you go. Before you do, can I ask what's prompting it? You can also just cancel with the button above.",
   placeholder: "Tell us what's going on",
   send: "Send",
+  speak: "Speak",
   accept: "Yes, do that",
   decline: "No thanks",
   keep: "Keep my subscription",
