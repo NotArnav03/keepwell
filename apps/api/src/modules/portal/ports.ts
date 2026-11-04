@@ -1,7 +1,7 @@
 import type { DelegationScope } from "@keepwell/contracts";
 
-// What the identity services need from the outside world. Postgres-backed versions arrive with the
-// sessions module (#32); memory.ts holds the in-process ones the fake server and the tests use.
+// What the identity services need from the outside world. pg.ts holds the Postgres versions the
+// API uses; memory.ts holds the in-process ones the fake server and the tests use.
 
 /** Who a portal login can match. Postgres: `merchants.slug` and `subscriptions.subscriber_email_hash`. */
 export interface PortalDirectory {
