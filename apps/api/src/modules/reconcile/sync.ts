@@ -21,6 +21,8 @@ type PlanRow = typeof plans.$inferSelect;
 
 /** Statuses a Keepwell cancel counts for: a cancel underway or done means it wasn't PayPal-side. */
 const OUR_CANCEL_STATES = ["PENDING", "EXECUTING", "RETRY_WAIT", "APPLIED", "CONFIRMED"] as const;
+/** The payment_failed reasonCode when PayPal counted a failure but gave no last_failed_payment. */
+export const UNKNOWN_FAILURE_REASON = "UNKNOWN";
 
 export class SubscriptionSync {
   constructor(
@@ -113,14 +115,17 @@ export class SubscriptionSync {
         tx,
       );
     }
-    if (row.failedPaymentsCount > previous.failedPaymentsCount && row.lastFailureReason !== null) {
+    // The count is what proves a failure. PayPal doesn't always say why: in a real sandbox failure
+    // (spike Q5) last_failed_payment was absent while failed_payments_count reached 3. Recovery
+    // still needs to hear about it, and picks its generic playbook for UNKNOWN.
+    if (row.failedPaymentsCount > previous.failedPaymentsCount) {
       await emit(
         {
           type: "subscription.payment_failed",
           merchantId,
           payload: {
             subscriptionId,
-            reasonCode: row.lastFailureReason,
+            reasonCode: row.lastFailureReason ?? UNKNOWN_FAILURE_REASON,
             failedCount: row.failedPaymentsCount,
             nextRetryTime: row.nextRetryTime?.toISOString() ?? null,
           },

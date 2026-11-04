@@ -32,6 +32,7 @@ let engine: DbActionEngine;
 let reconciler: Reconciler;
 let now: Date;
 let sent: { name: string; payload: unknown }[];
+let events: FakeDomainEvents;
 
 const ours = async (name: string) =>
   (
@@ -64,7 +65,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
       log: quiet,
       retryDelaysMs: [],
     });
-    const events = new FakeDomainEvents();
+    events = new FakeDomainEvents();
     sync = new SubscriptionSync(db, paypal, events);
     engine = new DbActionEngine({
       db,
@@ -142,6 +143,20 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
     expect((await ours("chloe"))?.status).toBe("CANCELLED");
     expect((await ours("priya"))?.failedPaymentsCount).toBe(1);
     expect(await reconciler.drift(M)).toMatchObject({ drifted: 0 });
+  });
+
+  // Spike Q5 (#131): a real sandbox renewal failure showed failed_payments_count 3 and no
+  // last_failed_payment at all. Recovery must still hear about it, with the reason unknown.
+  it("emits payment_failed when the failure count rises even without a reason code", async () => {
+    const kenji = fixtureSubscriptionId("kenji");
+    await sync.sync(M, kenji);
+    mock.state.renew(kenji, "PAYER_CANNOT_PAY");
+    delete mock.state.getSubscription(M, kenji).billing_info?.last_failed_payment;
+    const before = events.emitted.length;
+    await sync.sync(M, kenji);
+    const failed = events.emitted.slice(before).filter((e) => e.type === "subscription.payment_failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0]?.payload).toMatchObject({ reasonCode: "UNKNOWN", failedCount: 1, nextRetryTime: null });
   });
 
   it("puts subscriptions with an Action in flight on the hot loop", async () => {
