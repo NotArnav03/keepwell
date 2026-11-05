@@ -29,3 +29,26 @@ curl -N "localhost:3000/v1/sessions/<id>/stream?fake=pause"     # in a second te
 curl -X POST localhost:3000/v1/sessions/<id>/messages -H 'content-type: application/json' \
   -H 'authorization: Bearer fake:pause' -d '{"text":"I am travelling for two months"}'
 ```
+
+## The real module (#32)
+
+`service.ts` is `DbSessionsApi`: the fake's rules, kept in Postgres.
+
+| Table | What it holds |
+|---|---|
+| `sessions` | state, reason, fallback level, outcome |
+| `offers` | one row per session: the menu computed at start, the one offer shown (card text and hash), the answer, the consent |
+| `messages` | the transcript, redacted (`redact.ts`: emails, phone and card numbers) |
+| `session_events` | every SSE frame, numbered per session, for replay from `Last-Event-ID` |
+
+- Every write locks the session's row, so concurrent clicks and PayPal's answers apply in order.
+- `subscribe` watches before it replays, then follows by an in-process wake (`feed.ts`) plus a 1 s poll, so events written by another instance or by the domain-event worker still arrive.
+- `accept` re-checks the offer with `evaluateAcceptance` against today's policy and subscription. A pause's resume is tied to its suspend (`afterActionId`).
+- The session's Actions are keyed `<sessionId>:<offerId>` and `<sessionId>:cancel:<n>`. Register `onActionStateChanged` for `action.state_changed`: it streams `action.update` and closes the session when its Action applies. A cancel pre-empts an offer still being applied.
+- `cancel` never touches the agent (a test runs it with an agent that throws).
+
+`auth.ts` is the `authenticate` for the routes: the merchant's widget token, the portal's session token, or a stream ticket (`?ticket=`, for that one session's stream; `create()` puts it in `streamUrl` via `signStreamTicket`).
+
+Wiring into `platform.ts` needs a Postgres `PolicyStore` and `MerchantCatalog` (#124), the widget and ticket secrets, and `onActionStateChanged` registered on the domain events.
+
+Tests: `service.db.test.ts` runs against Postgres (`KEEPWELL_TEST_DATABASE_URL`, as in CI); locally `docker run -d -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18` is enough.
