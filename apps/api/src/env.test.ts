@@ -14,6 +14,7 @@ describe("loadEnv", () => {
       PAYPAL_USE_MOCK: false,
       PAYPAL_MOCK_URL: "http://localhost:4010",
       TRUST_PROXY_HOPS: 0,
+      RESEND_API_BASE: "https://api.resend.com",
     });
   });
 
