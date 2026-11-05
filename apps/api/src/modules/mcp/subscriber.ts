@@ -15,6 +15,8 @@ import {
 } from "@keepwell/contracts";
 import { describeOffer } from "@keepwell/policy";
 import type { DelegationGrant } from "../portal/delegations.js";
+import { RateLimiter } from "../portal/rate-limit.js";
+import { hashToken } from "../portal/tokens.js";
 import { ipPrefix } from "../sessions/routes.js";
 
 // The subscriber-agent MCP server (ARCHITECTURE.md §6.14, #41): a subscriber's own AI assistant,
@@ -50,6 +52,8 @@ export interface SubscriberMcpOptions {
   publicUrl: string;
   /** Where a subscriber creates a token, for the discovery document. */
   portalUrl: string;
+  /** Defaults: 300 requests a minute per IP (before the token is checked), 120 per token. */
+  limits?: { perIp?: RateLimiter; perToken?: RateLimiter };
 }
 
 const SCOPE_ORDER: DelegationScope[] = ["read", "accept_offer", "cancel"];
@@ -62,10 +66,19 @@ export const subscriberMcpRoutes: FastifyPluginCallback<SubscriberMcpOptions> = 
     reply.header("cache-control", "public, max-age=300").send(discovery(options)),
   );
 
+  // Per IP before the token is looked at, so guessing tokens is slow; per token after, so one
+  // runaway agent can't crowd out the rest. Stateless MCP spends about three requests a tool call.
+  const perIp = options.limits?.perIp ?? new RateLimiter({ limit: 300, windowMs: 60_000 });
+  const perToken = options.limits?.perToken ?? new RateLimiter({ limit: 120, windowMs: 60_000 });
+
   app.post("/mcp/subscriber", { bodyLimit: 64 * 1024 }, async (request, reply) => {
+    const byIp = perIp.hit(`ip:${request.ip}`);
+    if (!byIp.allowed) return tooMany(reply, byIp.retryAfterSeconds);
     const token = request.headers.authorization?.match(/^Bearer (\S+)$/)?.[1];
     const grant = token === undefined ? null : await grantFor(options.delegations, token);
     if (token === undefined || grant === null) return unauthorized(reply);
+    const byToken = perToken.hit(hashToken(token));
+    if (!byToken.allowed) return tooMany(reply, byToken.retryAfterSeconds);
 
     const server = buildServer(options, token, grant, meta(request));
     const transport = new StreamableHTTPServerTransport({
@@ -233,6 +246,17 @@ function meta(request: FastifyRequest): RequestMeta {
     ipPrefix: ipPrefix(request.ip),
     userAgent: request.headers["user-agent"]?.slice(0, 512) ?? null,
   };
+}
+
+function tooMany(reply: FastifyReply, retryAfterSeconds: number) {
+  return reply
+    .code(429)
+    .header("retry-after", retryAfterSeconds)
+    .send({
+      jsonrpc: "2.0",
+      error: { code: -32002, message: `Too many requests; try again in ${retryAfterSeconds} s` },
+      id: null,
+    });
 }
 
 function unauthorized(reply: FastifyReply) {

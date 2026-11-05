@@ -3,6 +3,7 @@
 `subscriber.ts`: the subscriber-agent MCP server (ARCHITECTURE.md §6.14, #41) at `POST /mcp/subscriber`, streamable HTTP, stateless, plus the discovery document at `GET /.well-known/keepwell-agent.json`.
 
 - **Auth:** `Authorization: Bearer kwd_…`, a delegation token the subscriber creates in the portal. Only the tools its scopes allow are listed, and each call re-checks the token, so a revoked token stops working mid-conversation.
+- **Rate limits:** 300 requests a minute per IP, counted before the token is checked so guessing tokens is slow, and 120 a minute per token (stateless MCP spends about three requests a tool call). Over either, `429` with `Retry-After`.
 - **Tools:**
   - `get_my_subscription` (read).
   - `get_retention_options` (read): the policy's menu as structured offers, always with the note that cancelling is one call.

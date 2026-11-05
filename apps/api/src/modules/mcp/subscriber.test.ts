@@ -5,6 +5,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { SessionError, type DelegationScope, type OfferMenu, type ReasonCategory } from "@keepwell/contracts";
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
+import { RateLimiter } from "../portal/rate-limit.js";
 import { subscriberMcpRoutes, type SubscriberAgentApi } from "./subscriber.js";
 
 // The MCP server through the SDK's own client over HTTP, as Claude Desktop would reach it.
@@ -30,7 +31,10 @@ afterEach(async () => {
   app = undefined;
 });
 
-async function start(tokens: Record<string, DelegationScope[]>) {
+async function start(
+  tokens: Record<string, DelegationScope[]>,
+  limits?: { perIp?: RateLimiter; perToken?: RateLimiter },
+) {
   const sessions = {
     agentSubscription: vi.fn(() =>
       Promise.resolve({
@@ -71,6 +75,7 @@ async function start(tokens: Record<string, DelegationScope[]>) {
     },
     publicUrl: "https://api.keepwell.example",
     portalUrl: "https://portal.keepwell.example/",
+    ...(limits === undefined ? {} : { limits }),
   });
   const address = await app.listen({ port: 0, host: "127.0.0.1" });
   return { sessions, url: new URL(`${address}/mcp/subscriber`), revoke: (t: string) => revoked.add(t) };
@@ -173,5 +178,37 @@ describe("subscriber MCP server", () => {
     const doc = (await res.json()) as { mcp: { url: string }; honesty_policy: string[] };
     expect(doc.mcp.url).toBe("https://api.keepwell.example/mcp/subscriber");
     expect(doc.honesty_policy[0]).toBe("Cancelling is always available and takes one call.");
+  });
+});
+
+describe("rate limits", () => {
+  const post = (url: URL, token?: string) =>
+    fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        accept: "application/json, text/event-stream",
+        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+
+  it("limits each token, without touching another token's budget", async () => {
+    const { url } = await start(
+      { kwd_a: ["read"], kwd_b: ["read"] },
+      { perToken: new RateLimiter({ limit: 2, windowMs: 60_000 }) },
+    );
+    expect((await post(url, "kwd_a")).status).toBe(200);
+    expect((await post(url, "kwd_a")).status).toBe(200);
+    const limited = await post(url, "kwd_a");
+    expect(limited.status).toBe(429);
+    expect(Number(limited.headers.get("retry-after"))).toBeGreaterThan(0);
+    expect((await post(url, "kwd_b")).status).toBe(200);
+  });
+
+  it("limits each IP before looking at the token, so guessing tokens is slow", async () => {
+    const { url } = await start({}, { perIp: new RateLimiter({ limit: 3, windowMs: 60_000 }) });
+    for (let i = 0; i < 3; i++) expect((await post(url, `kwd_guess${i}`)).status).toBe(401);
+    expect((await post(url, "kwd_guess9")).status).toBe(429);
   });
 });
