@@ -5,9 +5,13 @@ import { createPool, postgresReadiness, withStrictSsl } from "./db.js";
 import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
 import { reviseReturn } from "./modules/actions/revise-return.js";
+import { createLlmClient } from "./modules/agent/index.js";
 import { DbAudit } from "./modules/audit/log.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
+import { DrizzleInsightStore, DrizzleSessionReader } from "./modules/insights/drizzle-store.js";
+import { InsightExtractor, noReplies } from "./modules/insights/extractor.js";
+import { registerInsights } from "./modules/insights/jobs.js";
 import { PayPalClient } from "./modules/paypal/client.js";
 import { MOCK_CREDENTIALS, singleAppCredentials } from "./modules/paypal/credentials.js";
 import { DbJudgePool } from "./modules/pool/pool.js";
@@ -42,7 +46,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   // Waking a suspended Neon compute can take a few seconds.
   const app = buildServer(env, { readinessChecks, readinessTimeoutMs: 5000 });
   const core = await createCore(env, url, app.log);
-  const { pool, db, paypal, jobs, events, engine, sync, reconciler } = core;
+  const { pool, db, paypal, jobs, events, audit, engine, sync, reconciler } = core;
   readinessChecks.push(postgresReadiness(pool), {
     name: "paypal",
     check: async () => {
@@ -55,6 +59,18 @@ export async function startPlatform(env: Env): Promise<Platform> {
   events.on("subscription.synced", "actions.confirm", async (event) => {
     await engine.confirmFromSync(event.merchantId, event.payload.snapshot);
   });
+
+  // M5 insights: the session.closed handler registers before the events worker starts.
+  const extractor = new InsightExtractor({
+    llm: createLlmClient({ anthropicApiKey: env.ANTHROPIC_API_KEY, log: app.log }),
+    sessions: new DrizzleSessionReader(db),
+    // The win-back module supplies the real reader once it owns a replies table.
+    replies: noReplies,
+    store: new DrizzleInsightStore(db),
+    audit,
+    log: app.log,
+  });
+  await registerInsights({ db, jobs, events, extractor, log: app.log });
 
   await events.startWorker();
   await jobs.work("webhook.process", async ({ webhookEventId }) => {
