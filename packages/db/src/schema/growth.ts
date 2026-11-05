@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { ReasonCategory } from "@keepwell/contracts";
 import { amount, at, createdAt, currency, id, merchantId, enumText } from "./columns.js";
 import { merchants } from "./merchants.js";
@@ -58,6 +58,13 @@ export const insights = pgTable(
     id: id(),
     merchantId: merchantId().references(() => merchants.id),
     sessionId: uuid().references(() => sessions.id),
+    /** The win-back reply this insight came from; the replies table (winback module) owns it. */
+    replyId: uuid(),
+    /** For win-back replies, which subscription they belong to; sessions carry it themselves. */
+    subscriptionId: uuid().references(() => subscriptions.id),
+    source: text({ enum: ["session", "winback_reply"] })
+      .notNull()
+      .default("session"),
     reason: enumText(ReasonCategory.options).notNull(),
     subReason: text(),
     featureRequests: text().array(),
@@ -67,7 +74,12 @@ export const insights = pgTable(
     quote: text(),
     createdAt: createdAt(),
   },
-  (t) => [index().on(t.merchantId, t.createdAt)],
+  (t) => [
+    index().on(t.merchantId, t.createdAt),
+    // One insight per source, so insights.extract is idempotent even if two workers race.
+    uniqueIndex().on(t.sessionId),
+    uniqueIndex().on(t.replyId),
+  ],
 );
 
 export const insightActions = pgTable("insight_actions", {

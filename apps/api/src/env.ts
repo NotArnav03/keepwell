@@ -39,6 +39,8 @@ const EnvSchema = z
     TRUST_PROXY_HOPS: z.preprocess(blank, z.coerce.number().int().min(0).max(5).default(0)),
     // Bearer token for GET /ops. Unset: /ops answers 404.
     OPS_TOKEN: z.preprocess(blank, z.string().min(16).optional()),
+    // Unset: no model calls anywhere; sessions run in L1 and insights use their fallback record.
+    ANTHROPIC_API_KEY: optionalString,
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
     SENTRY_DSN: optionalUrl,
   })
