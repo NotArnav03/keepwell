@@ -75,10 +75,16 @@ export const insightActions = pgTable("insight_actions", {
   merchantId: merchantId().references(() => merchants.id),
   kind: text().notNull(),
   params: jsonb().notNull(),
+  rationale: text().notNull().default(""),
   estimate: jsonb(),
-  state: text({ enum: ["proposed", "approved", "rejected", "executed"] })
+  state: text({ enum: ["proposed", "approved", "rejected", "executed", "failed"] })
     .notNull()
     .default("proposed"),
+  proposedBy: text({ enum: ["copilot", "merchant_mcp"] })
+    .notNull()
+    .default("copilot"),
+  /** Why an approved action failed to run; null otherwise. */
+  error: text(),
   actionId: uuid().references(() => actions.id),
   createdAt: createdAt(),
   decidedAt: at(),
