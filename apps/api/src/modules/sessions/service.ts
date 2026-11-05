@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, like, max } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, like, lt, max, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
   AcceptOfferRequest,
@@ -75,6 +75,9 @@ import { closingSummary } from "./summary.js";
  */
 export const STREAM_IDLE_MS = 12 * 60_000;
 
+/** A session untouched this long, and not waiting on PayPal, is closed as abandoned. */
+export const ABANDON_AFTER_MS = 30 * 60_000;
+
 /**
  * An accepted offer whose Actions changed nothing in PayPal (the buyer pressed Cancel on PayPal's
  * approval page, or it failed) can be accepted again, up to this many attempts in all.
@@ -132,6 +135,8 @@ export interface DbSessionsApiOptions {
   pollMs?: number;
   /** Default STREAM_IDLE_MS. */
   idleMs?: number;
+  /** Default ABANDON_AFTER_MS. */
+  abandonAfterMs?: number;
 }
 
 type SessionRow = typeof sessions.$inferSelect;
@@ -637,6 +642,49 @@ export class DbSessionsApi implements SessionsApi {
         await tx.update(sessions).set({ state: "open" }).where(eq(sessions.id, sessionId));
       }
     });
+  }
+
+  /**
+   * The `sessions.abandon_sweep` job: closes sessions nobody has touched for ABANDON_AFTER_MS as
+   * `abandoned`, so the dashboard doesn't count them as open forever. Only `open` and
+   * `offer_presented` ones: a session waiting on PayPal is PayPal's to finish. Each is re-checked
+   * under its row lock, so a click that lands meanwhile wins. Returns how many it closed.
+   */
+  async abandonIdle(limit = 200): Promise<number> {
+    const cutoff = new Date(this.clock().getTime() - (this.o.abandonAfterMs ?? ABANDON_AFTER_MS));
+    const lastTouched = sql<Date>`coalesce((select max(${sessionEvents.createdAt}) from ${sessionEvents} where ${sessionEvents.sessionId} = ${sessions.id}), ${sessions.startedAt})`;
+    const candidates = await this.o.db.acrossMerchants((tx) =>
+      tx
+        .select({ id: sessions.id, merchantId: sessions.merchantId, subscriptionId: sessions.subscriptionId })
+        .from(sessions)
+        .where(and(inArray(sessions.state, ["open", "offer_presented"]), lt(lastTouched, cutoff)))
+        .orderBy(asc(sessions.startedAt))
+        .limit(limit),
+    );
+    let closed = 0;
+    for (const candidate of candidates) {
+      const principal = {
+        merchantId: candidate.merchantId,
+        subscriptionId: candidate.subscriptionId,
+        channel: "widget" as const,
+      };
+      const done = await this.inSession(principal, candidate.id, async (tx, row, push) => {
+        if (row.state !== "open" && row.state !== "offer_presented") return false;
+        const [latest] = await tx
+          .select({ at: max(sessionEvents.createdAt) })
+          .from(sessionEvents)
+          .where(eq(sessionEvents.sessionId, row.id));
+        const touched = latest?.at ? new Date(latest.at) : row.startedAt;
+        if (touched.getTime() >= cutoff.getTime()) return false;
+        await this.close(tx, row, push, "abandoned", null);
+        return true;
+      }).catch((err: unknown) => {
+        this.o.log?.warn({ err, sessionId: candidate.id }, "abandoning a session failed");
+        return false;
+      });
+      if (done) closed += 1;
+    }
+    return closed;
   }
 
   // ---------- internals ----------

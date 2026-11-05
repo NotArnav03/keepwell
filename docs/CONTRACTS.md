@@ -276,6 +276,7 @@ Emitted to the `domain_events` table and to Postgres `NOTIFY` (for the live feed
 | `insights.refresh_views` | M5 | `{}` | hour |
 | `pool.health` | M1 | `{}` | 5-minute window |
 | `llm.budget_reset` | M2 | `{}` | day |
+| `sessions.abandon_sweep` | M3 | `{}` | 5-minute window |
 
 ---
 

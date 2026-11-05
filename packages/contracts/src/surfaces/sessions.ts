@@ -298,3 +298,18 @@ export const surfacesEventPayloads = {
     reason: ReasonCategory,
   }),
 } as const;
+
+/**
+ * M3 job queues (CONTRACTS.md §3), same shape as platformJobs. `sessions.abandon_sweep` closes
+ * sessions nobody has touched for a while as `abandoned`, so the dashboard's funnel doesn't count
+ * them as open forever. Its key is a 5-minute bucket, so a duplicate enqueue is a no-op.
+ */
+export const surfacesJobs = {
+  "sessions.abandon_sweep": {
+    payload: z.strictObject({}),
+    idempotencyKey: (_payload: Record<string, never>, now: Date): string => {
+      const width = 5 * 60_000;
+      return new Date(Math.floor(now.getTime() / width) * width).toISOString().slice(0, 16);
+    },
+  },
+} as const;

@@ -79,6 +79,7 @@ function build(
     payments?: PaymentLookup;
     subscription?: () => SubscriptionSnapshot;
     idleMs?: number;
+    abandonAfterMs?: number;
   } = {},
 ) {
   const events = new FakeDomainEvents();
@@ -120,6 +121,7 @@ function build(
     streamUrl: (id) => `https://api.keepwell.example/v1/sessions/${id}/stream`,
     pollMs: 50,
     ...(options.idleMs === undefined ? {} : { idleMs: options.idleMs }),
+    ...(options.abandonAfterMs === undefined ? {} : { abandonAfterMs: options.abandonAfterMs }),
   });
   return { api, events, audit, engine };
 }
@@ -465,6 +467,36 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
     await new Promise((resolve) => setTimeout(resolve, 400));
     stream.unsubscribe();
     expect(stream.seen.length).toBe(seen);
+  });
+
+  it("abandons sessions nobody touched, but not one waiting on PayPal or one just used", async () => {
+    const { api, events } = build({ abandonAfterMs: 100 });
+    const quiet = await api.create(maya(), { channel: "widget" });
+    const shown = await withPauseOffer(api);
+    const waiting = await withPauseOffer(api);
+    await api.accept(maya(), waiting.sessionId, waiting.offerId, { shownTextHash: waiting.hash }, meta);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const fresh = await api.create(maya(), { channel: "widget" });
+
+    expect(await api.abandonIdle()).toBeGreaterThanOrEqual(2);
+    const state = async (id: string) =>
+      (
+        await testDb.ownerPool.query<{ state: string; outcome: string | null }>(
+          "SELECT state, outcome FROM sessions WHERE id = $1",
+          [id],
+        )
+      ).rows[0];
+    expect(await state(quiet.sessionId)).toEqual({ state: "closed", outcome: "abandoned" });
+    expect(await state(shown.sessionId)).toEqual({ state: "closed", outcome: "abandoned" });
+    expect(await state(waiting.sessionId)).toEqual({ state: "awaiting_paypal", outcome: null });
+    expect(await state(fresh.sessionId)).toEqual({ state: "open", outcome: null });
+
+    const stream = await watch(api, quiet.sessionId);
+    stream.unsubscribe();
+    expect(stream.seen.at(-1)?.[1]).toMatchObject({ type: "session.closed", outcome: "abandoned" });
+    expect(events.emitted.filter((e) => e.type === "session.closed").length).toBeGreaterThanOrEqual(2);
+    // Cancel still works on an abandoned session.
+    await api.cancel(maya(), quiet.sessionId, {});
   });
 
   it("calls a quiet session idle, but never one waiting on PayPal", async () => {
