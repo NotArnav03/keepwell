@@ -46,6 +46,9 @@ const EnvSchema = z
     // Signs unsubscribe links. Unset: a key that lives until restart (the platform logs a warning),
     // so set it anywhere links must keep working.
     UNSUBSCRIBE_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Win-back: where the exit-interview reply page lives, and the secret that signs its links.
+    PORTAL_URL: optionalUrl,
+    MAGIC_LINK_SECRET: z.preprocess(blank, z.string().min(16).optional()),
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
     SENTRY_DSN: optionalUrl,
   })
