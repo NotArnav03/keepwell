@@ -36,6 +36,10 @@ export interface SendOptions {
   /** Join this transaction: the job is created only if it commits. */
   tx?: Tx;
   startAfter?: Date;
+  /** Overrides the queue's retry policy for this job (e.g. a model that may be down for hours). */
+  retryLimit?: number;
+  retryDelay?: number;
+  retryBackoff?: boolean;
 }
 
 const SCHEMA = "pgboss";
@@ -89,6 +93,9 @@ export class Jobs {
     return this.boss.send(name, data as object, {
       singletonKey: job.idempotencyKey(data, now),
       ...(options.startAfter && { startAfter: options.startAfter }),
+      ...(options.retryLimit !== undefined && { retryLimit: options.retryLimit }),
+      ...(options.retryDelay !== undefined && { retryDelay: options.retryDelay }),
+      ...(options.retryBackoff !== undefined && { retryBackoff: options.retryBackoff }),
       ...(options.tx && { db: fromDrizzle(options.tx, sql) }),
     });
   }

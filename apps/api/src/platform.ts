@@ -5,10 +5,14 @@ import { createPool, postgresReadiness, withStrictSsl } from "./db.js";
 import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
 import { reviseReturn } from "./modules/actions/revise-return.js";
+import { createLlmClient, LlmBudget, PgLlmUsageStore } from "./modules/agent/index.js";
 import { DbAudit } from "./modules/audit/log.js";
 import { registerWinback } from "./modules/winback/index.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
+import { DrizzleInsightStore, DrizzleSessionReader } from "./modules/insights/drizzle-store.js";
+import { InsightExtractor, noReplies } from "./modules/insights/extractor.js";
+import { registerInsights } from "./modules/insights/jobs.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
 import { mountRecovery } from "./modules/recovery/mount.js";
 import { PayPalClient } from "./modules/paypal/client.js";
@@ -85,6 +89,23 @@ export async function startPlatform(env: Env): Promise<Platform> {
     ...(env.PORTAL_URL && { portalUrl: env.PORTAL_URL }),
     ...(env.MAGIC_LINK_SECRET && { tokenSecret: env.MAGIC_LINK_SECRET }),
   });
+
+  // M5 insights: the session.closed handler registers before the events worker starts. One
+  // LlmBudget for every model caller, so the daily cap and in-flight reservations are shared.
+  const llmBudget = new LlmBudget({
+    store: new PgLlmUsageStore(db),
+    dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
+  });
+  const extractor = new InsightExtractor({
+    llm: createLlmClient({ anthropicApiKey: env.ANTHROPIC_API_KEY, budget: llmBudget, log: app.log }),
+    sessions: new DrizzleSessionReader(db),
+    // The win-back module supplies the real reader once it owns a replies table.
+    replies: noReplies,
+    store: new DrizzleInsightStore(db),
+    audit,
+    log: app.log,
+  });
+  await registerInsights({ db, jobs, events, extractor, log: app.log });
 
   await events.startWorker();
   await jobs.work("webhook.process", async ({ webhookEventId }) => {
