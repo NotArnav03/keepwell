@@ -404,11 +404,14 @@ interface DomainEvents {
 
 // M1 → M3 (Judge Mode, §6.17). As implemented in packages/contracts/src/platform/interfaces.ts; FakeJudgePool in fakes.
 interface JudgePool {
-  lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;  // 30 min default; null = pool empty, show the fallback
-  release(merchantId: string, poolEntryId: string): Promise<PoolReturn>;              // "available" | "restoring" | "consumed", decided from PayPal's state
+  lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;  // 30 min default; longest-unused first; null = none available, show the fallback
+  holds(merchantId: string, poolEntryId: string, leasedUntil: string): Promise<boolean>; // this exact lease is still live: check on every lease-token request
+  release(merchantId: string, poolEntryId: string, leasedUntil?: string): Promise<PoolReturn | null>; // "available" | "restoring" | "consumed", from PayPal's state; null = that lease isn't live
   counts(merchantId: string): Promise<Record<PoolState, number>>;                     // available, leased, restoring, consumed
 }
-// PoolLease = { poolEntryId, subscriptionId, paypalSubscriptionId, leasedUntil }. Leases end on their own at
+// PoolLease = { poolEntryId, subscriptionId, paypalSubscriptionId, leasedUntil }. Entries are lent again and again,
+// so a lease is the pair (poolEntryId, leasedUntil), whole seconds; a returned entry rests one widget-token lifetime
+// (10 min) before it is lent again. Leases end on their own at
 // leasedUntil (pool.health, every 5 min). On return: cancelled or another plan → consumed; paused → activate;
 // discounted → plan price back (both as Actions, "restoring" until PayPal shows it whole); the judge's pending resumes are cancelled.
 
