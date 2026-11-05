@@ -194,10 +194,13 @@ export const portalRoutes: FastifyPluginCallback<PortalRoutesOptions> = (app, op
   done();
 };
 
-/** The PORTAL cookie's holder; for writes, the request must also come from the portal's origin. */
+/** The PORTAL cookie's holder. Writes must also come from the portal's origin. */
 function portalPrincipal(request: FastifyRequest, options: PortalRoutesOptions, now: Date): PortalPrincipal {
   const origin = request.headers.origin;
-  if (origin === undefined || !options.allowOrigin(origin)) {
+  // Writes must name the portal's origin (CSRF). A same-origin GET carries no Origin at all, which
+  // is how the portal calls /portal/me behind its /v1 rewrite; a foreign one is still refused.
+  const read = request.method === "GET" || request.method === "HEAD";
+  if (origin === undefined ? !read : !options.allowOrigin(origin)) {
     throw new PortalHttpError(403, "forbidden", "This request must come from the portal");
   }
   const cookie = readCookie(request.headers.cookie, PORTAL_COOKIE);

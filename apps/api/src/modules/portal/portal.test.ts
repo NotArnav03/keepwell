@@ -368,12 +368,30 @@ describe("the signed-in portal page", () => {
     expect(await s.delegations.list({ merchantId: MERCHANT, emailHash: hashEmail(MAYA) })).toEqual([]);
   });
 
-  it("needs the cookie and the portal's origin", async () => {
+  it("needs the cookie; a read may be same-origin (no Origin), a foreign origin is refused", async () => {
     const s = await start();
     expect((await asPortal(s, "GET", "/v1/portal/me", null)).statusCode).toBe(401);
     const cookie = await signIn(s);
-    const noOrigin = await s.server.inject({ method: "GET", url: "/v1/portal/me", headers: { cookie } });
-    expect(noOrigin.statusCode).toBe(403);
+    const sameOrigin = await s.server.inject({ method: "GET", url: "/v1/portal/me", headers: { cookie } });
+    expect(sameOrigin.statusCode).toBe(200);
+    const foreign = await s.server.inject({
+      method: "GET",
+      url: "/v1/portal/me",
+      headers: { cookie, origin: "https://evil.example" },
+    });
+    expect(foreign.statusCode).toBe(403);
+  });
+
+  it("refuses a write with no Origin, even with the cookie", async () => {
+    const s = await start();
+    const cookie = await signIn(s);
+    const res = await s.server.inject({
+      method: "POST",
+      url: "/v1/portal/token",
+      payload: { subscriptionId: MAYA_SUB },
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(403);
   });
 
   it("mints a 10-minute token for one subscription the email owns, and refuses others", async () => {
