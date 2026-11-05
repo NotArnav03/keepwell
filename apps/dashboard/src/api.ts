@@ -219,21 +219,26 @@ export class MerchantApi {
     return () => source.close();
   }
 
-  private async request<T = undefined>(path: string, init: RequestInit, schema?: Parser<T>): Promise<T> {
-    const response = await this.fetcher(
-      new URL(path.replace(/^\//, ""), `${this.base.href.replace(/\/$/, "")}/`),
-      {
-        ...init,
-        credentials: "include",
-        headers: {
-          ...(init.body ? { "content-type": "application/json" } : {}),
-          ...(init.method && !["GET", "HEAD", "OPTIONS"].includes(init.method.toUpperCase()) && this.csrfToken
-            ? { "x-keepwell-csrf": this.csrfToken }
-            : {}),
-          ...init.headers,
-        },
+  /**
+   * Same URL, cookie and CSRF header as the typed methods, without reading the body.
+   * Insights streams a POST response and must not go through `request`, which always parses JSON.
+   */
+  fetchRaw(path: string, init: RequestInit): Promise<Response> {
+    return this.fetcher(new URL(path.replace(/^\//, ""), `${this.base.href.replace(/\/$/, "")}/`), {
+      ...init,
+      credentials: "include",
+      headers: {
+        ...(init.body ? { "content-type": "application/json" } : {}),
+        ...(init.method && !["GET", "HEAD", "OPTIONS"].includes(init.method.toUpperCase()) && this.csrfToken
+          ? { "x-keepwell-csrf": this.csrfToken }
+          : {}),
+        ...init.headers,
       },
-    );
+    });
+  }
+
+  private async request<T = undefined>(path: string, init: RequestInit, schema?: Parser<T>): Promise<T> {
+    const response = await this.fetchRaw(path, init);
     if (!response.ok) {
       let code = "http_error";
       let message = `Request failed (${response.status})`;

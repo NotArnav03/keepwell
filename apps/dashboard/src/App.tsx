@@ -16,9 +16,10 @@ import {
 import { MerchantApi, MerchantApiError } from "./api.js";
 import { explainAuditEntry } from "./views.js";
 import { previewPolicyDraft } from "./policy-editor.js";
+import { InsightsPage } from "./insights/InsightsPage.js";
 import { themeStyles, type Theme } from "@keepwell/ui";
 
-type Page = "overview" | "subscribers" | "timeline" | "audit" | "policies" | "onboarding";
+type Page = "overview" | "subscribers" | "timeline" | "audit" | "policies" | "onboarding" | "insights";
 const NAV: { id: Page; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "subscribers", label: "Subscribers" },
@@ -26,6 +27,7 @@ const NAV: { id: Page; label: string }[] = [
   { id: "audit", label: "Audit log" },
   { id: "policies", label: "Policies" },
   { id: "onboarding", label: "Onboarding" },
+  { id: "insights", label: "Insights" },
 ];
 
 const api = new MerchantApi();
@@ -237,6 +239,7 @@ export function App() {
                 {activePage === "audit" && <AuditExplorer api={client} />}
                 {activePage === "policies" && <PolicyEditor api={client} />}
                 {activePage === "onboarding" && <Onboarding api={client} />}
+                {activePage === "insights" && <InsightsPage api={client} />}
               </>
             )}
           </main>
