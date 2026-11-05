@@ -30,3 +30,9 @@ Domain events are streamed over SSE using PostgreSQL LISTEN/NOTIFY. The overview
 owned by M5; the dashboard shows an explicit API error until that endpoint is connected rather than
 fabricated values. The timeline remains an accessible event-list fallback until the Bryntum licence
 is confirmed.
+
+## Insights
+
+`#insights` is the merchant insights page: overview for a date range (7, 30 or 90 days, or a custom
+range), at-risk subscribers, the copilot chat, the insight-action queue and the Demo Inbox. Every
+figure is taken from the API response. An endpoint that answers 404 is shown as not available yet.
