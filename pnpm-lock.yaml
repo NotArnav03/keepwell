@@ -102,7 +102,27 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
 
-  apps/judge: {}
+  apps/judge:
+    dependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@keepwell/widget':
+        specifier: workspace:*
+        version: link:../../packages/widget
+      preact:
+        specifier: 11.1.0
+        version: 11.1.0
+    devDependencies:
+      axe-core:
+        specifier: 4.14.0
+        version: 4.14.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      happy-dom:
+        specifier: 21.0.4
+        version: 21.0.4
 
   apps/portal: {}
 
