@@ -137,6 +137,53 @@ describe.skipIf(URL_ === undefined)("notify against Postgres", { timeout: 30_000
     });
   });
 
+  describe("supersede", () => {
+    it("withdraws a queued message, audits it, and the dispatcher then skips it", async () => {
+      const id = await enqueue(email());
+      expect(await db.forMerchant(A, (tx) => notifier.supersede(A, id, tx))).toBe(true);
+      expect(await rowOf(id)).toMatchObject({ status: "suppressed", suppressedBecause: "superseded" });
+      expect(await auditKinds(id)).toEqual(["notification.enqueued", "notification.suppressed"]);
+      const calls = provider.calls;
+      expect(await dispatcher.dispatch(id)).toEqual({ status: "skipped" });
+      expect(provider.calls).toBe(calls);
+      // A second withdrawal changes nothing and writes no second audit entry.
+      expect(await notifier.supersede(A, id)).toBe(false);
+      expect(await auditKinds(id)).toEqual(["notification.enqueued", "notification.suppressed"]);
+    });
+
+    it("leaves a message that is sending, sent or from another merchant alone", async () => {
+      const sending = await enqueue(email());
+      await testDb.ownerPool.query(`UPDATE notifications SET status = 'sending' WHERE id = $1`, [sending]);
+      expect(await notifier.supersede(A, sending)).toBe(false);
+      expect(await rowOf(sending)).toMatchObject({ status: "sending", suppressedBecause: null });
+
+      const sent = await enqueue(email());
+      expect(await dispatcher.dispatch(sent)).toEqual({ status: "sent" });
+      expect(await notifier.supersede(A, sent)).toBe(false);
+      expect(await rowOf(sent)).toMatchObject({ status: "sent" });
+
+      const mine = await enqueue(email());
+      expect(await notifier.supersede(B, mine)).toBe(false); // B cannot see or change A's row
+      expect(await rowOf(mine)).toMatchObject({ status: "queued" });
+      // Leave nothing queued that a later sweep would deliver.
+      await testDb.ownerPool.query(`UPDATE notifications SET status = 'failed' WHERE id = ANY($1)`, [
+        [sending, mine],
+      ]);
+    });
+
+    it("rolls back with the caller's transaction", async () => {
+      const id = await enqueue(email());
+      await expect(
+        db.forMerchant(A, async (tx) => {
+          await notifier.supersede(A, id, tx);
+          throw new Error("business change failed");
+        }),
+      ).rejects.toThrow("business change failed");
+      expect(await rowOf(id)).toMatchObject({ status: "queued" });
+      await testDb.ownerPool.query(`UPDATE notifications SET status = 'failed' WHERE id = $1`, [id]);
+    });
+  });
+
   describe("dispatch", () => {
     it("sends once and a second run of the same job does nothing", async () => {
       const to = email();

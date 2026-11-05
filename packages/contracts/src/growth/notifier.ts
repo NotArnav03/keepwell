@@ -4,4 +4,10 @@ import type { NotificationRequest } from "./notifications.js";
 // the notify.dispatch job sends it later. Returns the notification id.
 export interface Notifier<Tx = unknown> {
   enqueue(n: NotificationRequest, tx?: Tx): Promise<string>;
+  /**
+   * Withdraws a message that is still queued (suppressed because `superseded`), e.g. when newer facts
+   * replace it. Does nothing if it was already sent, sending or suppressed, or isn't this merchant's.
+   * Returns whether it was withdrawn.
+   */
+  supersede(merchantId: string, notificationId: string, tx?: Tx): Promise<boolean>;
 }

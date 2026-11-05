@@ -41,6 +41,14 @@ export class FakeNotifier implements Notifier {
     return notification.id;
   }
 
+  supersede(merchantId: string, notificationId: string): Promise<boolean> {
+    const found = this.queued.find((n) => n.id === notificationId && n.merchantId === merchantId);
+    if (found?.status !== "queued") return Promise.resolve(false);
+    found.status = "suppressed";
+    found.suppressedBecause = "superseded";
+    return Promise.resolve(true);
+  }
+
   byTemplate(template: Notification["content"]["template"]): Notification[] {
     return this.queued.filter((n) => n.content.template === template);
   }

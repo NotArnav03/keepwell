@@ -1,3 +1,4 @@
+import { and, eq } from "drizzle-orm";
 import { NotificationRequest, type Audit, type Notifier } from "@keepwell/contracts";
 import { notifications, type Db, type Tx } from "@keepwell/db";
 import { normalizeEmail } from "./unsubscribe-token.js";
@@ -60,11 +61,51 @@ export function createNotifier({ db, audit, log, now = () => new Date() }: Notif
     return row.id;
   }
 
+  /**
+   * Withdraws a message that has not started sending. One conditional UPDATE: only a `queued` row of
+   * this merchant changes, so a message already `sending`, `sent` or `suppressed` is left alone and
+   * two concurrent callers cannot both withdraw it.
+   */
+  async function withdraw(tx: Tx, merchantId: string, notificationId: string): Promise<boolean> {
+    const [row] = await tx
+      .update(notifications)
+      .set({ status: "suppressed", suppressedBecause: "superseded" })
+      .where(
+        and(
+          eq(notifications.id, notificationId),
+          eq(notifications.merchantId, merchantId),
+          eq(notifications.status, "queued"),
+        ),
+      )
+      .returning({ id: notifications.id, subscriptionId: notifications.subscriptionId, simulated: notifications.simulated });
+    if (!row) return false;
+    await audit.append(
+      {
+        merchantId,
+        actor: "system",
+        kind: "notification.suppressed",
+        subjectIds: {
+          notificationId,
+          ...(row.subscriptionId ? { subscriptionId: row.subscriptionId } : {}),
+        },
+        payload: { reason: "superseded" },
+        simulated: row.simulated,
+      },
+      tx,
+    );
+    log.info({ merchantId, notificationId }, "notification superseded");
+    return true;
+  }
+
   return {
     async enqueue(n, tx) {
       const request = NotificationRequest.parse(n);
       if (tx) return insert(tx, request);
       return db.forMerchant(request.merchantId, (scoped) => insert(scoped, request));
+    },
+    async supersede(merchantId, notificationId, tx) {
+      if (tx) return withdraw(tx, merchantId, notificationId);
+      return db.forMerchant(merchantId, (scoped) => withdraw(scoped, merchantId, notificationId));
     },
   };
 }

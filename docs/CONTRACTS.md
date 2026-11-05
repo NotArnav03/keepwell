@@ -443,6 +443,8 @@ interface Notifier {
   // Inserts an outbox row in the caller's transaction; notify.dispatch sends it later. Returns the notification id.
   // Rejects (never throws synchronously) if the request breaks the contract.
   enqueue(n: NotificationRequest, tx?: Tx): Promise<string>;
+  // Withdraws a still-queued message (suppressed because "superseded"); false if already sent/sending/suppressed.
+  supersede(merchantId: string, notificationId: string, tx?: Tx): Promise<boolean>;
 }
 // NotificationRequest = { merchantId, subscriptionId | null, to, content: NotificationContent, dueAt?, simulated (default false) }
 // NotificationContent = discriminated union on `template`; each payload holds facts only (amounts, dates, links).
