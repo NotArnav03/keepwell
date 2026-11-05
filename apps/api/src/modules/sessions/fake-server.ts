@@ -22,6 +22,8 @@ import {
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
 import { demoStoreRoutes } from "../demo/store-routes.js";
+import { FakeSubscriberAgent } from "../mcp/fake.js";
+import { subscriberMcpRoutes } from "../mcp/subscriber.js";
 import { DelegationService } from "../portal/delegations.js";
 import { verifyPortalSessionToken, verifyWidgetToken } from "../portal/jwt.js";
 import { MagicLinkService } from "../portal/magic-link.js";
@@ -171,6 +173,11 @@ const portalDirectory = new MemoryPortalDirectory()
   });
 const portalStores = { links: new MemoryMagicLinkStore(), delegations: new MemoryDelegationStore() };
 const portalAudit = new FakeAudit();
+const portalDelegations = new DelegationService({
+  store: portalStores.delegations,
+  directory: portalDirectory,
+  audit: portalAudit,
+});
 await app.register(portalRoutes, {
   prefix: "/v1",
   directory: portalDirectory,
@@ -181,11 +188,7 @@ await app.register(portalRoutes, {
     verifyUrl: (token) => `${publicUrl}/v1/portal/verify?token=${token}`,
     audit: portalAudit,
   }),
-  delegations: new DelegationService({
-    store: portalStores.delegations,
-    directory: portalDirectory,
-    audit: portalAudit,
-  }),
+  delegations: portalDelegations,
   signingSecret,
   portalUrl: process.env.PORTAL_URL || "http://localhost:5178/",
   // Any origin, with credentials: what allowCors warns against. Acceptable only because this server
@@ -193,6 +196,19 @@ await app.register(portalRoutes, {
   allowOrigin: () => true,
   // The fake runs on plain http, where browsers drop Secure cookies.
   secureCookies: false,
+});
+
+// The subscriber-agent MCP server (#41) over a faked agent API: make a token in the portal
+// ("Let an AI assistant manage this"), then point Claude Code or Claude Desktop at /mcp/subscriber.
+await app.register(subscriberMcpRoutes, {
+  sessions: new FakeSubscriberAgent({
+    api,
+    subscriptions,
+    menuFor: (id) => scripts[scenarioOf.get(id) ?? "pause"].menu ?? menu([]),
+  }),
+  delegations: portalDelegations,
+  publicUrl,
+  portalUrl: process.env.PORTAL_URL || "http://localhost:5178/",
 });
 
 // PayPal's approval page for downgrades and annual switches, faked: Approve or Cancel.
