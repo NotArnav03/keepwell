@@ -481,7 +481,7 @@ All tables carry `merchant_id` (multi-tenant) and `created_at`. Money is stored 
 | `dunning_cases` | subscription_id, reason_code, failed_count, next_retry_time, playbook, state, recovered_amount | M5 |
 | `notifications` | to, channel, template, payload, due_at, sent_at, provider_id, status | M5 |
 | `insights` | session_id, reason, sub_reason, feature_requests, competitor, sentiment, quote | M5 |
-| `insight_actions` | kind, params, estimate, state (`proposed`/`approved`/`rejected`/`executed`), action_id | M5 |
+| `insight_actions` | kind, params, estimate, rationale, proposed_by, state (`proposed`/`approved`/`rejected`/`executed`/`failed`), error, action_id | M5 |
 | `delegations` | subscription_id, scopes, token_hash, expires_at, revoked_at | M3 |
 | `audit_log` | seq, actor, kind, subject_ids, payload, prev_hash, hash | M1 |
 | `pool_subscriptions` | subscription_id, state (`available`/`leased`/`consumed`), leased_until | M1 |
