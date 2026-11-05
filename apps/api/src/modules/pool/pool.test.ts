@@ -122,17 +122,51 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbJudgePool", { timeout: 120_0
     expect(new Set([a?.paypalSubscriptionId, b?.paypalSubscriptionId])).toEqual(new Set([MAYA, PRIYA]));
     const c = await pool.lease(M, { minutes: 10 });
     expect(c).toMatchObject({ paypalSubscriptionId: CHLOE });
-    expect(Date.parse(c?.leasedUntil ?? "")).toBe(now.getTime() + 10 * 60_000);
+    // Whole seconds, so a lease token's exp names the lease exactly.
+    expect(Date.parse(c?.leasedUntil ?? "")).toBe(Math.floor((now.getTime() + 10 * 60_000) / 1000) * 1000);
     expect(await pool.lease(M)).toBeNull();
     expect(await pool.counts(M)).toMatchObject({ available: 0, leased: 3 });
   });
 
-  it("takes an untouched subscription straight back", async () => {
+  it("takes an untouched subscription back, and rests it before lending it again", async () => {
     await pool.enroll(M, MAYA);
     const lease = await pool.lease(M);
     expect(await pool.release(M, lease?.poolEntryId ?? "")).toBe("available");
+    // A widget token minted just before the return lives 10 minutes: nobody else gets it until then.
+    expect(await pool.lease(M)).toBeNull();
+    now = new Date(now.getTime() + 10 * 60_000);
     expect(await pool.lease(M)).toMatchObject({ paypalSubscriptionId: MAYA });
     expect(await auditKinds()).toEqual(["pool.enrolled", "pool.leased", "pool.returned", "pool.leased"]);
+  });
+
+  it("names a lease by entry and leasedUntil, so a returned lease reaches nothing after it", async () => {
+    for (const id of [MAYA, PRIYA]) await pool.enroll(M, id);
+    const a = await pool.lease(M);
+    if (!a) throw new Error("no lease");
+    expect(a.paypalSubscriptionId).toBe(MAYA);
+    expect(await pool.holds(M, a.poolEntryId, a.leasedUntil)).toBe(true);
+    const later = new Date(Date.parse(a.leasedUntil) + 1000).toISOString();
+    expect(await pool.holds(M, a.poolEntryId, later)).toBe(false);
+
+    expect(await pool.release(M, a.poolEntryId, a.leasedUntil)).toBe("available");
+    expect(await pool.holds(M, a.poolEntryId, a.leasedUntil)).toBe(false);
+    expect(await pool.release(M, a.poolEntryId, a.leasedUntil)).toBeNull(); // a double click
+
+    // Rested: the entry never lent goes first, then Maya's, under a new leasedUntil.
+    now = new Date(now.getTime() + 11 * 60_000);
+    expect(await pool.lease(M)).toMatchObject({ paypalSubscriptionId: PRIYA });
+    const c = await pool.lease(M);
+    if (!c) throw new Error("no lease");
+    expect(c.poolEntryId).toBe(a.poolEntryId);
+    // The old lease's token names the same entry, and still reaches nothing.
+    expect(await pool.holds(M, a.poolEntryId, a.leasedUntil)).toBe(false);
+    expect(await pool.release(M, a.poolEntryId, a.leasedUntil)).toBeNull();
+    expect(await pool.holds(M, c.poolEntryId, c.leasedUntil)).toBe(true);
+    expect(await pool.counts(M)).toMatchObject({ available: 0, leased: 2 });
+
+    // Past its end, a lease isn't held even before the sweep takes it back.
+    now = new Date(Date.parse(c.leasedUntil) + 1000);
+    expect(await pool.holds(M, c.poolEntryId, c.leasedUntil)).toBe(false);
   });
 
   it("activates a paused subscription before the next judge, and cancels the pause's resume", async () => {
