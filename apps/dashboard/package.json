@@ -21,7 +21,8 @@
     "@keepwell/policy": "workspace:*",
     "@keepwell/ui": "workspace:*",
     "react": "^19.3.1",
-    "react-dom": "^19.3.1"
+    "react-dom": "^19.3.1",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/react": "^19.3.0",

@@ -468,3 +468,20 @@ code {
     align-items: start;
   }
 }
+
+.ins-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--kw-space-sm);
+}
+
+.ins-plain {
+  margin: 0;
+  font: inherit;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+textarea.ins-composer {
+  min-height: calc(var(--kw-space-xl) * 3);
+}
