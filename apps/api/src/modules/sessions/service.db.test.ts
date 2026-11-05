@@ -74,7 +74,12 @@ const disabledAgent: Agent = {
 };
 
 function build(
-  options: { agent?: Agent; payments?: PaymentLookup; subscription?: () => SubscriptionSnapshot } = {},
+  options: {
+    agent?: Agent;
+    payments?: PaymentLookup;
+    subscription?: () => SubscriptionSnapshot;
+    idleMs?: number;
+  } = {},
 ) {
   const events = new FakeDomainEvents();
   const audit = new FakeAudit();
@@ -114,6 +119,7 @@ function build(
     payments: options.payments ?? { listTransactions: () => Promise.resolve([]) },
     streamUrl: (id) => `https://api.keepwell.example/v1/sessions/${id}/stream`,
     pollMs: 50,
+    ...(options.idleMs === undefined ? {} : { idleMs: options.idleMs }),
   });
   return { api, events, audit, engine };
 }
@@ -413,6 +419,36 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
       await expect(call()).rejects.toBeInstanceOf(SessionError);
       await expect(call()).rejects.toMatchObject({ code: "not_found" });
     }
+  });
+
+  it("stops polling once the session closes, so an open tab costs nothing", async () => {
+    const { api: reader } = build();
+    const { api: writer } = build();
+    const { sessionId } = await reader.create(maya(), { channel: "widget" });
+    const stream = await watch(reader, sessionId);
+    await writer.keep(maya(), sessionId);
+    await until(() => stream.seen.some(([, e]) => e.type === "session.closed"));
+    const seen = stream.seen.length;
+    // Another instance writes after the close (a cancel after keeping): the stopped poll misses it.
+    await writer.cancel(maya(), sessionId, {});
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    stream.unsubscribe();
+    expect(stream.seen.length).toBe(seen);
+  });
+
+  it("calls a quiet session idle, but never one waiting on PayPal", async () => {
+    const { api } = build({ idleMs: 50 });
+    const { sessionId } = await api.create(maya(), { channel: "widget" });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const quiet = await api.subscribe(maya(), sessionId, 99, () => undefined);
+    quiet.unsubscribe();
+    expect(quiet).toMatchObject({ idle: true, closed: false });
+
+    await api.cancel(maya(), sessionId, {});
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    const waiting = await api.subscribe(maya(), sessionId, 99, () => undefined);
+    waiting.unsubscribe();
+    expect(waiting).toMatchObject({ idle: false, closed: false });
   });
 
   it("delivers events written by another instance, by polling", async () => {

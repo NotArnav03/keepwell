@@ -49,6 +49,17 @@ curl -X POST localhost:3000/v1/sessions/<id>/messages -H 'content-type: applicat
 
 `auth.ts` is the `authenticate` for the routes: the merchant's widget token, the portal's session token, or a stream ticket (`?ticket=`, for that one session's stream; `create()` puts it in `streamUrl` via `signStreamTicket`).
 
-Wiring into `platform.ts` needs a Postgres `PolicyStore` and `MerchantCatalog` (#124), the widget and ticket secrets, and `onActionStateChanged` registered on the domain events.
+Wiring into `platform.ts` (Arnav, with #41, once #124 lands) needs:
+
+- a Postgres `PolicyStore` and `MerchantCatalog` (#124);
+- `onActionStateChanged` registered on `action.state_changed`;
+- the secrets below.
+
+Secrets:
+
+- `WIDGET_TOKEN_SECRET` signs widget tokens for the demo merchant only. `demoMerchantWidgetSecret(demoMerchantId, secret)` returns null for every other merchant, so no other merchant's token is accepted. **After the hackathon**, per-merchant secrets in `merchants.keepwell_signing_secret_enc` replace it (creating them, encrypting them, and showing them to the merchant).
+- `SESSION_TICKET_SECRET` signs stream tickets. It is separate from every other secret, so either can be rotated alone.
+
+Streams and the database: `subscribe` polls once a second only while it is needed. It stops when the session closes, and the route ends a stream with no event for 12 minutes (`idleMs`). A reconnect to a session that is quiet and not waiting on PayPal gets 204, so the browser stops retrying. The widget reopens the stream from its last event whenever the subscriber acts. An open tab therefore doesn't keep Neon's compute awake.
 
 Tests: `service.db.test.ts` runs against Postgres (`KEEPWELL_TEST_DATABASE_URL`, as in CI); locally `docker run -d -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18` is enough.

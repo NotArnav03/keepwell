@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { FastifyRequest } from "fastify";
 import { signJwt, signWidgetToken } from "../portal/jwt.js";
-import { sessionAuthenticator, signStreamTicket, STREAM_TICKET_TTL_SECONDS } from "./auth.js";
+import {
+  demoMerchantWidgetSecret,
+  sessionAuthenticator,
+  signStreamTicket,
+  STREAM_TICKET_TTL_SECONDS,
+} from "./auth.js";
 
 const NOW = new Date("2026-11-05T10:00:00.000Z");
 const M = "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b";
@@ -125,5 +130,15 @@ describe("sessionAuthenticator", () => {
       clock: () => new Date(NOW.getTime() + (STREAM_TICKET_TTL_SECONDS + 1) * 1000),
     });
     await expect(later(stream(SESSION))).rejects.toMatchObject({ code: "unauthorized" });
+  });
+});
+
+describe("demoMerchantWidgetSecret", () => {
+  it("gives the secret for the demo merchant only, and nothing when it isn't set", async () => {
+    const secret = demoMerchantWidgetSecret(M, "the-demo-secret-long-enough");
+    expect(await secret(M)).toBe("the-demo-secret-long-enough");
+    expect(await secret(OTHER_M)).toBeNull();
+    expect(await demoMerchantWidgetSecret(M, undefined)(M)).toBeNull();
+    expect(await demoMerchantWidgetSecret(M, "")(M)).toBeNull();
   });
 });

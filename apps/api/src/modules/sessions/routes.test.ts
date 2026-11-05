@@ -33,6 +33,7 @@ afterEach(async () => {
 async function start(
   sessions: SessionsApi = new FakeSessionsApi({ subscriptions: [maya] }),
   authenticate: () => Promise<SubscriberPrincipal> = () => Promise.resolve(principal),
+  extra: { idleMs?: number } = {},
 ): Promise<FastifyInstance> {
   app = buildServer(env);
   await app.register(sessionRoutes, {
@@ -40,6 +41,7 @@ async function start(
     sessions,
     authenticate,
     allowOrigin: (origin) => origin === MERCHANT_SITE,
+    ...extra,
   });
   await app.ready();
   return app;
@@ -239,6 +241,37 @@ describe("SSE stream", () => {
 
     const after = await fetch(`${url}?after=${rest.at(-1)?.seq ?? 0}`);
     expect(after.status).toBe(204);
+  });
+});
+
+describe("quiet streams", () => {
+  it("ends a stream with no event for idleMs, so a forgotten tab stops costing queries", async () => {
+    const server = await start(undefined, undefined, { idleMs: 150 });
+    const base = await server.listen({ host: "127.0.0.1", port: 0 });
+    const id = await createSession(server);
+    const started = Date.now();
+    const res = await fetch(`${base}/v1/sessions/${id}/stream`);
+    expect(res.status).toBe(200);
+    await res.text();
+    expect(Date.now() - started).toBeLessThan(5000);
+  });
+
+  it("answers 204 to a reconnect when the session is idle, so the browser stops retrying", async () => {
+    const fake = new FakeSessionsApi({ subscriptions: [maya] });
+    const idle: SessionsApi = {
+      create: (p, b) => fake.create(p, b),
+      subscribe: async (p, s, a, l) => ({ ...(await fake.subscribe(p, s, a, l)), idle: true }),
+      message: (p, s, b) => fake.message(p, s, b),
+      reason: (p, s, b) => fake.reason(p, s, b),
+      accept: (p, s, o, b, m) => fake.accept(p, s, o, b, m),
+      decline: (p, s, o) => fake.decline(p, s, o),
+      keep: (p, s) => fake.keep(p, s),
+      cancel: (p, s, b) => fake.cancel(p, s, b),
+    };
+    const server = await start(idle);
+    const id = await createSession(server);
+    const res = await server.inject({ method: "GET", url: `/v1/sessions/${id}/stream?after=99` });
+    expect(res.statusCode).toBe(204);
   });
 });
 

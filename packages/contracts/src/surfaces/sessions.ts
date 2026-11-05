@@ -239,14 +239,16 @@ export interface SessionsApi {
   create(principal: SubscriberPrincipal, body: CreateSessionRequest): Promise<CreateSessionResponse>;
   /**
    * Replays the events after `afterSeq` (0 for all), then delivers new ones until unsubscribed.
-   * `closed` says the session had already ended when the replay finished.
+   * `closed` says the session had already ended when the replay finished. `idle` says nothing has
+   * happened for a while and nothing is waiting on PayPal, so the route can tell the browser to
+   * stop reconnecting (the widget reopens the stream when the subscriber acts).
    */
   subscribe(
     principal: SubscriberPrincipal,
     sessionId: string,
     afterSeq: number,
     listener: SessionStreamListener,
-  ): Promise<{ unsubscribe: () => void; closed: boolean }>;
+  ): Promise<{ unsubscribe: () => void; closed: boolean; idle?: boolean }>;
   /** Resolves once the message is accepted; the reply arrives on the stream. */
   message(principal: SubscriberPrincipal, sessionId: string, body: PostMessageRequest): Promise<void>;
   reason(principal: SubscriberPrincipal, sessionId: string, body: PostReasonRequest): Promise<void>;

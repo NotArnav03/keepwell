@@ -50,6 +50,18 @@ export function signStreamTicket(
   );
 }
 
+/**
+ * The hackathon's widget-token secrets: one `WIDGET_TOKEN_SECRET`, for the demo merchant only.
+ * Every other merchant gets null, so no other merchant's widget token is ever accepted. Per-merchant
+ * secrets in `merchants.keepwell_signing_secret_enc` are the next step (sessions README).
+ */
+export function demoMerchantWidgetSecret(
+  demoMerchantId: string,
+  secret: string | undefined,
+): (merchantId: string) => Promise<string | null> {
+  return (merchantId) => Promise.resolve(secret && merchantId === demoMerchantId ? secret : null);
+}
+
 export interface SessionAuthOptions {
   /** The merchant's widget-token secret, or null if it has none. */
   widgetSecret: (merchantId: string) => Promise<string | null>;

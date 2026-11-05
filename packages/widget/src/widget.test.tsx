@@ -347,3 +347,18 @@ describe("full page focus", () => {
     sibling.remove();
   });
 });
+
+describe("a stream the server ended for idleness", () => {
+  it("is reopened from the last event seen when the subscriber acts", async () => {
+    const { transport, calls, emit } = fakeTransport();
+    await open(transport);
+    await emit({ type: "agent.delta", text: "Hi" });
+    await emit({ type: "agent.done", messageId: "0199a1b2-c3d4-7e5f-8a6b-000000000a01" });
+    expect(calls.stream).toHaveBeenCalledTimes(1);
+
+    await click("Cancel now");
+    await flush();
+    expect(calls.stream).toHaveBeenCalledTimes(2);
+    expect(calls.stream.mock.calls[1]?.[1]).toBe(2);
+  });
+});

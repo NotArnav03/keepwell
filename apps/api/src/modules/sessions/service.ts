@@ -68,6 +68,13 @@ import { closingSummary } from "./summary.js";
 // Every write to a session runs in one transaction that locks its row, so two clicks, or a click
 // and PayPal's answer, are applied one after the other. Cancel never touches the agent or a model.
 
+/**
+ * A stream with nothing new for this long is ended by the route, and a reconnect to a session this
+ * quiet (and not waiting on PayPal) gets 204, so an open tab stops reaching the database. The
+ * widget reopens the stream when the subscriber does something, and replay fills the gap.
+ */
+export const STREAM_IDLE_MS = 12 * 60_000;
+
 /** ARCHITECTURE.md §6.5: after three messages the widget offers only Cancel and Keep. */
 export const MAX_SUBSCRIBER_MESSAGES = 3;
 const NOTHING_APPLIED: readonly Action["state"][] = ["FAILED", "ABANDONED", "SUPERSEDED"];
@@ -115,6 +122,8 @@ export interface DbSessionsApiOptions {
   clock?: () => Date;
   /** How often an open stream looks for events written elsewhere. */
   pollMs?: number;
+  /** Default STREAM_IDLE_MS. */
+  idleMs?: number;
 }
 
 type SessionRow = typeof sessions.$inferSelect;
@@ -215,12 +224,19 @@ export class DbSessionsApi implements SessionsApi {
     sessionId: string,
     afterSeq: number,
     listener: SessionStreamListener,
-  ): Promise<{ unsubscribe: () => void; closed: boolean }> {
+  ): Promise<{ unsubscribe: () => void; closed: boolean; idle: boolean }> {
     await this.owned(principal, sessionId);
     let last = afterSeq;
     let stopped = false;
     let busy = false;
     let again = false;
+    let timer: NodeJS.Timeout | undefined;
+    // Polling costs a query a second, and on Neon an open tab would keep the compute awake: it
+    // stops when the session closes, and the route ends an idle stream (see STREAM_IDLE_MS).
+    const stopPolling = () => {
+      clearInterval(timer);
+      timer = undefined;
+    };
 
     // One query at a time, in seq order. A wake during a query asks for one more pass, so nothing
     // written meanwhile is missed, and nothing at or below `last` is delivered twice.
@@ -243,7 +259,10 @@ export class DbSessionsApi implements SessionsApi {
           for (const row of rows) {
             if (stopped) return;
             last = row.seq;
-            listener(row.seq, SessionStreamEvent.parse(row.event));
+            const event = SessionStreamEvent.parse(row.event);
+            listener(row.seq, event);
+            // Nothing more comes on its own; a cancel after a save reopens the stream.
+            if (event.type === "session.closed") stopPolling();
           }
         } while (again && !stopped);
       } finally {
@@ -258,16 +277,32 @@ export class DbSessionsApi implements SessionsApi {
     // Watch before replaying, so an event written during the replay still wakes us.
     const unwatch = this.feed.watch(sessionId, safePump);
     await pump();
-    const timer = setInterval(safePump, this.o.pollMs ?? 1000);
     const session = await this.owned(principal, sessionId);
+    const closed = session.state === "closed";
+    const idle =
+      !closed && session.state !== "awaiting_paypal" && (await this.quietFor(principal, sessionId));
+    if (!closed && !idle) timer = setInterval(safePump, this.o.pollMs ?? 1000);
     return {
-      closed: session.state === "closed",
+      closed,
+      idle,
       unsubscribe: () => {
         stopped = true;
-        clearInterval(timer);
+        stopPolling();
         unwatch();
       },
     };
+  }
+
+  /** Nothing written to the session's stream for STREAM_IDLE_MS. */
+  private async quietFor(principal: SubscriberPrincipal, sessionId: string): Promise<boolean> {
+    const [row] = await this.o.db.forMerchant(principal.merchantId, (tx) =>
+      tx
+        .select({ at: max(sessionEvents.createdAt) })
+        .from(sessionEvents)
+        .where(eq(sessionEvents.sessionId, sessionId)),
+    );
+    const at = row?.at ?? null;
+    return at !== null && this.clock().getTime() - new Date(at).getTime() > (this.o.idleMs ?? STREAM_IDLE_MS);
   }
 
   async message(principal: SubscriberPrincipal, sessionId: string, body: PostMessageRequest): Promise<void> {
