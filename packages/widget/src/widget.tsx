@@ -20,6 +20,8 @@ export interface WidgetProps {
   apiOrigin?: string;
   /** The browser's speech recognition, or null where there is none (default: detected). */
   speech?: RecognitionCtor | null;
+  /** Rendered in the page (the hosted portal) rather than as a modal over it: no trap, no Escape. */
+  fullPage?: boolean;
 }
 
 /** What the widget needs of the approval window: to notice the buyer closing it. */
@@ -94,17 +96,25 @@ export function Widget(props: WidgetProps) {
     next.onerror = () => setListening(false);
     recognition.current = next;
     setListening(true);
-    next.start();
+    try {
+      next.start();
+    } catch {
+      // Already running, or the microphone is blocked by policy: nothing is listening.
+      setListening(false);
+    }
   };
 
   // Focus the dialog on open, so keyboard and screen-reader users start inside it.
   useEffect(() => {
-    dialog.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
+    if (!props.fullPage) dialog.current?.querySelector<HTMLElement>(FOCUSABLE)?.focus();
   }, []);
 
   // Buttons come and go as the conversation moves (Yes/No vanish once answered). When the focused
   // one goes, the browser drops focus to the page behind the dialog, so bring it back to the dialog.
+  // No dependency list on purpose: it must run after every render, streamed tokens included.
+  // Full page (the portal) is not modal: the page has its own controls, and focus may be on them.
   useEffect(() => {
+    if (props.fullPage) return;
     const box = dialog.current;
     if (box && !box.contains((box.getRootNode() as ShadowRoot).activeElement)) box.focus();
   });
@@ -261,15 +271,15 @@ export function Widget(props: WidgetProps) {
   const note = offer ? acceptNote(offer.offer) : null;
 
   return (
-    <div class="kw-backdrop">
+    <div class={props.fullPage ? "kw-backdrop kw-page" : "kw-backdrop"}>
       <div
         class="kw-dialog"
-        role="dialog"
-        aria-modal="true"
+        role={props.fullPage ? "region" : "dialog"}
+        aria-modal={props.fullPage ? undefined : "true"}
         aria-labelledby="kw-title"
         tabIndex={-1}
         ref={dialog}
-        onKeyDown={onKeyDown}
+        onKeyDown={props.fullPage ? undefined : onKeyDown}
       >
         <header class="kw-header">
           <div>

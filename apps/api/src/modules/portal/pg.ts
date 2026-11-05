@@ -1,5 +1,5 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
-import { DelegationScope } from "@keepwell/contracts";
+import { and, asc, desc, eq, inArray, isNull } from "drizzle-orm";
+import { DelegationScope, type PortalSubscription } from "@keepwell/contracts";
 import { delegations, magicLinks, merchants, subscriptions, type Db } from "@keepwell/db";
 import type {
   DelegationRecord,
@@ -102,6 +102,21 @@ export class PgDelegationStore implements DelegationStore {
     return row === undefined ? null : toRecord(row);
   }
 
+  /** Newest first. An empty id list matches nothing (and sends no query). */
+  async listFor(merchantId: string, subscriptionIds: string[]): Promise<DelegationRecord[]> {
+    if (subscriptionIds.length === 0) return [];
+    const rows = await this.db.forMerchant(merchantId, (tx) =>
+      tx
+        .select()
+        .from(delegations)
+        .where(
+          and(eq(delegations.merchantId, merchantId), inArray(delegations.subscriptionId, subscriptionIds)),
+        )
+        .orderBy(desc(delegations.createdAt), desc(delegations.id)),
+    );
+    return rows.map(toRecord);
+  }
+
   /** Only the first revoke sets the time; later ones change nothing. */
   async revoke(id: string, at: Date): Promise<void> {
     await this.db.acrossMerchants((tx) =>
@@ -135,5 +150,29 @@ export class PgPortalDirectory implements PortalDirectory {
         .orderBy(asc(subscriptions.createdAt), asc(subscriptions.id)),
     );
     return rows.map((row) => row.id);
+  }
+
+  /** What the portal lists: the price is the discount override while one is active, as in the widget. */
+  async summary(merchantId: string, subscriptionId: string): Promise<PortalSubscription | null> {
+    const [row] = await this.db.forMerchant(merchantId, (tx) =>
+      tx
+        .select()
+        .from(subscriptions)
+        .where(and(eq(subscriptions.merchantId, merchantId), eq(subscriptions.id, subscriptionId)))
+        .limit(1),
+    );
+    if (row === undefined) return null;
+    const override =
+      row.overrideValue !== null && row.overrideCurrency !== null
+        ? { value: row.overrideValue, currency: row.overrideCurrency }
+        : null;
+    return {
+      id: row.id,
+      planName: row.planName,
+      price: override ?? { value: row.priceValue, currency: row.priceCurrency },
+      interval: { unit: row.intervalUnit, count: row.intervalCount },
+      status: row.status,
+      nextBillingTime: row.nextBillingTime?.toISOString() ?? null,
+    };
   }
 }

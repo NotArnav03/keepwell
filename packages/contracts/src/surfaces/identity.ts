@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Id, IsoDateTime } from "../shared.js";
+import { BillingInterval, Id, IsoDateTime, Money } from "../shared.js";
 import { SubscriptionStatus } from "../platform/subscriptions.js";
 
 // Who may change which subscription (ARCHITECTURE.md §6.7, owner M3), and Pantry Plan's own small
@@ -99,3 +99,54 @@ export const CreateDelegationResponse = z.object({
   expiresAt: IsoDateTime,
 });
 export type CreateDelegationResponse = z.infer<typeof CreateDelegationResponse>;
+
+/** One subscription on the portal's list: the subscriber's own data, no email or payer id. */
+export const PortalSubscription = z.object({
+  id: Id,
+  planName: z.string(),
+  price: Money,
+  interval: BillingInterval,
+  status: SubscriptionStatus,
+  nextBillingTime: IsoDateTime.nullable(),
+});
+export type PortalSubscription = z.infer<typeof PortalSubscription>;
+
+/** A delegation as the portal lists it. Never the token: that was shown once, at creation. */
+export const DelegationSummary = z.object({
+  id: Id,
+  subscriptionId: Id,
+  scopes: z.array(DelegationScope),
+  expiresAt: IsoDateTime,
+  createdAt: IsoDateTime,
+});
+export type DelegationSummary = z.infer<typeof DelegationSummary>;
+
+/** GET /v1/portal/me: what the signed-in subscriber sees. 401 when there is no valid session. */
+export const PortalMe = z.object({
+  subscriptions: z.array(PortalSubscription),
+  /** Only the live ones: not revoked and not expired. */
+  delegations: z.array(DelegationSummary),
+});
+export type PortalMe = z.infer<typeof PortalMe>;
+
+/** POST /v1/portal/token: a token the portal's widget uses to open a session on one subscription. */
+export const PortalTokenRequest = z.object({ subscriptionId: Id });
+export type PortalTokenRequest = z.infer<typeof PortalTokenRequest>;
+
+export const PortalTokenResponse = z.object({ token: z.string().min(1), expiresAt: IsoDateTime });
+export type PortalTokenResponse = z.infer<typeof PortalTokenResponse>;
+
+/**
+ * What that token carries (HS256, signed with the portal secret, 10 minutes at most). The sessions
+ * API accepts it as the PORTAL channel for exactly this subscription, the way it accepts a widget token.
+ */
+export const PortalSessionTokenClaims = z.object({
+  kind: z.literal("portal_session"),
+  mid: Id,
+  /** Our subscription id (not PayPal's). */
+  sub: Id,
+  iat: z.number().int(),
+  exp: z.number().int(),
+  nonce: z.string().min(16).max(64),
+});
+export type PortalSessionTokenClaims = z.infer<typeof PortalSessionTokenClaims>;

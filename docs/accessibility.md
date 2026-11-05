@@ -32,6 +32,8 @@ it needs a browser download in CI for one widget, and the pool spike (Q10) alrea
   before the demo and record it here.
 - **Voice input in a real recording.** Pressing Speak asks for the microphone, so it is covered by tests
   with a fake recognizer only.
+- **Target size (2.5.8).** Not measured; the buttons have 7px/12px padding at 14px text, so they are
+  expected to be above 24x24 px, but nobody has checked.
 
 ## Voice input and privacy
 
@@ -39,5 +41,3 @@ Voice uses the browser's Web Speech API, so it costs nothing and none of our ser
 Chrome processes it on its vendor's servers, which is the browser's behaviour, not ours. The button is
 hidden where the API doesn't exist, listening starts only on a press, takes one phrase, and stops by
 itself or when the dialog closes. It is the first thing to cut if it causes trouble.
-- **Target size (2.5.8).** Not measured; the buttons have 7px/12px padding at 14px text, so they are
-  expected to be above 24x24 px, but nobody has checked.

@@ -3,10 +3,15 @@ import { css } from "./styles.js";
 import { Widget, type WidgetProps } from "./widget.js";
 
 /**
- * Opens the widget in its own Shadow DOM under `document.body`. Returns a function that removes it.
+ * Opens the widget in its own Shadow DOM under `container` (the page body unless told otherwise). Returns a function that removes it.
  * Focus goes back to whatever opened it (usually the merchant's cancel button).
  */
-export function mount(props: Omit<WidgetProps, "onClose">, onClosed?: () => void): () => void {
+export function mount(
+  props: Omit<WidgetProps, "onClose">,
+  onClosed?: () => void,
+  /** Where to put it; the page body by default. A full-page widget goes in the portal's own element. */
+  container: HTMLElement = document.body,
+): () => void {
   const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const host = document.createElement("div");
   host.setAttribute("data-keepwell-widget", "");
@@ -14,7 +19,7 @@ export function mount(props: Omit<WidgetProps, "onClose">, onClosed?: () => void
   const style = document.createElement("style");
   style.textContent = css;
   root.append(style);
-  document.body.append(host);
+  container.append(host);
 
   const unmount = () => {
     render(null, root);

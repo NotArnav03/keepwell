@@ -1,4 +1,4 @@
-import type { DelegationScope } from "@keepwell/contracts";
+import type { DelegationScope, PortalSubscription } from "@keepwell/contracts";
 
 // What the identity services need from the outside world. pg.ts holds the Postgres versions the
 // API uses; memory.ts holds the in-process ones the fake server and the tests use.
@@ -8,6 +8,8 @@ export interface PortalDirectory {
   merchantBySlug(slug: string): Promise<string | null>;
   /** Our ids of the merchant's subscriptions whose PayPal email hashes to `emailHash`. */
   subscriptionsFor(merchantId: string, emailHash: string): Promise<string[]>;
+  /** What the portal shows for one subscription; null if it is gone. */
+  summary(merchantId: string, subscriptionId: string): Promise<PortalSubscription | null>;
 }
 
 export interface MagicLinkRecord {
@@ -51,6 +53,8 @@ export interface DelegationStore {
   insert(record: DelegationRecord): Promise<void>;
   get(id: string): Promise<DelegationRecord | null>;
   findByTokenHash(tokenHash: string): Promise<DelegationRecord | null>;
+  /** Every delegation (live or not) on these subscriptions, newest first. */
+  listFor(merchantId: string, subscriptionIds: string[]): Promise<DelegationRecord[]>;
   /** Sets revokedAt once; revoking twice keeps the first time. */
   revoke(id: string, at: Date): Promise<void>;
 }

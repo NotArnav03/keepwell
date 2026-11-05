@@ -50,7 +50,7 @@ Conventions:
 - `SessionsApi` is the sessions API without HTTP; the routes, the subscriber MCP server and `FakeSessionsApi` share it. `SubscriberPrincipal` is what a credential resolves to.
 - `surfacesEventPayloads`: `session.started`, `session.offer_accepted` (the whole `offer` instead of `offerId`, plus `actionIds`), `session.offer_declined`, `session.closed` (`reason` is a `ReasonCategory`).
 - `FakeSessionsApi`, `PANTRY_PLAN` and `pantryPlanSubscription` are in `@keepwell/contracts/fakes`. `pnpm dev:fake-sessions` serves the fake over HTTP for building the widget.
-- `surfaces/identity.ts`: `WidgetTokenClaims` (`{ mid, sid: PayPal subscription id, iat, exp, nonce }`, HS256, at most `WIDGET_TOKEN_TTL_SECONDS` = 600) and the demo store bodies (`DemoStoreVerifyRequest/Response`, `DemoStoreTokenRequest/Response`). Also `MagicLinkRequest`, `PortalClaims` (the PORTAL cookie: `{ kind: "portal", mid, eh: sha256 of the email, iat, exp }`, 24 h), `DelegationScope` (`read`, `cancel`, `accept_offer`) and `CreateDelegationRequest/Response`, with `MAGIC_LINK_TTL_SECONDS` (15 min) and `DELEGATION_TTL_SECONDS` (7 days).
+- `surfaces/identity.ts`: `WidgetTokenClaims` (`{ mid, sid: PayPal subscription id, iat, exp, nonce }`, HS256, at most `WIDGET_TOKEN_TTL_SECONDS` = 600) and the demo store bodies (`DemoStoreVerifyRequest/Response`, `DemoStoreTokenRequest/Response`). Also `MagicLinkRequest`, `PortalClaims` (the PORTAL cookie: `{ kind: "portal", mid, eh: sha256 of the email, iat, exp }`, 24 h), `DelegationScope` (`read`, `cancel`, `accept_offer`) `CreateDelegationRequest/Response`, and what the portal page needs: `PortalSubscription`, `DelegationSummary`, `PortalMe`, `PortalTokenRequest/Response` and `PortalSessionTokenClaims` (`{ kind: "portal_session", mid, sub: our subscription id, iat, exp, nonce }`, HS256, at most 600 s; the sessions API accepts it as the `portal` channel for exactly that subscription), with `MAGIC_LINK_TTL_SECONDS` (15 min) and `DELEGATION_TTL_SECONDS` (7 days).
 
 ```ts
 // ---------- shared ----------
@@ -296,9 +296,12 @@ Auth types: **SUB** = subscriber token, **PORTAL** = portal session cookie, **DE
 | `POST /sessions/:id/keep` | SUB / PORTAL | → `204` ("Keep my subscription": closes as `kept_without_offer`) |
 | `POST /sessions/:id/cancel` | SUB / PORTAL | `{ reason? }` → `{ actionId }`. **Never touches the LLM.** Works in every state, including after a save. |
 | `GET /revise/return` | – (signed `state` param) | PayPal return URL → HTML page that notifies the widget and closes |
-| `POST /portal/magic-link` | – (rate limited) | `{ merchantSlug, email }` → `202` always (no account enumeration). Limited per IP (20/h) and per email hash (5/h); over the limit is `429` with `Retry-After`, the same whether or not the email matches |
+| `POST /portal/magic-link` | – (rate limited) | `{ merchantSlug, email }` → `202` always (no account enumeration), answered before the lookup and send so timing says nothing either. Limited per IP (20/h) and per email hash (5/h); over the limit is `429` with `Retry-After`, the same whether or not the email matches |
 | `GET /portal/verify` | – | `?token=` → sets the PORTAL cookie (`HttpOnly; Secure; SameSite=Lax`, 24 h) and redirects to the portal; a used, expired or unknown link redirects with `?error=link_expired`. 30 per 10 min per IP |
 | `POST /delegations` | PORTAL | `{ subscriptionId, scopes[] }` → `201 { id, token (shown once, `kwd_` prefix), scopes, expiresAt }`. Only for a subscription the signed-in email owns (`403` otherwise); 10 per hour per subscriber. Cookie-authenticated writes must carry the portal's `Origin` |
+| `GET /portal/me` | PORTAL | `PortalMe`: the subscriptions on the signed-in email and the live (unrevoked, unexpired) delegations, never a token. `401` when signed out. `no-store` |
+| `POST /portal/token` | PORTAL | `{ subscriptionId }` → `{ token, expiresAt }`, 10 minutes, for the portal's widget (`channel: "portal"`). `403` for a subscription the email doesn't own. Its own limit, 60 an hour per subscriber, so opening the widget can't lock out cancel |
+| `POST /portal/logout` | PORTAL origin | `204`, clears the cookie |
 | `DELETE /delegations/:id` | PORTAL | → `204`; an unknown or someone else's id is `404` |
 
 ```ts

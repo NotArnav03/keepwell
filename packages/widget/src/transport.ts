@@ -93,6 +93,8 @@ export interface HttpTransportOptions {
   /** The signed subscriber token for this subscription, fetched once per open. */
   token: () => Promise<string>;
   fetch?: typeof fetch;
+  /** Which door this is: the merchant's page (default) or the hosted portal. The token must match. */
+  channel?: "widget" | "portal";
 }
 
 export function httpTransport(options: HttpTransportOptions): Transport {
@@ -130,7 +132,7 @@ export function httpTransport(options: HttpTransportOptions): Transport {
 
   return {
     async createSession() {
-      const data = await call("/sessions", { channel: "widget" });
+      const data = await call("/sessions", { channel: options.channel ?? "widget" });
       return expect<CreateSessionResponse>(
         data,
         ["sessionId", "streamUrl", "subscription", "merchant"],

@@ -271,6 +271,17 @@ describe("voice input", () => {
     expect(FakeRecognition.last?.stopped).toBe(1);
   });
 
+  it("comes back unpressed when the browser refuses to start listening", async () => {
+    class Refusing extends FakeRecognition {
+      override start() {
+        throw new DOMException("blocked", "NotAllowedError");
+      }
+    }
+    await openWith(Refusing);
+    await act(() => control("Speak").click());
+    expect(control("Speak").getAttribute("aria-pressed")).toBe("false");
+  });
+
   it("stops listening when the dialog closes", async () => {
     await openWith(FakeRecognition);
     await act(() => control("Speak").click());

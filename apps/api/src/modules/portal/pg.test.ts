@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createDb, merchants, subscriptions, type Db } from "@keepwell/db";
 import { createTestDatabase, TEST_DATABASE_URL, type TestDatabase } from "@keepwell/db/testing";
+import { FakeAudit } from "@keepwell/contracts/fakes";
 import { DelegationService } from "./delegations.js";
 import { MagicLinkService } from "./magic-link.js";
 import { RecordingMailer } from "./memory.js";
@@ -77,6 +78,20 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("portal Postgres stores", { tim
       expect(await directory.subscriptionsFor(B, MAYA)).toEqual([subs.mayaAtB]);
       expect(await directory.subscriptionsFor(A, hashEmail("nobody@example.com"))).toEqual([]);
     });
+
+    it("summarises one of that merchant's subscriptions for the portal, and nothing across merchants", async () => {
+      const directory = new PgPortalDirectory(db);
+      expect(await directory.summary(A, subs.maya1 ?? "")).toEqual({
+        id: subs.maya1,
+        planName: "Standard",
+        price: { value: "12.00", currency: "USD" },
+        interval: { unit: "MONTH", count: 1 },
+        status: "ACTIVE",
+        nextBillingTime: null,
+      });
+      expect(await directory.summary(B, subs.maya1 ?? "")).toBeNull();
+      expect(await directory.summary(A, "0199c100-0000-7000-8000-00000000ffff")).toBeNull();
+    });
   });
 
   describe("PgMagicLinkStore", () => {
@@ -126,6 +141,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("portal Postgres stores", { tim
       const mailer = new RecordingMailer();
       const service = new MagicLinkService({
         directory: new PgPortalDirectory(db),
+        audit: new FakeAudit(),
         store: new PgMagicLinkStore(db),
         mailer,
         verifyUrl: (token) => `https://portal.example/v1/portal/verify?token=${token}`,
@@ -147,6 +163,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("portal Postgres stores", { tim
       const service = new DelegationService({
         store: new PgDelegationStore(db),
         directory: new PgPortalDirectory(db),
+        audit: new FakeAudit(),
         clock: () => now,
       });
       const maya = { merchantId: A, emailHash: MAYA };
@@ -174,6 +191,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("portal Postgres stores", { tim
       const service = new DelegationService({
         store: new PgDelegationStore(db),
         directory: new PgPortalDirectory(db),
+        audit: new FakeAudit(),
         clock: () => now,
       });
       const raj = { merchantId: A, emailHash: hashEmail("raj@example.com") };
@@ -193,11 +211,35 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("portal Postgres stores", { tim
       });
     });
 
+    it("lists a merchant's delegations on the given subscriptions, newest first", async () => {
+      const store = new PgDelegationStore(db);
+      const at = (minutes: number) =>
+        new DelegationService({
+          store,
+          directory: new PgPortalDirectory(db),
+          audit: new FakeAudit(),
+          clock: () => new Date(now.getTime() + minutes * 60_000),
+        });
+      const maya = { merchantId: A, emailHash: MAYA };
+      const older = await at(1).create(maya, { subscriptionId: subs.maya2 ?? "", scopes: ["read"] });
+      const newer = await at(2).create(maya, { subscriptionId: subs.maya2 ?? "", scopes: ["cancel"] });
+
+      const listed = await store.listFor(A, [subs.maya2 ?? ""]);
+      const ids = listed.map((row) => row.id);
+      expect(ids.indexOf(newer.id)).toBeLessThan(ids.indexOf(older.id));
+      expect(ids.indexOf(older.id)).toBeGreaterThanOrEqual(0);
+      expect(listed.every((row) => row.subscriptionId === subs.maya2)).toBe(true);
+      // Another merchant's view of the same ids is empty, and no ids means no rows.
+      expect(await store.listFor(B, [subs.maya2 ?? ""])).toEqual([]);
+      expect(await store.listFor(A, [])).toEqual([]);
+    });
+
     it("an expired delegation doesn't authenticate", async () => {
       const store = new PgDelegationStore(db);
       const minted = new DelegationService({
         store,
         directory: new PgPortalDirectory(db),
+        audit: new FakeAudit(),
         clock: () => now,
       });
       const created = await minted.create(
@@ -207,6 +249,7 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("portal Postgres stores", { tim
       const weekLater = new DelegationService({
         store,
         directory: new PgPortalDirectory(db),
+        audit: new FakeAudit(),
         clock: () => new Date(now.getTime() + 7 * 24 * 3600_000),
       });
       expect(await weekLater.authenticate(created.token, "read")).toBeNull();
