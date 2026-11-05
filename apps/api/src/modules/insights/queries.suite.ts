@@ -1,3 +1,4 @@
+import { sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { dunningCases, insights, merchants, sessions, subscriptions, type Db, type Tx } from "@keepwell/db";
 import { uuidv7 } from "@keepwell/contracts/fakes";
@@ -361,6 +362,73 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
         const b = await insightsOverview(db, B, range);
         expect(b.total).toBe(1);
         expect(b.topQuotes.map((q) => q.quote)).toEqual(["B only"]);
+      });
+    });
+
+    // After the cases above, which expect the view to start empty and then populate it.
+    describe("insight_daily tenancy", () => {
+      async function visibleMerchants(merchantId: string): Promise<string[]> {
+        const result = await db.forMerchant(merchantId, (tx) =>
+          tx.execute<{ merchant_id: string }>(
+            sql`select distinct merchant_id::text as merchant_id from insight_daily order by 1`,
+          ),
+        );
+        return result.rows.map((row) => row.merchant_id);
+      }
+
+      it("shows only the current tenant and reports security_barrier on the view", async () => {
+        await handleRefreshViewsJob(db, log);
+        const defined = await db.forMerchant(A, (tx) =>
+          tx.execute<{ reloptions: string[] | null }>(
+            sql`select reloptions from pg_class where oid = 'public.insight_daily'::regclass`,
+          ),
+        );
+        const reloptions = defined.rows[0]?.reloptions;
+        const listed = Array.isArray(reloptions) ? reloptions.join(",") : String(reloptions);
+        expect(listed).toContain("security_barrier=true");
+        expect(await visibleMerchants(A)).toEqual([A]);
+        expect(await visibleMerchants(B)).toEqual([B]);
+      });
+
+      it("applies the tenant filter again after refresh_insight_views() returns", async () => {
+        // The flag is transaction-local. Restoring it inside the function is what keeps the
+        // rest of this forMerchant transaction on one tenant.
+        const seen = await db.forMerchant(A, async (tx) => {
+          await tx.execute(sql`select refresh_insight_views()`);
+          const flag = await tx.execute<{ cross_tenant: string | null }>(
+            sql`select current_setting('app.cross_tenant', true) as cross_tenant`,
+          );
+          const rows = await tx.execute<{ merchant_id: string }>(
+            sql`select distinct merchant_id::text as merchant_id from insight_daily order by 1`,
+          );
+          return {
+            crossTenant: flag.rows[0]?.cross_tenant ?? null,
+            merchants: rows.rows.map((row) => row.merchant_id),
+          };
+        });
+        expect(seen.crossTenant === null || seen.crossTenant === "").toBe(true);
+        expect(seen.merchants).toEqual([A]);
+      });
+
+      it("refreshes twice from acrossMerchants and leaves that transaction cross-tenant", async () => {
+        const during = await db.acrossMerchants(async (tx) => {
+          await tx.execute(sql`select refresh_insight_views()`);
+          await tx.execute(sql`select refresh_insight_views()`);
+          const flag = await tx.execute<{ cross_tenant: string | null }>(
+            sql`select current_setting('app.cross_tenant', true) as cross_tenant`,
+          );
+          const rows = await tx.execute<{ n: number | string }>(
+            sql`select count(distinct merchant_id)::int as n from insight_daily`,
+          );
+          return {
+            crossTenant: flag.rows[0]?.cross_tenant ?? null,
+            merchants: Number(rows.rows[0]?.n ?? 0),
+          };
+        });
+        expect(during).toEqual({ crossTenant: "on", merchants: 2 });
+        expect(await visibleMerchants(A)).toEqual([A]);
+        expect((await insightsOverview(db, A, range)).total).toBe(5);
+        expect((await insightsOverview(db, B, range)).total).toBe(1);
       });
     });
   });

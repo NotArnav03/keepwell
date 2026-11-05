@@ -30,7 +30,10 @@ CREATE UNIQUE INDEX insight_daily_mv_key ON insight_daily_mv (merchant_id, day, 
 --> statement-breakpoint
 REVOKE ALL ON insight_daily_mv FROM PUBLIC, keepwell_app;
 --> statement-breakpoint
-CREATE VIEW insight_daily AS
+-- security_barrier so keepwell_can_see() runs before any function in a caller's WHERE. The view
+-- executes as its owner, who can read every row of the materialized view; a leaky predicate must
+-- not observe another tenant.
+CREATE VIEW insight_daily WITH (security_barrier) AS
 SELECT merchant_id, day, plan_name, reason, outcome, insight_count
 FROM insight_daily_mv
 WHERE keepwell_can_see(merchant_id);
@@ -40,15 +43,27 @@ REVOKE ALL ON insight_daily FROM PUBLIC, keepwell_app;
 GRANT SELECT ON insight_daily TO keepwell_app;
 --> statement-breakpoint
 -- The app role can't own the materialized view, so it refreshes it through this definer function.
--- It builds the view across all merchants, hence the cross-tenant switch (transaction-local).
+-- The cross-tenant switch is transaction-local and would otherwise stay on until the caller
+-- commits, so a forMerchant transaction that called this would then see every tenant. Put the
+-- previous value back before returning ('' if it was unset: only 'on' opens keepwell_can_see) and
+-- keep is_local so a pooled connection never inherits it. Meant to be called from acrossMerchants
+-- only. That caller already had the flag on, so restoring it changes nothing there.
 CREATE FUNCTION refresh_insight_views() RETURNS void
   LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp
   AS $$
+  DECLARE
+    previous text;
   BEGIN
-    PERFORM set_config('app.cross_tenant', 'on', true);
-    REFRESH MATERIALIZED VIEW CONCURRENTLY insight_daily_mv;
+    -- Schema-qualified: search_path lists pg_temp, which would otherwise shadow these.
+    previous := pg_catalog.current_setting('app.cross_tenant', true);
+    PERFORM pg_catalog.set_config('app.cross_tenant', 'on', true);
+    REFRESH MATERIALIZED VIEW CONCURRENTLY public.insight_daily_mv;
+    PERFORM pg_catalog.set_config('app.cross_tenant', coalesce(previous, ''), true);
   END
   $$;
+--> statement-breakpoint
+COMMENT ON FUNCTION refresh_insight_views() IS
+  'Refreshes insight_daily_mv for every merchant. Meant to be called from acrossMerchants only.';
 --> statement-breakpoint
 REVOKE ALL ON FUNCTION refresh_insight_views() FROM PUBLIC;
 --> statement-breakpoint

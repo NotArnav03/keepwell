@@ -10,7 +10,7 @@ Why subscribers leave (ARCHITECTURE.md §6.12). Insights are never on the critic
 | `queries.ts` | All merchant-facing numbers, as SQL: `overviewKpis` (for `GET /m/overview`) and `insightsOverview` (for `GET /m/insights`). |
 | `routes.ts` | `GET /insights?from&to&quotes` (register under `/v1/m`). |
 
-Aggregates read `insight_daily`, a tenant-filtered view over a materialized view (migration 0003) that `insights.refresh_views` rebuilds. Top quotes and the overview KPIs read live tables.
+Aggregates read `insight_daily`, a `security_barrier` view over a materialized view (migration 0005) that `insights.refresh_views` rebuilds hourly from `acrossMerchants`. The refresh function turns `app.cross_tenant` on for the rebuild and restores the previous value before it returns. Top quotes and the overview KPIs read live tables.
 
 ## Not wired yet
 
