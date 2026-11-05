@@ -493,4 +493,61 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
     stream.unsubscribe();
     expect(stream.seen.at(-1)?.[1]).toMatchObject({ type: "session.closed", outcome: "kept_without_offer" });
   });
+
+  describe("the subscriber's agent (MCP)", () => {
+    const agentOf = (): SubscriberPrincipal => ({ ...maya(), channel: "subscriber_agent" });
+
+    it("lists the policy's offers, reuses the session, and accepts as the agent with consent", async () => {
+      const { api, audit } = build();
+      const first = await api.agentOptions(agentOf());
+      const again = await api.agentOptions(agentOf());
+      expect(again.sessionId).toBe(first.sessionId);
+      const pause = first.menu.offers.find((o) => o.kind === "pause");
+      if (!pause) throw new Error("the policy offers no pause");
+
+      const accepted = await api.agentAccept(agentOf(), pause.id, meta);
+      expect(await api.agentAccept(agentOf(), pause.id, meta)).toEqual(accepted);
+      const { rows } = await testDb.ownerPool.query<{
+        channel: string;
+        status: string;
+        consent: { channel: string };
+      }>(
+        "SELECT s.channel, o.status, o.consent FROM sessions s JOIN offers o ON o.session_id = s.id WHERE s.id = $1",
+        [first.sessionId],
+      );
+      expect(rows[0]).toMatchObject({
+        channel: "subscriber_agent",
+        status: "accepted",
+        consent: { channel: "subscriber_agent" },
+      });
+      expect(audit.entries.find((e) => e.kind === "offer.accepted")?.actor).toBe("subscriber_agent");
+    });
+
+    it("needs the options first, and only accepts an offer from them", async () => {
+      const { api } = build();
+      const raj = { ...agentOf(), subscriptionId: otherSubscriptionId };
+      await expect(api.agentAccept(raj, "pause-2", meta)).rejects.toMatchObject({
+        code: "offer_unavailable",
+      });
+      await api.agentOptions(agentOf());
+      await expect(api.agentAccept(agentOf(), "made-up-offer", meta)).rejects.toMatchObject({
+        code: "offer_unavailable",
+      });
+    });
+
+    it("cancels in one call with no session before it and the agent disabled", async () => {
+      const { api, audit } = build({ agent: disabledAgent });
+      const raj = { ...agentOf(), subscriptionId: otherSubscriptionId };
+      const { actionId } = await api.agentCancel(raj, { reason: "price" });
+      expect(await api.agentCancel(raj, {})).toEqual({ actionId });
+      const { rows } = await testDb.ownerPool.query<{ type: string }>(
+        "SELECT type FROM actions WHERE id = $1",
+        [actionId],
+      );
+      expect(rows[0]?.type).toBe("cancel");
+      expect(audit.entries.find((e) => e.kind === "session.cancel_requested")?.actor).toBe(
+        "subscriber_agent",
+      );
+    });
+  });
 });

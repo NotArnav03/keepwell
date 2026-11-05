@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, like, max } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, like, max, ne } from "drizzle-orm";
 import { z } from "zod";
 import {
   AcceptOfferRequest,
@@ -34,6 +34,7 @@ import {
   type SessionStreamListener,
   type SubscriberPrincipal,
   type SubscriptionSnapshot,
+  type SubscriptionSummary,
   type TranscriptTurn,
 } from "@keepwell/contracts";
 import {
@@ -46,7 +47,7 @@ import {
   type Db,
   type Tx,
 } from "@keepwell/db";
-import { evaluateAcceptance } from "@keepwell/policy";
+import { describeOffer, evaluateAcceptance } from "@keepwell/policy";
 import { uuidv7 } from "../agent/ids.js";
 import type { MerchantCatalog } from "../policy/service.js";
 import { SessionFeed } from "./feed.js";
@@ -85,6 +86,8 @@ export const MAX_OFFER_ATTEMPTS = 3;
 export const MAX_SUBSCRIBER_MESSAGES = 3;
 const NOTHING_APPLIED: readonly Action["state"][] = ["FAILED", "ABANDONED", "SUPERSEDED"];
 const APPLIED: readonly Action["state"][] = ["APPLIED", "CONFIRMED"];
+/** An agent that asks for options again within this time gets the same session and menu. */
+const AGENT_SESSION_REUSE_MS = 30 * 60_000;
 const CHIP_REASONS = ReasonCategory.options.filter((r) => r !== "unknown");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -154,6 +157,12 @@ export class DbSessionsApi implements SessionsApi {
     if (channel !== principal.channel) {
       throw new SessionError("unauthorized", `This credential can't open a ${channel} session`);
     }
+    return this.start(principal);
+  }
+
+  /** Starts a session on the principal's own channel (the HTTP body can't ask for subscriber_agent). */
+  private async start(principal: SubscriberPrincipal): Promise<CreateSessionResponse> {
+    const { channel } = principal;
     const { merchantId, subscriptionId } = principal;
     const [sample] = await this.o.catalog.samples(merchantId, [subscriptionId]);
     if (!sample) throw new SessionError("unauthorized", "Unknown subscription");
@@ -205,14 +214,15 @@ export class DbSessionsApi implements SessionsApi {
       await this.o.audit.append(
         {
           merchantId,
-          actor: "subscriber",
+          actor: actorFor(row.channel),
           kind: "session.started",
           subjectIds: subjects(row, sample.subscription),
           payload: { channel, fallbackLevel: started.fallbackLevel, policyVersion: menu.policyVersion },
         },
         tx,
       );
-      if (started.fallbackLevel === "L1") {
+      // Reason chips are for people; an agent reads the menu from get_retention_options.
+      if (started.fallbackLevel === "L1" && channel !== "subscriber_agent") {
         await this.pusher(tx, row)({ type: "reason.chips", reasons: CHIP_REASONS });
       }
     });
@@ -488,7 +498,7 @@ export class DbSessionsApi implements SessionsApi {
       await this.o.audit.append(
         {
           merchantId,
-          actor: "subscriber",
+          actor: actorFor(row.channel),
           kind: "offer.accepted",
           subjectIds: { ...subjects(row, sample.subscription), actionId: action.id },
           payload: { offer: shown.offer, consent, attempt },
@@ -531,7 +541,7 @@ export class DbSessionsApi implements SessionsApi {
       await this.o.audit.append(
         {
           merchantId,
-          actor: "subscriber",
+          actor: actorFor(row.channel),
           kind: "offer.declined",
           subjectIds: { sessionId, subscriptionId },
           payload: { offerId },
@@ -587,7 +597,7 @@ export class DbSessionsApi implements SessionsApi {
       await this.o.audit.append(
         {
           merchantId,
-          actor: "subscriber",
+          actor: actorFor(row.channel),
           kind: "session.cancel_requested",
           subjectIds: { sessionId, subscriptionId, actionId: action.id },
           payload: { reason: nextReason },
@@ -637,6 +647,142 @@ export class DbSessionsApi implements SessionsApi {
         await tx.update(sessions).set({ state: "open" }).where(eq(sessions.id, sessionId));
       }
     });
+  }
+
+  // ---------- the subscriber's own agent (MCP, #41) ----------
+  //
+  // An agent holding a delegation token gets the policy's menu as structured data, accepts by
+  // offer id, and can always cancel in one call. No model is involved: the menu comes from the
+  // policy engine, and consent is the agent's call under a token the subscriber scoped to it.
+  // Each of these runs in a session on the subscriber_agent channel, so the dashboard and the
+  // audit log show what came through an agent.
+
+  /** The subscription the token is bound to: the subscriber's own data, no email or payer id. */
+  async agentSubscription(principal: SubscriberPrincipal): Promise<SubscriptionSummary> {
+    const [sample] = await this.o.catalog.samples(principal.merchantId, [principal.subscriptionId]);
+    if (!sample) throw new SessionError("not_found", "The subscription for this token is gone");
+    return summarizeSubscription(sample.subscription);
+  }
+
+  /** The offers the policy allows right now, in an agent session that agentAccept then uses. */
+  async agentOptions(principal: SubscriberPrincipal): Promise<{ sessionId: string; menu: OfferMenu }> {
+    const who = agentChannel(principal);
+    const current = await this.latestAgentSession(who);
+    if (current?.state === "open" && current.ageMs < AGENT_SESSION_REUSE_MS) {
+      const answer = await this.offerRow(who.merchantId, current.id);
+      if (answer && answer.pickedOffer === null) {
+        return { sessionId: current.id, menu: OfferMenu.parse(answer.menuSnapshot) };
+      }
+    }
+    const created = await this.start(who);
+    const answer = await this.offerRow(who.merchantId, created.sessionId);
+    if (!answer) throw new SessionError("internal", "The agent session has no menu");
+    return { sessionId: created.sessionId, menu: OfferMenu.parse(answer.menuSnapshot) };
+  }
+
+  /**
+   * Accepts an offer from the agent session's menu. The structured offer the agent received is
+   * what was "shown", so its hash is the consent's shownTextHash.
+   */
+  async agentAccept(
+    principal: SubscriberPrincipal,
+    offerId: string,
+    meta: RequestMeta,
+  ): Promise<AcceptOfferResponse> {
+    const who = agentChannel(principal);
+    const current = await this.latestAgentSession(who);
+    if (!current) {
+      throw new SessionError(
+        "offer_unavailable",
+        "Call get_retention_options first, then accept one of its offers",
+      );
+    }
+    const hash = await this.inSession(who, current.id, async (tx, row, push) => {
+      const answer = await this.lockedOfferRow(tx, current.id);
+      const shown = presentedOf(answer);
+      if (shown) {
+        if (shown.offer.id !== offerId) {
+          throw new SessionError("offer_unavailable", "Another offer was already accepted in this session");
+        }
+        return shown.shownTextHash;
+      }
+      const offer = OfferMenu.parse(answer.menuSnapshot).offers.find((o) => o.id === offerId);
+      if (!offer) throw new SessionError("offer_unavailable", "That offer isn't one of the current options");
+      const presented: Presented = {
+        offer,
+        cardText: describeOffer(offer),
+        shownTextHash: sha256(canonicalJson(offer)),
+      };
+      await tx.update(offers).set({ pickedOffer: presented }).where(eq(offers.id, answer.id));
+      if (row.state === "open") {
+        await tx
+          .update(sessions)
+          .set({ state: "offer_presented", presentedOfferId: offer.id })
+          .where(eq(sessions.id, current.id));
+      }
+      await push({
+        type: "offer.presented",
+        offer,
+        cardText: presented.cardText,
+        shownTextHash: presented.shownTextHash,
+      });
+      return presented.shownTextHash;
+    });
+    return this.accept(who, current.id, offerId, { shownTextHash: hash }, meta);
+  }
+
+  /** One call, whatever state things are in. Never touches the agent. */
+  async agentCancel(principal: SubscriberPrincipal, body: CancelRequest): Promise<CancelResponse> {
+    const who = agentChannel(principal);
+    const current = await this.latestAgentSession(who);
+    const sessionId = current?.id ?? (await this.bareAgentSession(who));
+    return this.cancel(who, sessionId, body);
+  }
+
+  /** The newest agent session for this subscription that isn't closed. */
+  private async latestAgentSession(principal: SubscriberPrincipal) {
+    const [row] = await this.o.db.forMerchant(principal.merchantId, (tx) =>
+      tx
+        .select({ id: sessions.id, state: sessions.state, startedAt: sessions.startedAt })
+        .from(sessions)
+        .where(
+          and(
+            eq(sessions.merchantId, principal.merchantId),
+            eq(sessions.subscriptionId, principal.subscriptionId),
+            eq(sessions.channel, "subscriber_agent"),
+            ne(sessions.state, "closed"),
+          ),
+        )
+        .orderBy(desc(sessions.startedAt), desc(sessions.id))
+        .limit(1),
+    );
+    return row ? { ...row, ageMs: this.clock().getTime() - row.startedAt.getTime() } : null;
+  }
+
+  /** A session for a cancel with nothing before it: no agent, no menu, nothing that can fail first. */
+  private async bareAgentSession(principal: SubscriberPrincipal): Promise<string> {
+    const stored = await this.o.policies.current(principal.merchantId).catch(() => null);
+    const id = uuidv7(this.clock().getTime());
+    const menu: OfferMenu = {
+      policyVersion: stored?.version ?? 1,
+      computedAt: this.now(),
+      offers: [],
+      defaultByReason: Object.fromEntries(
+        ReasonCategory.options.map((r) => [r, null]),
+      ) as OfferMenu["defaultByReason"],
+      excluded: [],
+    };
+    await this.o.db.forMerchant(principal.merchantId, async (tx) => {
+      await tx.insert(sessions).values({
+        id,
+        merchantId: principal.merchantId,
+        subscriptionId: principal.subscriptionId,
+        channel: "subscriber_agent",
+        policyVersion: menu.policyVersion,
+      });
+      await tx.insert(offers).values({ merchantId: principal.merchantId, sessionId: id, menuSnapshot: menu });
+    });
+    return id;
   }
 
   // ---------- internals ----------
@@ -939,6 +1085,15 @@ export class DbSessionsApi implements SessionsApi {
   private now(): string {
     return this.clock().toISOString();
   }
+}
+
+/** Audit entries say whether the subscriber acted, or their delegated agent did. */
+function actorFor(channel: SessionRow["channel"]): "subscriber" | "subscriber_agent" {
+  return channel === "subscriber_agent" ? "subscriber_agent" : "subscriber";
+}
+
+function agentChannel(principal: SubscriberPrincipal): SubscriberPrincipal {
+  return { ...principal, channel: "subscriber_agent" };
 }
 
 /** A session that can still take messages and reason chips. */
