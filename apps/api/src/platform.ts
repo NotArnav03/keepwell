@@ -6,6 +6,7 @@ import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
 import { reviseReturn } from "./modules/actions/revise-return.js";
 import { DbAudit } from "./modules/audit/log.js";
+import { registerWinback } from "./modules/winback/index.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
 import { PayPalClient } from "./modules/paypal/client.js";
@@ -54,6 +55,19 @@ export async function startPlatform(env: Env): Promise<Platform> {
   // Handlers before workers: an event reaches the handlers registered when it is emitted.
   events.on("subscription.synced", "actions.confirm", async (event) => {
     await engine.confirmFromSync(event.merchantId, event.payload.snapshot);
+  });
+
+  // Win-back records cancellations always; it sends once the notify module (PR #91) is mounted here.
+  await registerWinback({
+    app,
+    db,
+    jobs,
+    events,
+    audit: core.audit,
+    reconciler,
+    paypal,
+    ...(env.PORTAL_URL && { portalUrl: env.PORTAL_URL }),
+    ...(env.MAGIC_LINK_SECRET && { tokenSecret: env.MAGIC_LINK_SECRET }),
   });
 
   await events.startWorker();
