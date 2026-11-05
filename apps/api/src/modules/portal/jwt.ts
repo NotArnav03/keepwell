@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { z } from "zod";
-import { WIDGET_TOKEN_TTL_SECONDS, WidgetTokenClaims } from "@keepwell/contracts";
+import { PortalSessionTokenClaims, WIDGET_TOKEN_TTL_SECONDS, WidgetTokenClaims } from "@keepwell/contracts";
 
 // HS256 JWTs, by hand: node:crypto is enough for one algorithm, and accepting exactly one is
 // the point (no "alg": "none", no RS/HS confusion). Subscriber identity, ARCHITECTURE.md §6.7.
@@ -73,6 +73,15 @@ export function signWidgetToken(
 export function verifyWidgetToken(token: string, secret: string, now: Date) {
   const result = verifyJwt(token, secret, WidgetTokenClaims, now);
   // A token claiming a longer life than we ever sign is forged or from a bug: refuse it.
+  if (result.ok && result.claims.exp - result.claims.iat > WIDGET_TOKEN_TTL_SECONDS) {
+    return { ok: false as const, failure: "invalid_claims" as const };
+  }
+  return result;
+}
+
+/** The token POST /v1/portal/token hands the portal's widget: bound to one of our subscription ids. */
+export function verifyPortalSessionToken(token: string, secret: string, now: Date) {
+  const result = verifyJwt(token, secret, PortalSessionTokenClaims, now);
   if (result.ok && result.claims.exp - result.claims.iat > WIDGET_TOKEN_TTL_SECONDS) {
     return { ok: false as const, failure: "invalid_claims" as const };
   }

@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import {
   CreateDelegationRequest,
   DELEGATION_TTL_SECONDS,
+  type Audit,
   type CreateDelegationResponse,
+  type DelegationSummary,
   type DelegationScope,
 } from "@keepwell/contracts";
 import type { DelegationStore, PortalDirectory } from "./ports.js";
@@ -42,7 +44,13 @@ export class DelegationService {
   private readonly clock: () => Date;
 
   constructor(
-    private readonly deps: { store: DelegationStore; directory: PortalDirectory; clock?: () => Date },
+    private readonly deps: {
+      store: DelegationStore;
+      directory: PortalDirectory;
+      /** Handing an agent rights over a subscription, and taking them back, are both audited. */
+      audit: Audit;
+      clock?: () => Date;
+    },
   ) {
     this.clock = deps.clock ?? (() => new Date());
   }
@@ -63,7 +71,30 @@ export class DelegationService {
       createdAt: now,
     };
     await this.deps.store.insert(record);
+    await this.deps.audit.append({
+      merchantId: who.merchantId,
+      actor: "subscriber",
+      kind: "delegation.created",
+      subjectIds: { delegationId: record.id, subscriptionId },
+      payload: { scopes, expiresAt: record.expiresAt.toISOString() },
+    });
     return { id: record.id, token, scopes, expiresAt: record.expiresAt.toISOString() };
+  }
+
+  /** The live delegations (not revoked, not expired) on the subscriptions this email owns. */
+  async list(who: PortalPrincipal): Promise<DelegationSummary[]> {
+    const owned = await this.deps.directory.subscriptionsFor(who.merchantId, who.emailHash);
+    const now = this.clock().getTime();
+    const rows = await this.deps.store.listFor(who.merchantId, owned);
+    return rows
+      .filter((row) => row.revokedAt === null && row.expiresAt.getTime() > now)
+      .map((row) => ({
+        id: row.id,
+        subscriptionId: row.subscriptionId,
+        scopes: row.scopes,
+        expiresAt: row.expiresAt.toISOString(),
+        createdAt: row.createdAt.toISOString(),
+      }));
   }
 
   /** Someone else's delegation is "not found", not "forbidden", so ids can't be probed. */
@@ -72,7 +103,16 @@ export class DelegationService {
     if (record === null || record.merchantId !== who.merchantId) throw notFound();
     const owned = await this.deps.directory.subscriptionsFor(who.merchantId, who.emailHash);
     if (!owned.includes(record.subscriptionId)) throw notFound();
+    // Revoking twice is fine, and audited once.
+    if (record.revokedAt !== null) return;
     await this.deps.store.revoke(id, this.clock());
+    await this.deps.audit.append({
+      merchantId: who.merchantId,
+      actor: "subscriber",
+      kind: "delegation.revoked",
+      subjectIds: { delegationId: id, subscriptionId: record.subscriptionId },
+      payload: {},
+    });
   }
 
   /** The grant for a token that is known, unexpired, unrevoked and carries `scope`; otherwise null. */

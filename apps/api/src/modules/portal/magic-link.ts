@@ -1,4 +1,4 @@
-import { MAGIC_LINK_TTL_SECONDS, type MagicLinkRequest } from "@keepwell/contracts";
+import { MAGIC_LINK_TTL_SECONDS, type Audit, type MagicLinkRequest } from "@keepwell/contracts";
 import type { MagicLinkMailer, MagicLinkStore, PortalDirectory } from "./ports.js";
 import { hashEmail, hashToken, newToken } from "./tokens.js";
 
@@ -12,6 +12,8 @@ export interface MagicLinkServiceDeps {
   mailer: MagicLinkMailer;
   /** Where the emailed link points: the API's GET /portal/verify with the token. */
   verifyUrl: (token: string) => string;
+  /** Sent links and sign-ins are audited, by subscription id: never the email or the token. */
+  audit: Audit;
   clock?: () => Date;
 }
 
@@ -42,11 +44,27 @@ export class MagicLinkService {
       url: this.deps.verifyUrl(token),
       expiresAt,
     });
+    await this.deps.audit.append({
+      merchantId,
+      actor: "subscriber",
+      kind: "portal.link_sent",
+      subjectIds: { subscriptionIds: subscriptions.join(",") },
+      payload: { expiresAt: expiresAt.toISOString() },
+    });
   }
 
   /** Spends a link. Null for anything unknown, used or expired; the three look the same. */
   async redeem(token: string): Promise<{ merchantId: string; emailHash: string } | null> {
     const link = await this.deps.store.consume(hashToken(token), this.clock());
-    return link === null ? null : { merchantId: link.merchantId, emailHash: link.emailHash };
+    if (link === null) return null;
+    const subscriptions = await this.deps.directory.subscriptionsFor(link.merchantId, link.emailHash);
+    await this.deps.audit.append({
+      merchantId: link.merchantId,
+      actor: "subscriber",
+      kind: "portal.signed_in",
+      subjectIds: { subscriptionIds: subscriptions.join(",") },
+      payload: {},
+    });
+    return { merchantId: link.merchantId, emailHash: link.emailHash };
   }
 }

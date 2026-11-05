@@ -161,3 +161,24 @@ describe("stream", () => {
     expect(events.map(([seq]) => seq)).toEqual([3]);
   });
 });
+
+describe("createSession", () => {
+  const session = { sessionId: "s", streamUrl: "u", subscription: {}, merchant: {} };
+  const post = async (channel?: "widget" | "portal") => {
+    const fetched = vi.fn(() => Promise.resolve(new Response(JSON.stringify(session), { status: 201 })));
+    const transport = httpTransport({
+      apiBase: "http://localhost:3000",
+      token: () => Promise.resolve("t"),
+      fetch: fetched,
+      ...(channel === undefined ? {} : { channel }),
+    });
+    await transport.createSession();
+    const call = fetched.mock.calls[0] as unknown as [string, RequestInit];
+    return JSON.parse(call[1].body as string) as unknown;
+  };
+
+  it("opens as the widget by default, and as the portal when it is the hosted portal's", async () => {
+    expect(await post()).toEqual({ channel: "widget" });
+    expect(await post("portal")).toEqual({ channel: "portal" });
+  });
+});
