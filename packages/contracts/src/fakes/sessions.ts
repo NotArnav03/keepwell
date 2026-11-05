@@ -42,6 +42,9 @@ import { FakeDomainEvents } from "./domain-events.js";
 import { PANTRY_PLAN, pantryPlanSubscription } from "./pantry-plan.js";
 import { uuidv7 } from "./uuidv7.js";
 
+/** Accepting again after the offer's Actions changed nothing in PayPal: up to this many attempts. */
+export const MAX_OFFER_ATTEMPTS = 3;
+
 /** ARCHITECTURE.md §6.5: after three messages the widget offers only Cancel and Keep. */
 const MAX_SUBSCRIBER_MESSAGES = 3;
 const CHIP_REASONS = ReasonCategory.options.filter((r) => r !== "unknown");
@@ -79,7 +82,7 @@ interface Entry {
   /** The agent's reply so far, until agent.done. */
   reply: string;
   presented: { offer: Offer; shownTextHash: string } | null;
-  answer: { kind: "accepted"; response: AcceptOfferResponse } | { kind: "declined" } | null;
+  answer: { kind: "accepted"; response: AcceptOfferResponse; attempts: number } | { kind: "declined" } | null;
   subscriberMessages: number;
   log: { seq: number; event: SessionStreamEvent }[];
   listeners: Set<SessionStreamListener>;
@@ -251,9 +254,23 @@ export class FakeSessionsApi implements SessionsApi {
     const { shownTextHash } = parseBody(AcceptOfferRequest, body);
     const entry = this.entryFor(principal, sessionId);
     const { presented, answer, session } = entry;
-    if (answer?.kind === "accepted" && presented?.offer.id === offerId) return answer.response;
+    let attempt = 1;
+    if (answer?.kind === "accepted" && presented?.offer.id === offerId) {
+      // The first click's Actions, unless they all changed nothing: then this is a retry.
+      const previous = await Promise.all(
+        answer.response.actionIds.map((id) => this.actions.get(session.merchantId, id)),
+      );
+      if (!previous.every((a) => a !== null && NOTHING_APPLIED.includes(a.state))) return answer.response;
+      attempt = answer.attempts + 1;
+      if (attempt > MAX_OFFER_ATTEMPTS) {
+        throw new SessionError(
+          "offer_unavailable",
+          "That offer didn't go through. You can still cancel or keep your plan.",
+        );
+      }
+    }
     if (session.state === "closed") throw new SessionError("session_closed", "This conversation has ended");
-    if (!presented || presented.offer.id !== offerId || answer) {
+    if (!presented || presented.offer.id !== offerId || (answer && attempt === 1)) {
       throw new SessionError("offer_unavailable", "That offer isn't open in this conversation");
     }
     if (session.state === "awaiting_paypal") {
@@ -272,9 +289,9 @@ export class FakeSessionsApi implements SessionsApi {
       ipPrefix: meta.ipPrefix,
       userAgent: meta.userAgent,
     });
-    const action = await this.createOfferAction(entry, offer);
+    const action = await this.createOfferAction(entry, offer, attempt);
     const response: AcceptOfferResponse = { actionIds: [action.id], approveUrl: null };
-    entry.answer = { kind: "accepted", response };
+    entry.answer = { kind: "accepted", response, attempts: attempt };
     entry.pending.set(action.id, SAVED_OUTCOME[offer.kind]);
     session.state = "awaiting_paypal";
 
@@ -464,13 +481,13 @@ export class FakeSessionsApi implements SessionsApi {
     });
   }
 
-  private async createOfferAction(entry: Entry, offer: Offer): Promise<Action> {
+  private async createOfferAction(entry: Entry, offer: Offer, attempt = 1): Promise<Action> {
     const { merchantId, subscriptionId, id } = entry.session;
     const base = {
       merchantId,
       subscriptionId,
       origin: "session",
-      idempotencyKey: `${id}:${offer.id}`,
+      idempotencyKey: attempt === 1 ? `${id}:${offer.id}` : `${id}:${offer.id}:${attempt}`,
     } as const;
     switch (offer.kind) {
       case "pause":

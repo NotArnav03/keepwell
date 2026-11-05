@@ -257,6 +257,9 @@ export interface SessionsApi {
    * Action is created, re-run `evaluate(policy, freshContext, offerId, storedMenu)` with
    * `offersPresentedThisSession: 0` (the offer being accepted is the one that was presented);
    * a refusal is `offer_unavailable`. A pause's resume is scheduled only once its suspend applies.
+   * Once every Action of an accepted offer ended without changing anything (the buyer pressed Cancel
+   * on PayPal's approval page, or it failed), accepting again is a retry: same checks, new Action,
+   * up to 3 attempts in all.
    */
   accept(
     principal: SubscriberPrincipal,

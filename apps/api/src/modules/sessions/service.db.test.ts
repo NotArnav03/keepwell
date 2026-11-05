@@ -375,6 +375,37 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
     ]);
   });
 
+  it("retries an accepted offer whose attempt changed nothing, with a new Action and resume", async () => {
+    const { api } = build();
+    const { sessionId, offerId, hash } = await withPauseOffer(api);
+    const first = await api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta);
+    // Still in flight: a second click is the same click.
+    expect(await api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta)).toEqual(first);
+
+    await payPalMoves(api, first.actionIds[0] ?? "", "PENDING", "FAILED");
+    const second = await api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta);
+    expect(second.actionIds[0]).not.toBe(first.actionIds[0]);
+    const keys = await testDb.ownerPool.query<{ idempotency_key: string }>(
+      "SELECT idempotency_key FROM actions WHERE id = $1",
+      [second.actionIds[0]],
+    );
+    expect(keys.rows[0]?.idempotency_key).toBe(`${sessionId}:${offerId}:2`);
+    const resumes = await testDb.ownerPool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM scheduled_resumes WHERE after_action_id = $1",
+      [second.actionIds[0]],
+    );
+    expect(resumes.rows[0]?.n).toBe(1);
+
+    await payPalMoves(api, second.actionIds[0] ?? "", "PENDING", "FAILED");
+    const third = await api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta);
+    await payPalMoves(api, third.actionIds[0] ?? "", "PENDING", "FAILED");
+    await expect(api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta)).rejects.toMatchObject(
+      {
+        code: "offer_unavailable",
+      },
+    );
+  });
+
   it("lets a cancel pre-empt an offer still being applied", async () => {
     const { api } = build();
     const { sessionId, offerId, hash } = await withPauseOffer(api);

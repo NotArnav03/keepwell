@@ -4,7 +4,15 @@ import { acceptNote, offerHeadline, planLine } from "./format.js";
 import { finalTranscript, speechSupport, type Recognition, type RecognitionCtor } from "./speech.js";
 import { en } from "./strings.js";
 import { ApiError, ApiUnreachable, type Transport } from "./transport.js";
-import { cancelFailed, cancelling, initialState, offerAction, reduce } from "./state.js";
+import {
+  cancelFailed,
+  cancelling,
+  initialState,
+  MAX_OFFER_ATTEMPTS,
+  offerAction,
+  offerAttempts,
+  reduce,
+} from "./state.js";
 
 export interface WidgetProps {
   transport: Transport;
@@ -210,6 +218,13 @@ export function Widget(props: WidgetProps) {
     transport.accept(sessionId, state.offer.offer.id, state.offer.shownTextHash).catch(report);
   };
 
+  // After an attempt that changed nothing in PayPal: the same offer, a new attempt (a new Action).
+  const retry = () => {
+    if (sessionId === null || !state.offer) return;
+    resume();
+    transport.accept(sessionId, state.offer.offer.id, state.offer.shownTextHash).catch(report);
+  };
+
   const decline = () => {
     if (sessionId === null || !state.offer) return;
     dispatch({ type: "answered", answer: "declined" });
@@ -264,6 +279,7 @@ export function Widget(props: WidgetProps) {
     pending !== null &&
     !["APPLIED", "CONFIRMED", "FAILED", "ABANDONED", "SUPERSEDED"].includes(pending.state);
   const offerFailed = pending !== null && ["FAILED", "ABANDONED"].includes(pending.state);
+  const canRetry = offerFailed && offerAttempts(state) < MAX_OFFER_ATTEMPTS;
   // While PayPal's approval is pending, say what is known: it came back, was closed, or is open.
   const waitingText =
     pending?.state !== "AWAITING_BUYER"
@@ -391,7 +407,13 @@ export function Widget(props: WidgetProps) {
               </p>
             )}
             {offerFailed && state.phase === "chat" && (
-              <p role="status">{pending.state === "ABANDONED" ? en.approvalAbandoned : en.offerFailed}</p>
+              <p role="status">
+                {!canRetry
+                  ? en.offerGaveUp
+                  : pending.state === "ABANDONED"
+                    ? en.approvalAbandoned
+                    : en.offerFailed}
+              </p>
             )}
 
             {state.closed && (
@@ -428,6 +450,11 @@ export function Widget(props: WidgetProps) {
               !busy &&
               (offer?.answer === "declined" || offerFailed || state.inputClosed) && (
                 <div class="kw-row">
+                  {canRetry && (
+                    <button type="button" class="kw-primary" onClick={retry}>
+                      {en.tryAgain}
+                    </button>
+                  )}
                   <button type="button" onClick={keep}>
                     {en.keep}
                   </button>

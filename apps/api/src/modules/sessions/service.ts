@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { and, asc, desc, eq, gt, like, max } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, like, max } from "drizzle-orm";
 import { z } from "zod";
 import {
   AcceptOfferRequest,
@@ -75,6 +75,12 @@ import { closingSummary } from "./summary.js";
  */
 export const STREAM_IDLE_MS = 12 * 60_000;
 
+/**
+ * An accepted offer whose Actions changed nothing in PayPal (the buyer pressed Cancel on PayPal's
+ * approval page, or it failed) can be accepted again, up to this many attempts in all.
+ */
+export const MAX_OFFER_ATTEMPTS = 3;
+
 /** ARCHITECTURE.md §6.5: after three messages the widget offers only Cancel and Keep. */
 export const MAX_SUBSCRIBER_MESSAGES = 3;
 const NOTHING_APPLIED: readonly Action["state"][] = ["FAILED", "ABANDONED", "SUPERSEDED"];
@@ -89,6 +95,8 @@ type Presented = z.infer<typeof Presented>;
 /** What `offers.decision` holds once the offer was accepted: the answer a second click gets back. */
 const Accepted = z.object({
   response: z.object({ actionIds: z.array(z.string()).min(1), approveUrl: z.string().nullable() }),
+  /** How many times the offer was sent to PayPal; a retry follows one that changed nothing. */
+  attempts: z.number().int().min(1).default(1),
 });
 
 /** A PayPal payment, as the refund lookup needs it. */
@@ -367,11 +375,28 @@ export class DbSessionsApi implements SessionsApi {
     const outcome = await this.inSession(principal, sessionId, async (tx, row, push) => {
       const answer = await this.lockedOfferRow(tx, sessionId);
       const shown = presentedOf(answer);
+      let attempt = 1;
       if (answer.status === "accepted" && shown?.offer.id === offerId) {
-        return { response: Accepted.parse(answer.decision).response };
+        // A second click gets the first click's Actions, unless they all changed nothing: then
+        // this is the subscriber trying again, which goes through every check below once more.
+        const earlier = Accepted.parse(answer.decision);
+        const previous = await tx
+          .select({ state: actions.state })
+          .from(actions)
+          .where(and(eq(actions.merchantId, merchantId), inArray(actions.id, earlier.response.actionIds)));
+        const changedNothing =
+          previous.length > 0 && previous.every((a) => NOTHING_APPLIED.includes(a.state));
+        if (!changedNothing) return { response: earlier.response };
+        attempt = earlier.attempts + 1;
+        if (attempt > MAX_OFFER_ATTEMPTS) {
+          throw new SessionError(
+            "offer_unavailable",
+            "That offer didn't go through. You can still cancel or keep your plan.",
+          );
+        }
       }
       if (row.state === "closed") throw new SessionError("session_closed", "This conversation has ended");
-      if (!shown || shown.offer.id !== offerId || answer.status !== "presented") {
+      if (!shown || shown.offer.id !== offerId || (answer.status !== "presented" && attempt === 1)) {
         throw new SessionError("offer_unavailable", "That offer isn't open in this conversation");
       }
       if (row.state === "awaiting_paypal") {
@@ -433,7 +458,7 @@ export class DbSessionsApi implements SessionsApi {
         ipPrefix: meta.ipPrefix,
         userAgent: meta.userAgent,
       });
-      const action = await this.createOfferAction(tx, row, shown.offer, refundTransaction);
+      const action = await this.createOfferAction(tx, row, shown.offer, refundTransaction, attempt);
       if (shown.offer.kind === "pause") {
         // Due only once the suspend applies, and dropped if it fails: the engine ties them together.
         await this.o.engine.scheduleResume(
@@ -447,7 +472,7 @@ export class DbSessionsApi implements SessionsApi {
         .set({
           status: "accepted",
           consent,
-          decision: { response, policy: decision },
+          decision: { response, policy: decision, attempts: attempt },
           answeredAt: this.clock(),
         })
         .where(eq(offers.id, answer.id));
@@ -466,7 +491,7 @@ export class DbSessionsApi implements SessionsApi {
           actor: "subscriber",
           kind: "offer.accepted",
           subjectIds: { ...subjects(row, sample.subscription), actionId: action.id },
-          payload: { offer: shown.offer, consent },
+          payload: { offer: shown.offer, consent, attempt },
         },
         tx,
       );
@@ -795,12 +820,14 @@ export class DbSessionsApi implements SessionsApi {
     row: SessionRow,
     offer: Offer,
     refundTransaction: string | null,
+    attempt = 1,
   ): Promise<Action> {
     const base = {
       merchantId: row.merchantId,
       subscriptionId: row.subscriptionId,
       origin: "session",
-      idempotencyKey: `${row.id}:${offer.id}`,
+      // A retry is a new Action: the first keeps the plain key, later ones say which attempt.
+      idempotencyKey: attempt === 1 ? `${row.id}:${offer.id}` : `${row.id}:${offer.id}:${attempt}`,
     } as const;
     switch (offer.kind) {
       case "pause":

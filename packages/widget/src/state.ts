@@ -165,13 +165,23 @@ function onStream(state: WidgetState, event: SessionStreamEvent): WidgetState {
   }
 }
 
-/** The Action applying the accepted offer, if any. */
+/** The Action applying the accepted offer, if any: the latest, since a retry makes a new one. */
 export function offerAction(state: WidgetState): (ActionView & { id: string }) | null {
+  let latest: (ActionView & { id: string }) | null = null;
   for (const [id, action] of Object.entries(state.actions)) {
-    if (id !== state.cancelActionId && action.type !== "cancel") return { id, ...action };
+    if (id !== state.cancelActionId && action.type !== "cancel") latest = { id, ...action };
   }
-  return null;
+  return latest;
 }
+
+/** How many times the accepted offer has been sent to PayPal (each retry is a new Action). */
+export function offerAttempts(state: WidgetState): number {
+  return Object.entries(state.actions).filter(([id, a]) => id !== state.cancelActionId && a.type !== "cancel")
+    .length;
+}
+
+/** The server allows this many attempts at one offer (SessionsApi.accept). */
+export const MAX_OFFER_ATTEMPTS = 3;
 
 /** The cancel is in PayPal's hands and hasn't finished. */
 export function cancelling(state: WidgetState): boolean {

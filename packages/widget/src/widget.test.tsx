@@ -262,6 +262,53 @@ describe("widget", () => {
     expect(button("Keep my subscription")).toBeTruthy();
   });
 
+  it("offers Try again after an abandoned approval: the same offer, a new attempt, three in all", async () => {
+    const opened: string[] = [];
+    const t = await awaitApproval((url) => {
+      opened.push(url);
+      return { closed: false };
+    });
+    await t.update("ABANDONED");
+    await flush();
+    expect(text()).toContain("You can try again, cancel, or keep your plan.");
+
+    // Each attempt is a new Action with its own approval link, opened once.
+    for (const [attempt, id] of [
+      [2, "a2"],
+      [3, "a3"],
+    ] as const) {
+      await click("Try again");
+      await flush();
+      expect(t.calls.accept).toHaveBeenCalledTimes(attempt);
+      expect(t.calls.accept.mock.calls[attempt - 1]).toEqual([session.sessionId, "offer-downgrade", HASH]);
+      const link = `${APPROVE_URL}&try=${attempt}`;
+      await t.emit({
+        type: "action.update",
+        actionId: id,
+        actionType: "revise",
+        state: "AWAITING_BUYER",
+        approveUrl: link,
+        error: null,
+      });
+      await flush();
+      expect(text()).toContain("Waiting for your approval in PayPal");
+      expect(opened.at(-1)).toBe(link);
+      await t.emit({
+        type: "action.update",
+        actionId: id,
+        actionType: "revise",
+        state: "ABANDONED",
+        approveUrl: link,
+        error: null,
+      });
+      await flush();
+    }
+    // Three attempts are all there are: then only cancel or keep.
+    expect(text()).toContain("You can cancel or keep your plan.");
+    expect(() => button("Try again")).toThrow();
+    expect(button("Cancel now")).toBeTruthy();
+  });
+
   it("L1: reason chips instead of the text box", async () => {
     const { transport, calls, emit } = fakeTransport(() =>
       Promise.resolve({ ...session, fallbackLevel: "L1" }),
