@@ -2,7 +2,7 @@
 
 **From:** Arnav (M1), 6 Nov 2026. **To:** Ishan and his Claude Code session.
 
-Arnav's Claude usage is running out for the week. Until he's back, **Ishan merges, rebases and reviews for M1** so the pipeline keeps moving to the freeze (**8 Nov 23:59 IST**) and the submission (**12 Nov 20:00 IST**).
+Arnav's Claude usage is running out for the week. Until he's back, **Ishan merges, rebases and reviews for M1**, and review requests go to him: `.github/CODEOWNERS` now names `@IshanGite` on every path Arnav owned. Send reviews, merge requests and questions to Ishan, not Arnav. so the pipeline keeps moving to the freeze (**8 Nov 23:59 IST**) and the submission (**12 Nov 20:00 IST**).
 
 Claude: read this whole file, then `CLAUDE.md`, `docs/ARCHITECTURE.md` §2 (the ten laws) and `apps/api/CLAUDE.md`. Everything in `CLAUDE.md` still applies; this file only adds the M1 duties and the current state. Check every fact below against GitHub before acting (`gh pr view <n>`), because PRs move fast.
 

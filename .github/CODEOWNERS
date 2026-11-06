@@ -1,15 +1,16 @@
 # Reviewers are requested automatically for these paths. Later lines win.
+# From 6 Nov 2026 Ishan covers M1 (Arnav's paths) while Arnav is away: see docs/HANDOFF-M1.md.
 # Arnav @NotArnav03 · Ishan @IshanGite · Aditya @inslot2525-ctrl · Ayush @Ayush32-creator · Om @OMEExZORO
 
-*                                 @NotArnav03
-/docs/                            @NotArnav03
-/.claude/                         @NotArnav03
-/.githooks/                       @NotArnav03
-/packages/db/                     @NotArnav03
-/packages/paypal-mock/            @NotArnav03
-/tools/                           @NotArnav03
+*                                 @IshanGite
+/docs/                            @IshanGite
+/.claude/                         @IshanGite
+/.githooks/                       @IshanGite
+/packages/db/                     @IshanGite
+/packages/paypal-mock/            @IshanGite
+/tools/                           @IshanGite
 
-/packages/contracts/              @NotArnav03 @IshanGite @inslot2525-ctrl @Ayush32-creator @OMEExZORO
+/packages/contracts/              @IshanGite @inslot2525-ctrl @Ayush32-creator @OMEExZORO
 
 /packages/policy/                 @IshanGite
 /packages/evals/                  @IshanGite
