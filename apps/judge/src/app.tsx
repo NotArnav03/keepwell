@@ -92,7 +92,12 @@ export function App(props: AppProps) {
 
   const fail = (err: unknown) => {
     if (err instanceof JudgeUnreachable) setFallback("unreachable");
-    else if (err instanceof JudgeApiError && err.code === "rate_limited") setError(err.message);
+    else if (err instanceof JudgeApiError && err.status === 401) {
+      // The lease ended (its 30 minutes, or it was returned): forget it, as on expiry.
+      closeWidget.current?.();
+      setLease(null);
+      setNotice("That lease has ended. Start any scenario for a fresh subscription.");
+    } else if (err instanceof JudgeApiError && err.code === "rate_limited") setError(err.message);
     else setError("Something went wrong. Try again, or use the Pantry Plan store below.");
   };
 
@@ -233,8 +238,9 @@ export function App(props: AppProps) {
             </button>
           </div>
           <p class="small">
-            Resume now runs a paused subscription's scheduled resume today instead of on its date. It is a
-            real PayPal call, labelled TIME SHIFT in the merchant's audit log.
+            Resume now runs a paused subscription's scheduled resume today instead of on its date. The
+            reactivation is a real PayPal call; the shift in time is ours, so the merchant's audit log marks
+            it TIME SHIFT and SIMULATED.
           </p>
         </section>
       )}

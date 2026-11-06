@@ -19,6 +19,6 @@ On the fake, each pooled subscription has its own scenario's script, so the offe
 | `JUDGE_API_BASE` | Empty (default): call this origin's `/v1`, rewritten to the API, like the dashboard. |
 | `JUDGE_STORE_URL` | Pantry Plan, for the fully real path and the fallback. |
 | `JUDGE_DASHBOARD_URL`, `JUDGE_EVALS_URL` | Links; left out when empty. |
-| `JUDGE_BUYER_EMAIL`, `JUDGE_BUYER_PASSWORD` | The PayPal **sandbox** buyer judges log in with (test money only). When unset, the page points to the submission's testing instructions. |
+| `JUDGE_BUYER_EMAIL`, `JUDGE_BUYER_PASSWORD` | For local development only. **Leave both unset on prod-demo and staging:** that buyer is the judge pool's own payer, and anyone reading a public page could change its password or funding and break the pool for every judge. The login goes in the Devpost testing instructions, which only judges see; when these are unset the page points there. |
 
 The API side is `apps/api/src/modules/demo/judge.ts`. It needs the prod-demo merchant id, `JUDGE_LEASE_SECRET` (its own) and `WIDGET_TOKEN_SECRET`, plus a deploy with the `/v1/*` rewrite.

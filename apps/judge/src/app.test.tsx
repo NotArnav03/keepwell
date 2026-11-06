@@ -3,7 +3,7 @@ import axe from "axe-core";
 import { render } from "preact";
 import { act } from "preact/test-utils";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { JudgeUnreachable, type Health, type JudgeApi, type Lease } from "./api.js";
+import { JudgeApiError, JudgeUnreachable, type Health, type JudgeApi, type Lease } from "./api.js";
 import { App, type JudgeConfig } from "./app.js";
 
 const lease: Lease = {
@@ -34,6 +34,7 @@ function fakeApi(options: { leaseResult?: Lease | "pool_empty" | Error; health?:
         resumed: true,
         actionId: null,
         label: "TIME SHIFT" as const,
+        simulated: true as const,
         note: "TIME SHIFT: resumed.",
       }),
     ),
@@ -153,6 +154,21 @@ describe("Judge Mode page", () => {
     expect(pageText()).toContain("Having trouble right now");
     await click("Try: Pause");
     expect(container?.querySelector("[role=alert]")?.textContent).toContain("can't reach the Keepwell API");
+  });
+
+  it("treats a 401 as an ended lease: forgets it and offers a fresh one", async () => {
+    const { api, mocks } = fakeApi();
+    mocks.resumeNow.mockRejectedValueOnce(new JudgeApiError(401, "unauthorized", "This lease has ended"));
+    const { closeWidget } = await show(api);
+    await click("Try: Pause");
+    await closeWidget();
+    await click("Resume now");
+    expect(pageText()).toContain("That lease has ended");
+    expect(container?.querySelector(".lease")).toBeNull();
+    // The next scenario leases afresh, without trying to return the ended lease.
+    await click("Try: Pause");
+    expect(mocks.lease).toHaveBeenCalledTimes(2);
+    expect(mocks.release).not.toHaveBeenCalled();
   });
 
   it("says where the test login is when it isn't on the page", async () => {
