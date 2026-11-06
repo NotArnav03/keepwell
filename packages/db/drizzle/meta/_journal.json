@@ -43,6 +43,13 @@
       "when": 1793878297506,
       "tag": "0005_notify_outbox",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1793945289644,
+      "tag": "0006_llm_usage_per_call",
+      "breakpoints": true
     }
   ]
 }
