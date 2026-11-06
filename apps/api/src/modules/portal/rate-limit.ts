@@ -22,6 +22,16 @@ export class RateLimiter {
     this.maxKeys = options.maxKeys ?? 10_000;
   }
 
+  /** Whether `key` has room left, without counting anything (for limits that count only successes). */
+  check(key: string): RateLimitResult {
+    const now = this.clock().getTime();
+    const window = this.windows.get(key);
+    if (window === undefined || window.resetsAt <= now || window.count < this.options.limit) {
+      return { allowed: true };
+    }
+    return { allowed: false, retryAfterSeconds: Math.max(1, Math.ceil((window.resetsAt - now) / 1000)) };
+  }
+
   /** Counts one attempt for `key`. Refused attempts don't extend the window. */
   hit(key: string): RateLimitResult {
     const now = this.clock().getTime();
