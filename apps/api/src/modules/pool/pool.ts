@@ -1,11 +1,12 @@
-import { and, asc, count, eq, inArray, lt } from "drizzle-orm";
-import type {
-  Action,
-  JudgePool,
-  PoolLease,
-  PoolReturn,
-  PoolState,
-  SubscriptionSnapshot,
+import { and, asc, count, eq, inArray, isNull, lt, lte, or, sql } from "drizzle-orm";
+import {
+  WIDGET_TOKEN_TTL_SECONDS,
+  type Action,
+  type JudgePool,
+  type PoolLease,
+  type PoolReturn,
+  type PoolState,
+  type SubscriptionSnapshot,
 } from "@keepwell/contracts";
 import {
   actions,
@@ -28,10 +29,17 @@ import type { SubscriptionSync } from "../reconcile/sync.js";
 // plan price back. Those fixes are Actions, so they retry, serialise and audit like any other;
 // the entry is "restoring" until PayPal shows it whole again. The pool.health job does the rest:
 // it takes back expired leases, finishes restores, and alerts below 40 available.
+//
+// A lease is the pair (entry, leasedUntil): entries are lent again and again, so the entry id alone
+// would let a returned lease's token reach the next judge. `holds` checks the pair. And a returned
+// entry rests for a widget token's lifetime before it is lent again, so a widget token minted just
+// before the return has expired by the time anyone else has that subscription.
 
 /** Below this many available, pool.health logs an error (Sentry's alert). */
 export const POOL_LOW_WATER = 40;
 const LEASE_MINUTES = 30;
+/** How long a returned entry rests: a widget token's lifetime, so none outlives its lease's judge. */
+const REST_MS = WIDGET_TOKEN_TTL_SECONDS * 1000;
 const OPEN_STATES = ["PENDING", "EXECUTING", "RETRY_WAIT", "AWAITING_BUYER", "APPLIED"] as const;
 const FAILED_STATES: readonly Action["state"][] = ["FAILED", "SUPERSEDED", "ABANDONED"];
 
@@ -70,9 +78,14 @@ export class DbJudgePool implements JudgePool {
   }
 
   async lease(merchantId: string, input: { minutes?: number } = {}): Promise<PoolLease | null> {
-    const leasedUntil = new Date(this.clock().getTime() + (input.minutes ?? LEASE_MINUTES) * 60_000);
+    const now = this.clock();
+    // Whole seconds, so a lease token's `exp` names the lease exactly (see holds).
+    const leasedUntil = wholeSeconds(new Date(now.getTime() + (input.minutes ?? LEASE_MINUTES) * 60_000));
+    const rested = new Date(now.getTime() - REST_MS);
     return this.o.db.forMerchant(merchantId, async (tx) => {
-      // SKIP LOCKED: two judges arriving together get two different subscriptions.
+      // SKIP LOCKED: two judges arriving together get two different subscriptions. On an available
+      // entry, leased_until is when its last lease ended (null if never lent): the longest unused
+      // goes first, and one that ended within REST_MS waits.
       const [entry] = await tx
         .select({
           id: poolSubscriptions.id,
@@ -86,9 +99,10 @@ export class DbJudgePool implements JudgePool {
             eq(poolSubscriptions.merchantId, merchantId),
             eq(poolSubscriptions.state, "available"),
             eq(subscriptions.status, "ACTIVE"),
+            or(isNull(poolSubscriptions.leasedUntil), lte(poolSubscriptions.leasedUntil, rested)),
           ),
         )
-        .orderBy(asc(poolSubscriptions.createdAt))
+        .orderBy(sql`${poolSubscriptions.leasedUntil} asc nulls first`, asc(poolSubscriptions.createdAt))
         .limit(1)
         .for("update", { of: poolSubscriptions, skipLocked: true });
       if (!entry) return null;
@@ -116,8 +130,22 @@ export class DbJudgePool implements JudgePool {
     });
   }
 
-  release(merchantId: string, poolEntryId: string): Promise<PoolReturn> {
-    return this.settle(merchantId, poolEntryId, "returned");
+  async holds(merchantId: string, poolEntryId: string, leasedUntil: string): Promise<boolean> {
+    const until = new Date(leasedUntil);
+    if (Number.isNaN(until.getTime()) || until.getTime() <= this.clock().getTime()) return false;
+    const [row] = await this.o.db.forMerchant(merchantId, (tx) =>
+      tx
+        .select({ id: poolSubscriptions.id })
+        .from(poolSubscriptions)
+        .where(leaseIs(merchantId, poolEntryId, until)),
+    );
+    return row !== undefined;
+  }
+
+  async release(merchantId: string, poolEntryId: string, leasedUntil?: string): Promise<PoolReturn | null> {
+    if (leasedUntil === undefined) return this.settle(merchantId, poolEntryId, "returned");
+    if (!(await this.holds(merchantId, poolEntryId, leasedUntil))) return null;
+    return this.settle(merchantId, poolEntryId, "returned", new Date(leasedUntil));
   }
 
   async counts(merchantId: string): Promise<Record<PoolState, number>> {
@@ -195,7 +223,7 @@ export class DbJudgePool implements JudgePool {
         if (!row) continue;
       }
       try {
-        await this.settle(merchantId, entry.id, expired ? "expired" : "restoring");
+        await this.settle(merchantId, entry.id, expired ? "expired" : "restoring", null);
       } catch (err) {
         // PayPal down or a sync error: the entry stays as it is and the next run tries again.
         this.o.log.warn({ err, merchantId, poolEntryId: entry.id }, "pool entry not settled");
@@ -221,7 +249,23 @@ export class DbJudgePool implements JudgePool {
 
   // ---------- internals ----------
 
-  private async settle(merchantId: string, poolEntryId: string, why: Why): Promise<PoolReturn> {
+  /**
+   * Judges an entry back from PayPal's state. With `lease`, only while that lease is still live: a
+   * second return of the same lease (a double click) or a race with the sweep gets null.
+   */
+  private async settle(merchantId: string, poolEntryId: string, why: Why): Promise<PoolReturn>;
+  private async settle(
+    merchantId: string,
+    poolEntryId: string,
+    why: Why,
+    lease: Date | null,
+  ): Promise<PoolReturn | null>;
+  private async settle(
+    merchantId: string,
+    poolEntryId: string,
+    why: Why,
+    lease: Date | null = null,
+  ): Promise<PoolReturn | null> {
     const [entry] = await this.o.db.forMerchant(merchantId, (tx) =>
       tx
         .select({
@@ -242,6 +286,14 @@ export class DbJudgePool implements JudgePool {
     const planId = await this.poolPlanId(merchantId);
 
     return this.o.db.forMerchant(merchantId, async (tx) => {
+      if (lease !== null) {
+        const [still] = await tx
+          .select({ id: poolSubscriptions.id })
+          .from(poolSubscriptions)
+          .where(leaseIs(merchantId, poolEntryId, lease))
+          .for("update");
+        if (!still) return null;
+      }
       const [open] = await tx
         .select({ id: actions.id })
         .from(actions)
@@ -290,7 +342,8 @@ export class DbJudgePool implements JudgePool {
       }
       await tx
         .update(poolSubscriptions)
-        .set({ state: result, ...(result === "available" && { leasedUntil: null }) })
+        // Available again: leased_until becomes when it came back, which lease() rests it from.
+        .set({ state: result, ...(result === "available" && { leasedUntil: this.clock() }) })
         .where(eq(poolSubscriptions.id, poolEntryId));
       if (result !== entry.state) {
         await this.o.audit.append(
@@ -320,6 +373,19 @@ export class DbJudgePool implements JudgePool {
     if (!plan) throw new Error(`Merchant ${merchantId} has no ACTIVE "${this.planName}" plan: run pnpm seed`);
     return plan.id;
   }
+}
+
+function leaseIs(merchantId: string, poolEntryId: string, leasedUntil: Date) {
+  return and(
+    eq(poolSubscriptions.id, poolEntryId),
+    eq(poolSubscriptions.merchantId, merchantId),
+    eq(poolSubscriptions.state, "leased"),
+    eq(poolSubscriptions.leasedUntil, leasedUntil),
+  );
+}
+
+function wholeSeconds(at: Date): Date {
+  return new Date(Math.floor(at.getTime() / 1000) * 1000);
 }
 
 function isGone(snapshot: SubscriptionSnapshot, poolPlanId: string): boolean {
