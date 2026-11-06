@@ -1,5 +1,5 @@
 import { eq } from "drizzle-orm";
-import type { ActionEngine, Audit, NotificationRequest, Notifier } from "@keepwell/contracts";
+import type { ActionEngine, Audit, Notifier } from "@keepwell/contracts";
 import { subscriptions, type Db, type Tx } from "@keepwell/db";
 import type { DbDomainEvents } from "../jobs/domain-events.js";
 import type { Jobs } from "../jobs/jobs.js";

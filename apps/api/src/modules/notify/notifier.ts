@@ -77,7 +77,11 @@ export function createNotifier({ db, audit, log, now = () => new Date() }: Notif
           eq(notifications.status, "queued"),
         ),
       )
-      .returning({ id: notifications.id, subscriptionId: notifications.subscriptionId, simulated: notifications.simulated });
+      .returning({
+        id: notifications.id,
+        subscriptionId: notifications.subscriptionId,
+        simulated: notifications.simulated,
+      });
     if (!row) return false;
     await audit.append(
       {
