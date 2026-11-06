@@ -293,7 +293,9 @@ export class DbSessionsApi implements SessionsApi {
     const session = await this.owned(principal, sessionId);
     const closed = session.state === "closed";
     const idle =
-      !closed && session.state !== "awaiting_paypal" && (await this.quietFor(principal, sessionId));
+      !closed &&
+      session.state !== "awaiting_paypal" &&
+      (await this.quietFor(principal, sessionId, session.startedAt));
     if (!closed && !idle) timer = setInterval(safePump, this.o.pollMs ?? 1000);
     return {
       closed,
@@ -306,16 +308,23 @@ export class DbSessionsApi implements SessionsApi {
     };
   }
 
-  /** Nothing written to the session's stream for STREAM_IDLE_MS. */
-  private async quietFor(principal: SubscriberPrincipal, sessionId: string): Promise<boolean> {
+  /**
+   * Nothing written to the session's stream for STREAM_IDLE_MS. A session with no events yet (L0
+   * starts with none) counts from when it started, as abandonIdle does.
+   */
+  private async quietFor(
+    principal: SubscriberPrincipal,
+    sessionId: string,
+    startedAt: Date,
+  ): Promise<boolean> {
     const [row] = await this.o.db.forMerchant(principal.merchantId, (tx) =>
       tx
         .select({ at: max(sessionEvents.createdAt) })
         .from(sessionEvents)
         .where(eq(sessionEvents.sessionId, sessionId)),
     );
-    const at = row?.at ?? null;
-    return at !== null && this.clock().getTime() - new Date(at).getTime() > (this.o.idleMs ?? STREAM_IDLE_MS);
+    const at = row?.at ? new Date(row.at) : startedAt;
+    return this.clock().getTime() - at.getTime() > (this.o.idleMs ?? STREAM_IDLE_MS);
   }
 
   async message(principal: SubscriberPrincipal, sessionId: string, body: PostMessageRequest): Promise<void> {
@@ -334,9 +343,10 @@ export class DbSessionsApi implements SessionsApi {
       });
       return turns;
     });
-    // The agent gets the message as typed; only the stored copy is redacted.
+    // The model never sees emails, phone or card numbers (ARCHITECTURE.md §10): it gets the same
+    // redacted text the transcript stores, and earlier turns are read back redacted too.
     await this.runAgent(principal, sessionId, transcript, (context, stream) =>
-      this.o.agent.respond(context, text, stream),
+      this.o.agent.respond(context, redact(text), stream),
     );
   }
 
@@ -628,20 +638,55 @@ export class DbSessionsApi implements SessionsApi {
 
     await this.inSession(principal, sessionId, async (tx, row, push) => {
       await push({ type: "action.update", actionId, actionType: type, state: to, approveUrl, error });
-      const cancels = await this.cancelActions(tx, merchantId, sessionId);
-      if (isCancel ? cancels[0]?.id !== actionId : cancels.length > 0) return;
+      const latestCancel = (await this.cancelActions(tx, merchantId, sessionId))[0];
+      const answer = await this.lockedOfferRow(tx, sessionId);
+      const accepted = answer.status === "accepted" ? Accepted.parse(answer.decision) : null;
+      const offer = accepted ? (presentedOf(answer)?.offer ?? null) : null;
+      const reopen = () => tx.update(sessions).set({ state: "open" }).where(eq(sessions.id, sessionId));
 
+      if (isCancel) {
+        // Only the latest cancel attempt counts.
+        if (latestCancel?.id !== actionId) return;
+        if (APPLIED.includes(to)) {
+          if (row.state !== "closed") await this.close(tx, row, push, "cancelled", null);
+          return;
+        }
+        if (!NOTHING_APPLIED.includes(to) || row.state !== "awaiting_paypal") return;
+        // The cancel changed nothing. An offer it pre-empted may have gone through meanwhile: then
+        // that is the outcome. One still being applied keeps the session waiting on PayPal.
+        const offerStates = accepted
+          ? await this.actionStates(tx, merchantId, accepted.response.actionIds)
+          : [];
+        if (offer && offerStates.some((s) => APPLIED.includes(s))) {
+          return this.close(tx, row, push, SAVED_OUTCOME[offer.kind], offer);
+        }
+        if (offerStates.some((s) => !APPLIED.includes(s) && !NOTHING_APPLIED.includes(s))) return;
+        await reopen();
+        return;
+      }
+
+      // Only the latest attempt at the accepted offer counts: a late duplicate of one a retry
+      // replaced must not reopen the session while the retry is in flight.
+      if (!accepted?.response.actionIds.includes(actionId)) return;
+      // A cancel that is still live (or applied) pre-empts the offer; one that changed nothing doesn't.
+      if (latestCancel && !NOTHING_APPLIED.includes(latestCancel.state)) return;
       if (APPLIED.includes(to)) {
-        if (row.state === "closed") return;
-        const answer = await this.lockedOfferRow(tx, sessionId);
-        const offer = answer.status === "accepted" ? (presentedOf(answer)?.offer ?? null) : null;
-        if (isCancel) return this.close(tx, row, push, "cancelled", null);
-        if (offer) return this.close(tx, row, push, SAVED_OUTCOME[offer.kind], offer);
+        if (row.state !== "closed" && offer)
+          await this.close(tx, row, push, SAVED_OUTCOME[offer.kind], offer);
       } else if (NOTHING_APPLIED.includes(to) && row.state === "awaiting_paypal") {
-        // Nothing changed in PayPal, so the subscriber can still cancel or keep from here.
-        await tx.update(sessions).set({ state: "open" }).where(eq(sessions.id, sessionId));
+        // Nothing changed in PayPal, so the subscriber can still retry, cancel or keep from here.
+        await reopen();
       }
     });
+  }
+
+  private async actionStates(tx: Tx, merchantId: string, ids: string[]): Promise<Action["state"][]> {
+    if (ids.length === 0) return [];
+    const rows = await tx
+      .select({ state: actions.state })
+      .from(actions)
+      .where(and(eq(actions.merchantId, merchantId), inArray(actions.id, ids)));
+    return rows.map((r) => r.state);
   }
 
   /**
@@ -756,6 +801,12 @@ export class DbSessionsApi implements SessionsApi {
       chain = chain
         .then(() =>
           this.inSession(principal, sessionId, async (tx, row, push) => {
+            // The subscriber cancelled (or the session ended) while the agent was still talking:
+            // the rest of the reply, and any offer in it, no longer belongs on the stream. agent.done
+            // still goes through, so the widget closes the reply it already started showing.
+            if ((row.state === "awaiting_paypal" || row.state === "closed") && event.type !== "agent.done") {
+              return;
+            }
             if (event.type === "offer.presented") {
               // One offer per session, whatever the agent does: a second one is never shown.
               const answer = await this.lockedOfferRow(tx, sessionId);
@@ -923,8 +974,13 @@ export class DbSessionsApi implements SessionsApi {
         );
       return completed[0]?.id ?? null;
     } catch (err) {
+      // Not a refusal: the offer stays open and the subscriber can accept again. Only a lookup that
+      // worked and found no payment is recorded as refused_at_accept.
       this.o.log?.warn({ err, merchantId }, "refund payment lookup failed");
-      return null;
+      throw new SessionError(
+        "internal",
+        "PayPal couldn't be reached to find the payment. Nothing was changed; please try again in a moment.",
+      );
     }
   }
 
