@@ -18,7 +18,7 @@ import { recordingFetch, type Exchange } from "../modules/paypal/recorder.js";
 // where the product goes through the action engine. Sandbox only (the gateway refuses live hosts).
 // --mock runs the same steps against paypal-mock, to try the script without credentials.
 
-const STEPS = ["setup", "status", "quick", "pause", "resume", "list"] as const;
+const STEPS = ["setup", "status", "quick", "pause", "resume", "list", "cancel"] as const;
 type Step = (typeof STEPS)[number];
 
 const MERCHANT = "sandbox-spike";
@@ -277,6 +277,18 @@ const steps: Record<Step, () => Promise<void>> = {
     await transactions();
     out(
       "\nRun `pnpm spike status` again in an hour or so: PayPal may charge a missed cycle later, not at once.",
+    );
+  },
+
+  /** Ends the spike: cancels its subscription so the daily $1.00 sandbox charge stops. Irreversible. */
+  async cancel() {
+    const rows = [await read("before")];
+    await paypal.cancel(MERCHANT, subscriptionId(), "Keepwell spike Q2: done");
+    rows.push(await read("cancelled"));
+    table(rows);
+    await transactions();
+    out(
+      "\nThe spike subscription is cancelled. `pnpm spike setup` starts a new one if a later spike needs it.",
     );
   },
 
