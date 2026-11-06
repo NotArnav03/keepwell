@@ -3,7 +3,8 @@
   "tasks": {
     "build": {
       "dependsOn": ["^build"],
-      "outputs": ["dist/**"]
+      "outputs": ["dist/**"],
+      "env": ["API_PUBLIC_URL", "PORTAL_*", "JUDGE_*", "WIDGET_CDN_URL", "PAYPAL_CLIENT_ID", "PAYPAL_PLAN_*"]
     },
     "typecheck": {
       "dependsOn": ["^build"]
