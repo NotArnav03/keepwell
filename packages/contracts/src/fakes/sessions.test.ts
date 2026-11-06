@@ -185,6 +185,29 @@ describe("FakeSessionsApi: Maya pauses", () => {
     expect(second).toEqual(first);
     expect(api.actions.actions).toHaveLength(1);
   });
+
+  it("lets the subscriber try again after an attempt that changed nothing, three times in all", async () => {
+    const api = make();
+    const { sessionId, streamed } = await open(api);
+    await api.message(principal, sessionId, { text: "Away for a while" });
+    const { offer, shownTextHash } = presentedOffer(streamed);
+    const tries: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const { actionIds } = await api.accept(principal, sessionId, offer.id, { shownTextHash }, meta);
+      const id = actionIds[0] ?? "";
+      tries.push(id);
+      await api.actions.transition(id, "EXECUTING");
+      await api.actions.transition(id, "FAILED", { error: { code: "UNPROCESSABLE", message: "No" } });
+      expect(api.get(sessionId)).toMatchObject({ state: "open" });
+    }
+    expect(new Set(tries).size).toBe(3);
+    await rejectsWith(
+      api.accept(principal, sessionId, offer.id, { shownTextHash }, meta),
+      "offer_unavailable",
+    );
+    // Cancel is still there after every attempt.
+    await api.cancel(principal, sessionId, {});
+  });
 });
 
 describe("FakeSessionsApi: consent and the one-offer rule", () => {

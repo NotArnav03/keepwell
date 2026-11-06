@@ -33,6 +33,11 @@ export interface SessionRoutesOptions {
   allowOrigin: (origin: string) => boolean;
   /** How often an idle stream gets an SSE comment, so proxies don't cut it. */
   heartbeatMs?: number;
+  /**
+   * A stream with no event for this long is ended (default 12 minutes): a forgotten tab shouldn't
+   * keep the database awake. The browser reconnects; an idle session then gets 204.
+   */
+  idleMs?: number;
 }
 
 const SessionParams = z.object({ id: Id });
@@ -86,16 +91,24 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
     let closing = false;
     let finished = false;
     let heartbeat: NodeJS.Timeout | undefined;
+    let idleTimer: NodeJS.Timeout | undefined;
     let unsubscribe = () => {};
     const finish = () => {
       if (finished) return;
       finished = true;
       clearInterval(heartbeat);
+      clearTimeout(idleTimer);
       unsubscribe();
       out?.end();
     };
+    const idleMs = options.idleMs ?? 12 * 60_000;
+    const stillAlive = () => {
+      clearTimeout(idleTimer);
+      if (out) idleTimer = setTimeout(finish, idleMs);
+    };
     const deliver = (seq: number, event: SessionStreamEvent) => {
       if (finished) return;
+      stillAlive();
       const frame = `id: ${seq}\ndata: ${JSON.stringify(event)}\n\n`;
       if (out) out.write(frame);
       else backlog.push(frame);
@@ -107,8 +120,8 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
 
     const subscription = await sessions.subscribe(principal, id, afterSeq, deliver);
     unsubscribe = subscription.unsubscribe;
-    if (subscription.closed && backlog.length === 0) {
-      // Over and nothing new: 204 tells EventSource to stop reconnecting.
+    if ((subscription.closed || subscription.idle === true) && backlog.length === 0) {
+      // Over, or quiet for a while, and nothing new: 204 tells EventSource to stop reconnecting.
       unsubscribe();
       return reply.code(204).send();
     }
@@ -121,6 +134,7 @@ export const sessionRoutes: FastifyPluginCallback<SessionRoutesOptions> = (app, 
     } else {
       const stream = out;
       heartbeat = setInterval(() => stream.write(": keep-alive\n\n"), options.heartbeatMs ?? 15_000);
+      stillAlive();
       // Fastify destroys the payload when the client goes away, which closes it.
       stream.on("close", finish);
     }

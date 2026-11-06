@@ -239,14 +239,16 @@ export interface SessionsApi {
   create(principal: SubscriberPrincipal, body: CreateSessionRequest): Promise<CreateSessionResponse>;
   /**
    * Replays the events after `afterSeq` (0 for all), then delivers new ones until unsubscribed.
-   * `closed` says the session had already ended when the replay finished.
+   * `closed` says the session had already ended when the replay finished. `idle` says nothing has
+   * happened for a while and nothing is waiting on PayPal, so the route can tell the browser to
+   * stop reconnecting (the widget reopens the stream when the subscriber acts).
    */
   subscribe(
     principal: SubscriberPrincipal,
     sessionId: string,
     afterSeq: number,
     listener: SessionStreamListener,
-  ): Promise<{ unsubscribe: () => void; closed: boolean }>;
+  ): Promise<{ unsubscribe: () => void; closed: boolean; idle?: boolean }>;
   /** Resolves once the message is accepted; the reply arrives on the stream. */
   message(principal: SubscriberPrincipal, sessionId: string, body: PostMessageRequest): Promise<void>;
   reason(principal: SubscriberPrincipal, sessionId: string, body: PostReasonRequest): Promise<void>;
@@ -255,6 +257,9 @@ export interface SessionsApi {
    * Action is created, re-run `evaluate(policy, freshContext, offerId, storedMenu)` with
    * `offersPresentedThisSession: 0` (the offer being accepted is the one that was presented);
    * a refusal is `offer_unavailable`. A pause's resume is scheduled only once its suspend applies.
+   * Once every Action of an accepted offer ended without changing anything (the buyer pressed Cancel
+   * on PayPal's approval page, or it failed), accepting again is a retry: same checks, new Action,
+   * up to 3 attempts in all.
    */
   accept(
     principal: SubscriberPrincipal,
@@ -292,4 +297,19 @@ export const surfacesEventPayloads = {
     outcome: SessionOutcome,
     reason: ReasonCategory,
   }),
+} as const;
+
+/**
+ * M3 job queues (CONTRACTS.md §3), same shape as platformJobs. `sessions.abandon_sweep` closes
+ * sessions nobody has touched for a while as `abandoned`, so the dashboard's funnel doesn't count
+ * them as open forever. Its key is a 5-minute bucket, so a duplicate enqueue is a no-op.
+ */
+export const surfacesJobs = {
+  "sessions.abandon_sweep": {
+    payload: z.strictObject({}),
+    idempotencyKey: (_payload: Record<string, never>, now: Date): string => {
+      const width = 5 * 60_000;
+      return new Date(Math.floor(now.getTime() / width) * width).toISOString().slice(0, 16);
+    },
+  },
 } as const;

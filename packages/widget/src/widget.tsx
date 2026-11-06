@@ -4,7 +4,15 @@ import { acceptNote, offerHeadline, planLine } from "./format.js";
 import { finalTranscript, speechSupport, type Recognition, type RecognitionCtor } from "./speech.js";
 import { en } from "./strings.js";
 import { ApiError, ApiUnreachable, type Transport } from "./transport.js";
-import { cancelFailed, cancelling, initialState, offerAction, reduce } from "./state.js";
+import {
+  cancelFailed,
+  cancelling,
+  initialState,
+  MAX_OFFER_ATTEMPTS,
+  offerAction,
+  offerAttempts,
+  reduce,
+} from "./state.js";
 
 export interface WidgetProps {
   transport: Transport;
@@ -177,49 +185,68 @@ export function Widget(props: WidgetProps) {
     }
   };
 
+  // The server ends a quiet stream, and a reconnect to an idle session gets 204 (so a forgotten tab
+  // stops reaching the database). Each action reopens it from the last event seen, so the reply and
+  // PayPal's updates arrive; the reducer skips anything already shown.
+  const resume = () => {
+    if (session === null) return;
+    closeStream.current?.();
+    closeStream.current = transport.stream(session.streamUrl, lastSeq.current, onEvent);
+  };
+
   const send = (event: Event) => {
     event.preventDefault();
     const text = draft.trim();
     if (sessionId === null || text === "") return;
     setDraft("");
     dispatch({ type: "sent", text });
+    resume();
     transport.message(sessionId, text).catch(report);
   };
 
   const pickReason = (reason: ReasonCategory) => {
     if (sessionId === null) return;
     dispatch({ type: "sent", text: en.reasons[reason] });
+    resume();
     transport.reason(sessionId, reason).catch(report);
   };
 
   const accept = () => {
     if (sessionId === null || !state.offer) return;
     dispatch({ type: "answered", answer: "accepted" });
+    resume();
+    transport.accept(sessionId, state.offer.offer.id, state.offer.shownTextHash).catch(report);
+  };
+
+  // After an attempt that changed nothing in PayPal: the same offer, a new attempt (a new Action).
+  const retry = () => {
+    if (sessionId === null || !state.offer) return;
+    resume();
     transport.accept(sessionId, state.offer.offer.id, state.offer.shownTextHash).catch(report);
   };
 
   const decline = () => {
     if (sessionId === null || !state.offer) return;
     dispatch({ type: "answered", answer: "declined" });
+    resume();
     transport.decline(sessionId, state.offer.offer.id).catch(report);
   };
 
   const keep = () => {
-    if (sessionId !== null) transport.keep(sessionId).catch(report);
+    if (sessionId === null) return;
+    resume();
+    transport.keep(sessionId).catch(report);
   };
 
-  // One click, no confirmation and no AI. After a save the stream had ended, so it is reopened
-  // from the last event seen to follow the cancel.
+  // One click, no confirmation and no AI. The stream may have ended (after a save, or idle), so it
+  // is reopened from the last event seen to follow the cancel.
   const cancel = () => {
     if (session === null) return;
     setCancelError(false);
     transport.cancel(session.sessionId).then(
       ({ actionId }) => {
         dispatch({ type: "cancel_requested", actionId });
-        if (state.phase === "closed") {
-          closeStream.current?.();
-          closeStream.current = transport.stream(session.streamUrl, lastSeq.current, onEvent);
-        }
+        resume();
       },
       () => setCancelError(true),
     );
@@ -252,6 +279,7 @@ export function Widget(props: WidgetProps) {
     pending !== null &&
     !["APPLIED", "CONFIRMED", "FAILED", "ABANDONED", "SUPERSEDED"].includes(pending.state);
   const offerFailed = pending !== null && ["FAILED", "ABANDONED"].includes(pending.state);
+  const canRetry = offerFailed && offerAttempts(state) < MAX_OFFER_ATTEMPTS;
   // While PayPal's approval is pending, say what is known: it came back, was closed, or is open.
   const waitingText =
     pending?.state !== "AWAITING_BUYER"
@@ -379,7 +407,13 @@ export function Widget(props: WidgetProps) {
               </p>
             )}
             {offerFailed && state.phase === "chat" && (
-              <p role="status">{pending.state === "ABANDONED" ? en.approvalAbandoned : en.offerFailed}</p>
+              <p role="status">
+                {!canRetry
+                  ? en.offerGaveUp
+                  : pending.state === "ABANDONED"
+                    ? en.approvalAbandoned
+                    : en.offerFailed}
+              </p>
             )}
 
             {state.closed && (
@@ -416,6 +450,11 @@ export function Widget(props: WidgetProps) {
               !busy &&
               (offer?.answer === "declined" || offerFailed || state.inputClosed) && (
                 <div class="kw-row">
+                  {canRetry && (
+                    <button type="button" class="kw-primary" onClick={retry}>
+                      {en.tryAgain}
+                    </button>
+                  )}
                   <button type="button" onClick={keep}>
                     {en.keep}
                   </button>
