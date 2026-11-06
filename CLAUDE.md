@@ -70,7 +70,7 @@ These come from the ten design laws (ARCHITECTURE.md §2). Breaking one fails re
 
 - **PayPal calls go only through the gateway** (`apps/api/src/modules/paypal`). **Every PayPal mutation is an Action** through the ActionEngine, never a direct call.
 - **The cancel path never touches the LLM**: no model call, no agent step, nothing that can fail because of AI.
-- **LLM calls go only through the agent module's client** (budget guard, logging, fallbacks). Don't import `@anthropic-ai/sdk` anywhere else. Models: `claude-sonnet-5-5` (conversation, copilot) and `claude-haiku-5-5` (classify, tag, check).
+- **LLM calls go only through the agent module's client** (budget guard, logging, fallbacks). Don't import `@anthropic-ai/sdk` anywhere else. Models: `claude-haiku-5-5` (agent conversation, classify, tag, check) and `claude-sonnet-5-5` (copilot).
 - **Offer terms render from `Offer` objects.** Model text never contains prices, dates or durations that the claims checker hasn't verified.
 - **The AI picks from the policy's menu, and the policy re-checks the pick.** Subscriber consent is a button click, never parsed from text.
 - **Neon is Postgres only.** The repo keeps just the `neon-postgres` and `neon-postgres-branches` skills, on purpose. Their text says to install the parent `neon` skill first: don't. Also don't add Neon Auth, Functions, AI Gateway, Realtime or Object Storage; the architecture already covers each. The API connects with `pg` over the **direct** URL (`DATABASE_URL_UNPOOLED`).

@@ -354,10 +354,10 @@ export const SessionStreamEvent = z.discriminatedUnion("type", [
 
 | Method + path | Auth | Purpose |
 |---|---|---|
-| `POST /demo/leases` | – (10 an hour per IP) | Lease a pooled subscription for 30 minutes → `201 { leaseId, leaseToken, expiresAt, subscriptionId }`. `leaseToken` is the DEMO bearer (`JudgeLeaseClaims`, its own secret). Empty pool → `503 pool_empty`: show the fallback |
+| `POST /demo/leases` | – (10 issued leases an hour per IP; a `pool_empty` answer doesn't count) | Lease a pooled subscription for 30 minutes → `201 { leaseId, leaseToken, expiresAt, subscriptionId }`. `leaseToken` is the DEMO bearer (`JudgeLeaseClaims`, its own secret). Every DEMO route checks `JudgePool.holds` too, so a returned lease's token is `401` at once, even when the next judge holds the same entry. Empty pool → `503 pool_empty`: show the fallback |
 | `POST /demo/leases/:id/token` | DEMO | `{ token, expiresAt }`: a 10-minute widget token for the leased subscription, for the widget's token callback |
-| `DELETE /demo/leases/:id` | DEMO | Return to pool → `{ result: "available" \| "restoring" \| "consumed" }`, decided from PayPal's state |
-| `POST /demo/time-machine/resume/:subscriptionId` | DEMO (that lease's subscription only) | Run the pause's scheduled resume now (a real `activate`) → `{ resumed, actionId, label: "TIME SHIFT", note }`; audited as `demo.time_shift` |
+| `DELETE /demo/leases/:id` | DEMO | Return to pool → `{ result: "available" \| "restoring" \| "consumed" }`, decided from PayPal's state. Settles only this exact lease (`release(…, leasedUntil)`) |
+| `POST /demo/time-machine/resume/:subscriptionId` | DEMO (that lease's subscription only) | Run the pause's scheduled resume now (a real `activate`) → `{ resumed, actionId, label: "TIME SHIFT", simulated: true, note }`; audited as `demo.time_shift` with `simulated: true`. A second press reports the resume that already ran |
 | `POST /demo/time-machine/dunning/:subscriptionId` | DEMO | Send scheduled dunning now |
 | `POST /demo/simulate/payment-failed/:subscriptionId` | DEMO | Inject a **SIMULATED** failure (only if spike Q5 fails) |
 | `POST /demo-store/subscriptions` | – | Pantry Plan's "backend": `{ paypalSubscriptionId }` → GETs it from PayPal; only ACTIVE/APPROVED on a Pantry Plan plan → `{ status, planName, shopperToken }` |
@@ -405,11 +405,14 @@ interface DomainEvents {
 
 // M1 → M3 (Judge Mode, §6.17). As implemented in packages/contracts/src/platform/interfaces.ts; FakeJudgePool in fakes.
 interface JudgePool {
-  lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;  // 30 min default; null = pool empty, show the fallback
-  release(merchantId: string, poolEntryId: string): Promise<PoolReturn>;              // "available" | "restoring" | "consumed", decided from PayPal's state
+  lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;  // 30 min default; longest-unused first; null = none available, show the fallback
+  holds(merchantId: string, poolEntryId: string, leasedUntil: string): Promise<boolean>; // this exact lease is still live: check on every lease-token request
+  release(merchantId: string, poolEntryId: string, leasedUntil?: string): Promise<PoolReturn | null>; // "available" | "restoring" | "consumed", from PayPal's state; null = that lease isn't live
   counts(merchantId: string): Promise<Record<PoolState, number>>;                     // available, leased, restoring, consumed
 }
-// PoolLease = { poolEntryId, subscriptionId, paypalSubscriptionId, leasedUntil }. Leases end on their own at
+// PoolLease = { poolEntryId, subscriptionId, paypalSubscriptionId, leasedUntil }. Entries are lent again and again,
+// so a lease is the pair (poolEntryId, leasedUntil), whole seconds; a returned entry rests one widget-token lifetime
+// (10 min) before it is lent again. Leases end on their own at
 // leasedUntil (pool.health, every 5 min). On return: cancelled or another plan → consumed; paused → activate;
 // discounted → plan price back (both as Actions, "restoring" until PayPal shows it whole); the judge's pending resumes are cancelled.
 

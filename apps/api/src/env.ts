@@ -39,6 +39,13 @@ const EnvSchema = z
     TRUST_PROXY_HOPS: z.preprocess(blank, z.coerce.number().int().min(0).max(5).default(0)),
     // Bearer token for GET /ops. Unset: /ops answers 404.
     OPS_TOKEN: z.preprocess(blank, z.string().min(16).optional()),
+    // Email (notify module). No RESEND_API_KEY: messages are logged, and still show in the Demo Inbox.
+    RESEND_API_KEY: optionalString,
+    RESEND_API_BASE: z.preprocess(blank, z.url().default("https://api.resend.com")),
+    EMAIL_FROM: optionalString,
+    // Signs unsubscribe links. Unset: a key that lives until restart (the platform logs a warning),
+    // so set it anywhere links must keep working.
+    UNSUBSCRIBE_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
     SENTRY_DSN: optionalUrl,
   })

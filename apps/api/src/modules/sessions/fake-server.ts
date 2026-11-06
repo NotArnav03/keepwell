@@ -173,6 +173,7 @@ const portalDirectory = new MemoryPortalDirectory()
   });
 const portalStores = { links: new MemoryMagicLinkStore(), delegations: new MemoryDelegationStore() };
 const portalAudit = new FakeAudit();
+const portalUrl = process.env.PORTAL_URL || "http://localhost:5178/";
 await app.register(portalRoutes, {
   prefix: "/v1",
   directory: portalDirectory,
@@ -180,7 +181,8 @@ await app.register(portalRoutes, {
     directory: portalDirectory,
     store: portalStores.links,
     mailer: new RecordingMailer((link) => app.log.info(`magic link for ${link.to}: ${link.url}`)),
-    verifyUrl: (token) => `${publicUrl}/v1/portal/verify?token=${token}`,
+    // On the portal's origin (its /v1 is proxied to us), so the cookie is set there: first-party.
+    verifyUrl: (token) => `${new URL(portalUrl).origin}/v1/portal/verify?token=${token}`,
     audit: portalAudit,
   }),
   delegations: new DelegationService({
@@ -189,7 +191,7 @@ await app.register(portalRoutes, {
     audit: portalAudit,
   }),
   signingSecret,
-  portalUrl: process.env.PORTAL_URL || "http://localhost:5178/",
+  portalUrl,
   // Any origin, with credentials: what allowCors warns against. Acceptable only because this server
   // refuses to start outside APP_ENV=local (see the top of this file). Real wiring lists the portal.
   allowOrigin: () => true,

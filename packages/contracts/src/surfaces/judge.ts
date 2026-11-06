@@ -49,6 +49,8 @@ export const JudgeResumeResponse = z.object({
   resumed: z.boolean(),
   actionId: Id.nullable(),
   label: z.literal("TIME SHIFT"),
+  /** Time shifts are simulated (ARCHITECTURE.md law 9): the dashboard shows SIMULATED next to TIME SHIFT. The activate itself is real. */
+  simulated: z.literal(true),
   note: z.string(),
 });
 export type JudgeResumeResponse = z.infer<typeof JudgeResumeResponse>;
