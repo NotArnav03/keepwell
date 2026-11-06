@@ -85,8 +85,43 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbTimeMachine", { timeout: 60_
     expect(resume.rows[0]?.status).toBe("done");
     expect(audit.entries.find((e) => e.kind === "demo.time_shift")).toMatchObject({
       actor: "demo",
-      payload: { label: "TIME SHIFT" },
+      simulated: true,
+      payload: { label: "TIME SHIFT", simulated: true },
     });
+
+    // A second press reports the resume that already ran, and shifts nothing more.
+    const again = await machine.resumeNow(M, subscriptionId);
+    expect(again).toEqual({ actionId, note: "This pause's resume has already run." });
+    expect(audit.entries.filter((e) => e.kind === "demo.time_shift")).toHaveLength(1);
+  });
+
+  it("leaves a resume still waiting on its suspend alone", async () => {
+    const { engine, machine, audit } = build();
+    const subscriptionId = await addSubscription("JUDGE0003");
+    const suspend = await engine.create({
+      merchantId: M,
+      subscriptionId,
+      origin: "session",
+      type: "suspend",
+      params: { reason: "Paused at the subscriber's request" },
+    });
+    const dueAt = new Date(Date.now() + 60 * 24 * 3600_000).toISOString();
+    const resumeId = await engine.scheduleResume({
+      merchantId: M,
+      subscriptionId,
+      dueAt,
+      afterActionId: suspend.id,
+    });
+
+    const result = await machine.resumeNow(M, subscriptionId);
+    expect(result.actionId).toBeNull();
+    const resume = await testDb.ownerPool.query<{ status: string; due_at: Date }>(
+      "SELECT status, due_at FROM scheduled_resumes WHERE id = $1",
+      [resumeId],
+    );
+    expect(resume.rows[0]?.status).toBe("waiting");
+    expect(resume.rows[0]?.due_at.toISOString()).toBe(dueAt);
+    expect(audit.entries.filter((e) => e.kind === "demo.time_shift")).toEqual([]);
   });
 
   it("does nothing, and says why, when there is no applied pause to resume", async () => {

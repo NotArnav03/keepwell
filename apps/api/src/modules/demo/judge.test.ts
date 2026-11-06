@@ -24,7 +24,8 @@ afterEach(async () => {
 });
 
 async function start(options: { empty?: boolean; leasesPerIp?: RateLimiter } = {}) {
-  const pool = new FakeJudgePool();
+  let now = Date.now();
+  const pool = new FakeJudgePool(() => new Date(now));
   if (!options.empty) pool.add(M, SUB, "I-POOL00000001");
   const resumeNow = vi.fn((_m: string, _s: string) =>
     Promise.resolve({ actionId: "0199a1b2-0000-7000-8000-0000000000a9", note: "ran" }),
@@ -40,9 +41,10 @@ async function start(options: { empty?: boolean; leasesPerIp?: RateLimiter } = {
     widgetSecret: WIDGET_SECRET,
     allowOrigin: (origin) => origin === "https://judge.keepwell.example",
     ...(options.leasesPerIp ? { leasesPerIp: options.leasesPerIp } : {}),
+    clock: () => new Date(now),
   });
   await app.ready();
-  return { server: app, pool, resumeNow };
+  return { server: app, pool, resumeNow, advance: (ms: number) => (now += ms) };
 }
 
 const lease = async (s: Awaited<ReturnType<typeof start>>) => {
@@ -130,7 +132,7 @@ describe("Judge Mode routes", () => {
       headers: as(leased.leaseToken),
     });
     expect(mine.statusCode).toBe(200);
-    expect(mine.json()).toMatchObject({ resumed: true, label: "TIME SHIFT" });
+    expect(mine.json()).toMatchObject({ resumed: true, label: "TIME SHIFT", simulated: true });
     expect(s.resumeNow).toHaveBeenCalledWith(M, SUB);
 
     const theirs = await s.server.inject({
@@ -155,5 +157,62 @@ describe("Judge Mode routes", () => {
       headers: { origin: "https://evil.example", "access-control-request-method": "POST" },
     });
     expect(other.headers["access-control-allow-origin"]).toBeUndefined();
+  });
+
+  it("stops a returned lease's token at once, even when the next judge holds the same entry", async () => {
+    const s = await start();
+    const first = await lease(s);
+    const back = await s.server.inject({
+      method: "DELETE",
+      url: `/v1/demo/leases/${first.leaseId}`,
+      headers: as(first.leaseToken),
+    });
+    expect(back.statusCode).toBe(200);
+
+    // A minute later the next judge leases, and gets the same (only) entry.
+    s.advance(60_000);
+    const second = await lease(s);
+    expect(second.leaseId).toBe(first.leaseId);
+
+    // The first token is still signed and unexpired, but it isn't the lease any more.
+    for (const [method, url] of [
+      ["POST", `/v1/demo/leases/${first.leaseId}/token`],
+      ["DELETE", `/v1/demo/leases/${first.leaseId}`],
+      ["POST", `/v1/demo/time-machine/resume/${SUB}`],
+    ] as const) {
+      const res = await s.server.inject({ method, url, headers: as(first.leaseToken) });
+      expect(res.statusCode).toBe(401);
+    }
+    expect(s.resumeNow).not.toHaveBeenCalled();
+    // The second judge's lease is untouched.
+    const theirs = await s.server.inject({
+      method: "POST",
+      url: `/v1/demo/leases/${second.leaseId}/token`,
+      headers: as(second.leaseToken),
+    });
+    expect(theirs.statusCode).toBe(200);
+  });
+
+  it("doesn't count asking while the pool is empty against the IP's leases", async () => {
+    const s = await start({ empty: true, leasesPerIp: new RateLimiter({ limit: 1, windowMs: 60_000 }) });
+    for (let i = 0; i < 3; i++) {
+      expect((await s.server.inject({ method: "POST", url: "/v1/demo/leases" })).statusCode).toBe(503);
+    }
+    s.pool.add(M, SUB, "I-POOL00000001");
+    await lease(s);
+    expect((await s.server.inject({ method: "POST", url: "/v1/demo/leases" })).statusCode).toBe(429);
+  });
+
+  it("answers the caller's own mistakes with 400, not 500", async () => {
+    const s = await start();
+    const leased = await lease(s);
+    const res = await s.server.inject({
+      method: "POST",
+      url: `/v1/demo/leases/${leased.leaseId}/token`,
+      headers: { ...as(leased.leaseToken), "content-type": "application/json" },
+      payload: "",
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ error: { code: "invalid_request" } });
   });
 });
