@@ -25,6 +25,7 @@
     "dev:widget": "pnpm --filter @keepwell/widget dev",
     "dev:store": "pnpm --filter @keepwell/demo-store dev",
     "dev:portal": "pnpm --filter @keepwell/portal dev",
+    "dev:judge": "pnpm --filter @keepwell/judge dev",
     "test:hooks": "node --test .claude/hooks/guard-git.test.mjs"
   },
   "devDependencies": {
