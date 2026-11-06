@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import type { z } from "zod";
-import type { LlmBudget, TokenUsage } from "./budget.js";
+import type { LlmBudget, Reservation, TokenUsage } from "./budget.js";
 import { LlmError, MODEL_FOR, type AgentLogger, type LlmClient, type StructuredCall } from "./llm.js";
 
 // The one place in the repo that imports @anthropic-ai/sdk (apps/api/CLAUDE.md).
@@ -30,13 +30,30 @@ export class AnthropicLlmClient implements LlmClient {
 
   async structured<S extends z.ZodType>(call: StructuredCall<S>): Promise<z.infer<S>> {
     const model = MODEL_FOR[call.purpose];
-    await this.assertBudget(call.sessionId);
-
     // Decisions come back as structured output, not a forced tool call: the schema is guaranteed,
     // and newer models (Sonnet 5.5, Opus 5.5) reject a forced tool_choice anyway. The SDK's parse()
     // would throw before we could tell a refusal from bad JSON, so this sends the schema only and
     // validates below.
     const { type, schema } = zodOutputFormat(call.schema);
+    const inputBytes = [call.system, call.input, JSON.stringify(schema)].reduce(
+      (sum, text) => sum + Buffer.byteLength(text),
+      0,
+    );
+    const reservation = await this.reserve(call, model, inputBytes);
+    try {
+      return await this.send(call, model, { type, schema });
+    } finally {
+      // After send() has recorded the usage, so the cost is always counted by the hold, the store
+      // or both, never by neither.
+      reservation?.release();
+    }
+  }
+
+  private async send<S extends z.ZodType>(
+    call: StructuredCall<S>,
+    model: string,
+    { type, schema }: { type: "json_schema"; schema: Record<string, unknown> },
+  ): Promise<z.infer<S>> {
     const started = this.now();
     let message: Anthropic.Message;
     try {
@@ -101,11 +118,20 @@ export class AnthropicLlmClient implements LlmClient {
     return parsed.data;
   }
 
-  /** Fails closed: if the usage store can't be read, we can't prove there's budget left. */
-  private async assertBudget(sessionId: string | null): Promise<void> {
-    if (!this.budget) return;
+  /**
+   * Checks the budget and holds the call's worst-case cost until it is recorded, so overlapping
+   * calls can't all pass the same check. Fails closed: if the usage store can't be read, we can't
+   * prove there's budget left.
+   */
+  private async reserve(
+    call: StructuredCall<z.ZodType>,
+    model: string,
+    inputBytes: number,
+  ): Promise<Reservation | null> {
+    if (!this.budget) return null;
+    const { sessionId } = call;
     try {
-      await this.budget.assertCanSpend(sessionId);
+      return await this.budget.reserve({ sessionId, model, inputBytes, maxOutputTokens: call.maxTokens });
     } catch (err) {
       if (err instanceof LlmError) {
         this.log.warn({ sessionId, reason: err.message }, "llm budget refused the call");
@@ -117,8 +143,9 @@ export class AnthropicLlmClient implements LlmClient {
   }
 
   /**
-   * The call already happened, so a failure to record it doesn't take the subscriber's reply away;
-   * it is logged as an error, because unrecorded spend weakens the budget.
+   * The call already happened, so a failure to record it doesn't take the subscriber's reply away.
+   * The budget keeps the cost in memory and retries the store, so the spend still counts toward
+   * the cap; it is logged as an error because the usage table is behind.
    */
   private async recordUsage(
     call: StructuredCall<z.ZodType>,

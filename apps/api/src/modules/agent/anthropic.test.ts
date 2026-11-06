@@ -114,12 +114,17 @@ describe("AnthropicLlmClient", () => {
     expect(requests[0]).not.toHaveProperty("tool_choice");
   });
 
-  it("uses Haiku for both the classifier and the conversation", async () => {
+  it("uses Haiku for the classifier and the conversation, and Sonnet for the copilot", async () => {
     const ok = { status: 200, body: message('{"answer":"no"}') };
-    const { llm, requests } = clientReturning([ok, ok]);
+    const { llm, requests } = clientReturning([ok, ok, ok]);
     await llm.structured(call("classify"));
     await llm.structured(call("converse"));
-    expect(requests.map((r) => r.model)).toEqual(["claude-haiku-5-5", "claude-haiku-5-5"]);
+    await llm.structured(call("copilot"));
+    expect(requests.map((r) => r.model)).toEqual([
+      "claude-haiku-5-5",
+      "claude-haiku-5-5",
+      "claude-sonnet-5-5",
+    ]);
   });
 
   it.each([
@@ -174,9 +179,10 @@ describe("AnthropicLlmClient with the budget guard", () => {
 
   it("refuses to call once today's budget is spent, without sending a request", async () => {
     const store = new InMemoryLlmUsageStore();
-    // $0.0001 budget; one call above costs $0.00017. Two good responses: only the guard stops the second.
+    // $0.00025 budget: room for one call (it reserves about $0.00014 and costs $0.00017) but not a
+    // second. Two good responses: only the guard stops the second.
     const ok = { status: 200, body: message('{"answer":"yes"}') };
-    const { llm, requests } = clientReturning([ok, ok], budgetWith(store, 0.0001));
+    const { llm, requests } = clientReturning([ok, ok], budgetWith(store, 0.00025));
     await llm.structured(call("converse"));
     expect(await failure(llm.structured(call("converse")))).toBe("unavailable");
     expect(requests).toHaveLength(1);
@@ -217,6 +223,40 @@ describe("AnthropicLlmClient with the budget guard", () => {
     expect(errors).toContain("llm budget check failed; refusing the call");
   });
 
+  it("lets only one of two overlapping calls through when the cap has room for one", async () => {
+    const store = new InMemoryLlmUsageStore();
+    const ok = { status: 200, body: message('{"answer":"yes"}') };
+    // Each call reserves about $0.00014 up front; $0.0002 holds one reservation, not two.
+    const { llm, requests } = clientReturning([ok, ok], budgetWith(store, 0.0002));
+    const results = await Promise.allSettled([llm.structured(call()), llm.structured(call())]);
+    expect(results.map((r) => r.status).sort()).toEqual(["fulfilled", "rejected"]);
+    expect(requests).toHaveLength(1);
+  });
+
+  it("releases the hold when a call fails, so the next call isn't refused for it", async () => {
+    const store = new InMemoryLlmUsageStore();
+    const ok = { status: 200, body: message('{"answer":"yes"}') };
+    const { llm, requests } = clientReturning(
+      [apiError(401, "authentication_error"), ok],
+      budgetWith(store, 0.0002),
+    );
+    await failure(llm.structured(call()));
+    await expect(llm.structured(call())).resolves.toEqual({ answer: "yes" });
+    expect(requests).toHaveLength(2);
+  });
+
+  it("releases the hold when the model's answer is unusable", async () => {
+    const store = new InMemoryLlmUsageStore();
+    const ok = { status: 200, body: message('{"answer":"yes"}') };
+    const { llm } = clientReturning(
+      [{ status: 200, body: message("not json") }, ok],
+      budgetWith(store, 0.0004),
+    );
+    expect(await failure(llm.structured(call()))).toBe("invalid_output");
+    // The first call cost $0.00017; if its $0.00014 hold had leaked, this second call would not fit.
+    await expect(llm.structured(call())).resolves.toEqual({ answer: "yes" });
+  });
+
   it("still returns the reply when recording usage fails, and logs it as an error", async () => {
     const store = new InMemoryLlmUsageStore();
     const failingRecord: LlmUsageStore = {
@@ -232,5 +272,22 @@ describe("AnthropicLlmClient with the budget guard", () => {
     );
     await expect(llm.structured(call())).resolves.toEqual({ answer: "yes" });
     expect(errors).toContain("llm usage not recorded");
+  });
+});
+
+describe("AnthropicLlmClient when usage can't be recorded", () => {
+  it("keeps counting the unrecorded spend, so the cap still holds", async () => {
+    const store = new InMemoryLlmUsageStore();
+    const failingRecord: LlmUsageStore = {
+      spentOn: (day) => store.spentOn(day),
+      sessionTotals: (id) => store.sessionTotals(id),
+      record: () => Promise.reject(new Error("db down")),
+    };
+    const ok = { status: 200, body: message('{"answer":"yes"}') };
+    // $0.00025 has room for one call; the first one cost $0.00017 and was never recorded.
+    const { llm, requests } = clientReturning([ok, ok], budgetWith(failingRecord, 0.00025));
+    await expect(llm.structured(call())).resolves.toEqual({ answer: "yes" });
+    expect(await failure(llm.structured(call()))).toBe("unavailable");
+    expect(requests).toHaveLength(1);
   });
 });
