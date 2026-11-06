@@ -1,4 +1,4 @@
-import { index, integer, jsonb, pgTable, text, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { ReasonCategory } from "@keepwell/contracts";
 import { amount, at, createdAt, currency, id, merchantId, enumText } from "./columns.js";
 import { merchants } from "./merchants.js";
@@ -44,12 +44,31 @@ export const notifications = pgTable(
     dueAt: at().notNull(),
     sentAt: at(),
     providerId: text(),
-    status: text({ enum: ["scheduled", "sent", "failed", "cancelled", "suppressed"] })
+    // Matches the contract's NotificationStatus. While "sending", dueAt doubles as the lease expiry.
+    status: text({ enum: ["queued", "sending", "sent", "failed", "suppressed"] })
       .notNull()
-      .default("scheduled"),
+      .default("queued"),
+    suppressedBecause: text({ enum: ["frequency_cap", "unsubscribed", "superseded"] }),
+    attempts: integer().notNull().default(0),
+    /** { code, message } of the last provider failure. */
+    lastError: jsonb(),
+    simulated: boolean().notNull().default(false),
     createdAt: createdAt(),
   },
-  (t) => [index().on(t.status, t.dueAt)],
+  (t) => [index().on(t.status, t.dueAt), index().on(t.merchantId, t.to, t.sentAt)],
+);
+
+// Opt-outs from the unsubscribe link, per merchant. The address is not stored: emailHash is
+// sha256 of the trimmed, lower-cased address, the same value the link is signed over.
+export const emailUnsubscribes = pgTable(
+  "email_unsubscribes",
+  {
+    id: id(),
+    merchantId: merchantId().references(() => merchants.id),
+    emailHash: text().notNull(),
+    createdAt: createdAt(),
+  },
+  (t) => [uniqueIndex().on(t.merchantId, t.emailHash)],
 );
 
 export const insights = pgTable(

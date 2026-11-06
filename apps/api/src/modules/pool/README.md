@@ -4,8 +4,9 @@ The judge pool (ARCHITECTURE.md §6.17): pre-approved sandbox subscriptions that
 
 | Call | What happens |
 |---|---|
-| `lease(merchantId, { minutes? })` | The oldest available subscription that is ACTIVE, for 30 minutes by default. `SKIP LOCKED`, so judges arriving together never share one. `null` when the pool is empty. |
-| `release(merchantId, poolEntryId)` | Re-reads the subscription from PayPal, then: cancelled, expired or on another plan → `consumed`; paused → an `activate` Action; discounted → a `patch_price` Action back to the plan price (both → `restoring`); otherwise `available`. Pending resumes from the judge's pause are cancelled, so they can't fire on the next judge. |
+| `lease(merchantId, { minutes? })` | The available ACTIVE subscription that has gone longest without a judge, for 30 minutes by default. One returned in the last 10 minutes (a widget token's lifetime) waits, so a token minted just before the return can't reach the next judge. `SKIP LOCKED`, so judges arriving together never share one. `null` when none is available. |
+| `holds(merchantId, poolEntryId, leasedUntil)` | Whether that exact lease is still live. Entries are lent again and again, so a lease is the pair (entry, `leasedUntil`, whole seconds); Judge Mode checks it on every request a lease token makes, so a returned lease's token reaches nothing. |
+| `release(merchantId, poolEntryId, leasedUntil?)` | With `leasedUntil`, only while that lease is live (otherwise `null`, and nothing changes). Re-reads the subscription from PayPal, then: cancelled, expired or on another plan → `consumed`; paused → an `activate` Action; discounted → a `patch_price` Action back to the plan price (both → `restoring`); otherwise `available`. Pending resumes from the judge's pause are cancelled, so they can't fire on the next judge. |
 | `enroll(merchantId, paypalSubscriptionId)` | Adds an ACTIVE subscription on the pool's plan (Standard). Pool refill calls it. |
 | `health()` | The `pool.health` job, every 5 minutes: expired leases come back, restores finish, and fewer than 40 available is an error log (Sentry's alert). |
 

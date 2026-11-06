@@ -11,7 +11,7 @@ export type FakeLlmStep = { output: unknown } | { error: LlmError } | { hang: tr
  */
 export class FakeLlmClient implements LlmClient {
   readonly calls: { purpose: LlmPurpose; system: string; input: string }[] = [];
-  private readonly queues: Record<LlmPurpose, FakeLlmStep[]> = { classify: [], converse: [] };
+  private readonly queues: Record<LlmPurpose, FakeLlmStep[]> = { classify: [], converse: [], copilot: [] };
 
   script(purpose: LlmPurpose, ...steps: FakeLlmStep[]): this {
     this.queues[purpose].push(...steps);

@@ -64,7 +64,10 @@ export interface PoolLease {
   /** Our subscription id; Judge Mode binds its widget token to it. */
   subscriptionId: string;
   paypalSubscriptionId: string;
-  /** ISO-8601. After this the pool takes it back on its own. */
+  /**
+   * ISO-8601, whole seconds. After this the pool takes it back on its own. With poolEntryId it
+   * names this one lease: the entry is lent again later, under a new leasedUntil.
+   */
   leasedUntil: string;
 }
 
@@ -79,9 +82,21 @@ export type PoolState = "available" | "leased" | "restoring" | "consumed";
 
 /** M1 → M3 (Judge Mode). */
 export interface JudgePool {
-  /** Leases the oldest available ACTIVE subscription. null when the pool is empty: show the fallback. */
+  /**
+   * Leases the available ACTIVE subscription that has gone longest without a judge; one returned
+   * in the last few minutes isn't lent again yet. null when none is: show the fallback.
+   */
   lease(merchantId: string, input?: { minutes?: number }): Promise<PoolLease | null>;
-  /** Ends a lease early: the judge is done. Leases also end on their own at leasedUntil. */
-  release(merchantId: string, poolEntryId: string): Promise<PoolReturn>;
+  /**
+   * True only while this exact lease is live: the entry is leased, with this leasedUntil. A lease
+   * that was returned, or that ended and was lent to someone else, is false. Check it on every
+   * request a lease token authorises.
+   */
+  holds(merchantId: string, poolEntryId: string, leasedUntil: string): Promise<boolean>;
+  /**
+   * Ends a lease early: the judge is done. Leases also end on their own at leasedUntil. With
+   * leasedUntil, nothing happens unless that lease is still live, and the answer is null.
+   */
+  release(merchantId: string, poolEntryId: string, leasedUntil?: string): Promise<PoolReturn | null>;
   counts(merchantId: string): Promise<Record<PoolState, number>>;
 }

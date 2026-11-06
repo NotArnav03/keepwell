@@ -8,6 +8,7 @@ import { reviseReturn } from "./modules/actions/revise-return.js";
 import { DbAudit } from "./modules/audit/log.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
+import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
 import { PayPalClient } from "./modules/paypal/client.js";
 import { MOCK_CREDENTIALS, singleAppCredentials } from "./modules/paypal/credentials.js";
 import { DbJudgePool } from "./modules/pool/pool.js";
@@ -42,7 +43,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   // Waking a suspended Neon compute can take a few seconds.
   const app = buildServer(env, { readinessChecks, readinessTimeoutMs: 5000 });
   const core = await createCore(env, url, app.log);
-  const { pool, db, paypal, jobs, events, engine, sync, reconciler } = core;
+  const { pool, db, paypal, jobs, audit, events, engine, sync, reconciler, notify, notifyConfig } = core;
   readinessChecks.push(postgresReadiness(pool), {
     name: "paypal",
     check: async () => {
@@ -81,6 +82,16 @@ export async function startPlatform(env: Env): Promise<Platform> {
   await jobs.work("pool.health", () => core.judgePool.health());
   await jobs.schedule("pool.health", "*/5 * * * *", {});
 
+  // Sends what recovery and win-back enqueue; the minute-by-minute sweep feeds the worker.
+  await wireNotify({
+    db,
+    dispatcher: notify.dispatcher,
+    jobs,
+    registerDueWork: (name, fn) => reconciler.registerDueWork(name, fn),
+  });
+  // Merchant auth (#48) isn't merged, so only the public unsubscribe route is mounted. Pass
+  // `authenticate` here when it lands to serve GET /v1/m/outbox (the Demo Inbox).
+  await app.register(notifyRoutes, { prefix: "/v1", db, audit, config: notifyConfig, log: app.log });
   await app.register(webhookIntake, { db, jobs });
   await app.register(reviseReturn, { prefix: "/v1", db, engine });
   await app.register(opsRoutes, {
@@ -158,5 +169,14 @@ export async function createCore(env: Env, url: string, log: CoreLogger) {
   const sync = new SubscriptionSync(db, paypal, events);
   const reconciler = new Reconciler({ db, paypal, sync, engine, jobs, log });
   const judgePool = new DbJudgePool({ db, engine, sync, audit, log });
-  return { pool, db, paypal, jobs, audit, events, engine, sync, reconciler, judgePool };
+  // Other modules enqueue email through `notify.notifier` (inside their own transaction).
+  const notifyConfig = notifyConfigFromEnv(env, env.API_PUBLIC_URL ?? `http://localhost:${env.PORT}`);
+  if (!env.UNSUBSCRIBE_TOKEN_SECRET) {
+    log.warn(
+      {},
+      "UNSUBSCRIBE_TOKEN_SECRET is not set: unsubscribe links use a key that dies with this process",
+    );
+  }
+  const notify = createNotify({ db, audit, events, config: notifyConfig, log });
+  return { pool, db, paypal, jobs, audit, events, engine, sync, reconciler, judgePool, notify, notifyConfig };
 }
