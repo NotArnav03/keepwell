@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { Audit, DomainEvents } from "@keepwell/contracts";
 import { AnthropicLlmClient } from "./anthropic.js";
 import { LlmBudget, type LlmUsageStore } from "./budget.js";
+export { PgLlmUsageStore } from "./pg-usage-store.js";
 import type { AgentLogger } from "./llm.js";
 import { AgentRuntime } from "./runtime.js";
 
@@ -21,7 +22,7 @@ export interface CreateAgentOptions {
   anthropicApiKey: string | undefined;
   /** LLM_DAILY_BUDGET_USD. Required, so no agent ever runs without a spending cap. */
   dailyBudgetUsd: number;
-  /** M1's llm_usage table. InMemoryLlmUsageStore forgets spend on restart: dev and tests only. */
+  /** PgLlmUsageStore (the llm_usage table) in production. InMemoryLlmUsageStore forgets spend on restart: dev and tests only. */
   usageStore: LlmUsageStore;
   events: DomainEvents;
   audit: Audit;

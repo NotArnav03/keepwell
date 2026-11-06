@@ -41,10 +41,12 @@ Rule: **whoever merges next regenerates their migration to the next free number.
 ```bash
 git fetch origin && git rebase origin/main
 # delete this PR's packages/db/drizzle/00NN_*.sql, meta/00NN_snapshot.json, and its entry in meta/_journal.json
-pnpm --filter @keepwell/db generate      # writes the next number
+pnpm db:generate                         # drizzle-kit: writes the next number
 # re-add any hand-written SQL (RLS: ENABLE / FORCE ROW LEVEL SECURITY + the tenant_isolation policy, as in 0001)
 pnpm check
 ```
+Afterwards, `pnpm db:generate` again must say "No schema changes". **drizzle-kit asks interactively when a column or table might be a rename**, and Claude Code's shell has no TTY, so there it fails with "Interactive prompts require a TTY". Either run it yourself in a real terminal, or generate in two steps (drop first, then create) and fold them into one migration: see how #125 did it.
+
 Then merge it, and only then does the next author regenerate. Hand-written migrations (#92's `insight_views`) are renamed and get a journal entry; they aren't regenerated.
 
 ## 4. Merge order and the state of every open PR (6 Nov)

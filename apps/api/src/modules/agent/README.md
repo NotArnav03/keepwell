@@ -53,7 +53,7 @@ Two failure cases are handled on purpose:
 - **The store can't be read:** the call is refused (fail closed), because we can't prove there's budget left.
 - **Usage can't be recorded after a successful call:** the reply still goes out and it's logged as an error, but the call's cost, time and tokens stay in memory and keep counting toward the caps. The budget retries the store on its next check or record and drops the entry once it's written.
 
-`createAgent` requires the daily cap and a store. M1 backs the store with an `llm_usage` table; `InMemoryLlmUsageStore` forgets spend on restart, so it's for dev and tests only.
+`createAgent` requires the daily cap and a store. M1 backs the store with the `llm_usage` table (`PgLlmUsageStore`, one row per call); `InMemoryLlmUsageStore` forgets spend on restart, so it's for dev and tests only.
 
 ## Tests
 

@@ -1,4 +1,4 @@
-import { date, integer, jsonb, numeric, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
+import { bigint, index, integer, jsonb, pgTable, primaryKey, text, uuid } from "drizzle-orm/pg-core";
 import { at, createdAt, id, merchantId } from "./columns.js";
 import { merchants } from "./merchants.js";
 import { sessions } from "./surfaces.js";
@@ -54,17 +54,27 @@ export const offers = pgTable("offers", {
   answeredAt: at(),
 });
 
-/** Global, not per merchant: the daily budget guard (#26) caps the whole deployment. */
+/**
+ * One row per model call, for the LLM budget guard (#26, #83): today's spend against
+ * LLM_DAILY_BUDGET_USD, and each session's model time and tokens. Deployment-wide, not per
+ * merchant, so it has no merchant_id and no row-level security. `session_id` has no foreign key:
+ * this is bookkeeping, written after the call, and must never fail because a session row moved.
+ */
 export const llmUsage = pgTable(
   "llm_usage",
   {
-    day: date({ mode: "string" }).notNull(),
-    feature: text().notNull(),
+    id: id(),
+    at: createdAt(),
+    sessionId: uuid(),
+    purpose: text().notNull(),
     model: text().notNull(),
-    tokensIn: integer().notNull().default(0),
-    tokensOut: integer().notNull().default(0),
-    /** US dollars. Six decimals, because one call costs a fraction of a cent. */
-    costUsd: numeric({ precision: 12, scale: 6 }).notNull().default("0"),
+    inputTokens: integer().notNull(),
+    outputTokens: integer().notNull(),
+    cacheReadTokens: integer().notNull(),
+    cacheWriteTokens: integer().notNull(),
+    /** Whole nano-dollars (1e-9 USD): every list price is an integer per token at this scale. */
+    costNanoUsd: bigint({ mode: "number" }).notNull(),
+    durationMs: integer().notNull(),
   },
-  (t) => [primaryKey({ columns: [t.day, t.feature, t.model] })],
+  (t) => [index().on(t.at), index().on(t.sessionId)],
 );
