@@ -58,7 +58,7 @@ export class FakeSubscriberAgent implements SubscriberAgentApi {
 
   agentOptions(principal: SubscriberPrincipal): Promise<{ sessionId: string; menu: OfferMenu }> {
     const snapshot = this.snapshot(principal);
-    return Promise.resolve({ sessionId: `fake-agent-${snapshot.id}`, menu: this.o.menuFor(snapshot.id) });
+    return Promise.resolve({ sessionId: `fake-agent-${snapshot.id}`, menu: this.agentMenu(snapshot.id) });
   }
 
   async agentAccept(
@@ -72,7 +72,7 @@ export class FakeSubscriberAgent implements SubscriberAgentApi {
       if (earlier.offerId === offerId) return earlier.response;
       throw new SessionError("offer_unavailable", "Another offer was already accepted");
     }
-    const offer = this.o.menuFor(snapshot.id).offers.find((o) => o.id === offerId);
+    const offer = this.agentMenu(snapshot.id).offers.find((o) => o.id === offerId);
     if (!offer) throw new SessionError("offer_unavailable", "That offer isn't one of the current options");
     const action = await this.o.api.actions.create(actionFor(snapshot, offer));
     const response = { actionIds: [action.id], approveUrl: null };
@@ -116,6 +116,15 @@ export class FakeSubscriberAgent implements SubscriberAgentApi {
       payload: { reason: body.reason ?? "unknown" },
     });
     return { actionId: action.id };
+  }
+
+  /** As the real module: plan changes need the subscriber's own PayPal approval, so agents don't get them. */
+  private agentMenu(subscriptionId: string): OfferMenu {
+    const menu = this.o.menuFor(subscriptionId);
+    return {
+      ...menu,
+      offers: menu.offers.filter((o) => o.kind !== "downgrade" && o.kind !== "switch_annual"),
+    };
   }
 
   private readonly actionSubscriptions = new Map<string, string>();

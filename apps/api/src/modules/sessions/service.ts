@@ -91,6 +91,18 @@ const NOTHING_APPLIED: readonly Action["state"][] = ["FAILED", "ABANDONED", "SUP
 const APPLIED: readonly Action["state"][] = ["APPLIED", "CONFIRMED"];
 /** An agent that asks for options again within this time gets the same session and menu. */
 const AGENT_SESSION_REUSE_MS = 30 * 60_000;
+/**
+ * Offers an agent can't complete: a plan change (`revise`) applies only after the subscriber
+ * approves it on PayPal's own page, and an MCP client has no way to get that link to them. They
+ * are left out of the agent's options and refused at accept; the subscriber makes them in the
+ * portal or on the merchant's site.
+ */
+const NOT_FOR_AGENTS: readonly Offer["kind"][] = ["downgrade", "switch_annual"];
+
+/** The menu as an agent may act on it. */
+function agentMenu(menu: OfferMenu): OfferMenu {
+  return { ...menu, offers: menu.offers.filter((o) => !NOT_FOR_AGENTS.includes(o.kind)) };
+}
 const CHIP_REASONS = ReasonCategory.options.filter((r) => r !== "unknown");
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
@@ -712,13 +724,13 @@ export class DbSessionsApi implements SessionsApi {
     if (current?.state === "open" && current.ageMs < AGENT_SESSION_REUSE_MS) {
       const answer = await this.offerRow(who.merchantId, current.id);
       if (answer && answer.pickedOffer === null) {
-        return { sessionId: current.id, menu: OfferMenu.parse(answer.menuSnapshot) };
+        return { sessionId: current.id, menu: agentMenu(OfferMenu.parse(answer.menuSnapshot)) };
       }
     }
     const created = await this.start(who);
     const answer = await this.offerRow(who.merchantId, created.sessionId);
     if (!answer) throw new SessionError("internal", "The agent session has no menu");
-    return { sessionId: created.sessionId, menu: OfferMenu.parse(answer.menuSnapshot) };
+    return { sessionId: created.sessionId, menu: agentMenu(OfferMenu.parse(answer.menuSnapshot)) };
   }
 
   /**
@@ -747,7 +759,14 @@ export class DbSessionsApi implements SessionsApi {
         }
         return shown.shownTextHash;
       }
-      const offer = OfferMenu.parse(answer.menuSnapshot).offers.find((o) => o.id === offerId);
+      const menu = OfferMenu.parse(answer.menuSnapshot);
+      if (menu.offers.some((o) => o.id === offerId && NOT_FOR_AGENTS.includes(o.kind))) {
+        throw new SessionError(
+          "offer_unavailable",
+          "Plan changes need the subscriber's own approval in PayPal, so an agent can't make them. The subscriber can switch plans in the merchant's portal.",
+        );
+      }
+      const offer = agentMenu(menu).offers.find((o) => o.id === offerId);
       if (!offer) throw new SessionError("offer_unavailable", "That offer isn't one of the current options");
       const presented: Presented = {
         offer,

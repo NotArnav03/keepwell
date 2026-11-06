@@ -176,7 +176,7 @@ function buildServer(
             terms: offer,
           })),
           cancel: CANCEL_NOTE,
-          note: "These are all the offers there are. Accepting one changes the subscription in PayPal; a plan change also needs the subscriber's own approval in PayPal.",
+          note: "These are all the offers there are, and accepting one changes the subscription in PayPal. Plan changes (a cheaper plan, annual billing) aren't offered here: they need the subscriber's own approval in PayPal, so the subscriber makes them in the merchant's portal.",
         };
       }),
     );
@@ -198,7 +198,6 @@ function buildServer(
           accepted: true,
           action_ids: accepted.actionIds,
           status: "Being applied in PayPal; get_my_subscription shows the result in a minute.",
-          note: "If this is a plan change, PayPal asks the subscriber to approve it themselves. Nothing changes until they do.",
         };
       }),
     );
@@ -298,7 +297,7 @@ export function discovery(options: Pick<SubscriberMcpOptions, "publicUrl" | "por
       "Cancelling is always available and takes one call.",
       "Offers come only from the merchant's published policy, re-checked when accepted. Nothing is invented by a model.",
       "Nothing changes without a call made with a token the subscriber created, and every change is in the merchant's audit log as made by the subscriber's agent.",
-      "A plan change also needs the subscriber's own approval in PayPal.",
+      "Plan changes need the subscriber's own approval in PayPal, so agents aren't offered them; the subscriber makes them in the merchant's portal.",
     ],
   };
 }

@@ -6,7 +6,7 @@
 - **Rate limits:** 300 requests a minute per IP, counted before the token is checked so guessing tokens is slow, and 120 a minute per token (stateless MCP spends about three requests a tool call). Over either, `429` with `Retry-After`.
 - **Tools:**
   - `get_my_subscription` (read).
-  - `get_retention_options` (read): the policy's menu as structured offers, always with the note that cancelling is one call.
+  - `get_retention_options` (read): the policy's menu as structured offers, always with the note that cancelling is one call. Plan changes (`downgrade`, `switch_annual`) are left out and refused at accept: they apply only after the subscriber approves them on PayPal's page, and an agent has no way to get that link to them, so the subscriber makes them in the portal.
   - `accept_offer(offer_id)` (accept_offer).
   - `cancel_subscription(reason?)` (cancel).
 - **Behind it:** `DbSessionsApi`'s `agent*` methods. Same policy (re-checked at accept), same Action engine, same audit log; the session's channel is `subscriber_agent` and audit entries say `actor: subscriber_agent`. No model is involved: the menu comes from the policy engine. Cancel needs no prior call and never touches the agent.

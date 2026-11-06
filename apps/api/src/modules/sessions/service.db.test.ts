@@ -736,6 +736,27 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
       expect(audit.entries.find((e) => e.kind === "offer.accepted")?.actor).toBe("subscriber_agent");
     });
 
+    it("leaves plan changes out for agents, and refuses them by id, since only the subscriber can approve them", async () => {
+      const { api } = build();
+      const raj = { ...agentOf(), subscriptionId: otherSubscriptionId };
+      const options = await api.agentOptions(raj);
+      expect(options.menu.offers.map((o) => o.kind)).not.toContain("downgrade");
+      expect(options.menu.offers.map((o) => o.kind)).not.toContain("switch_annual");
+
+      // The stored menu has a plan change; the agent just never gets it.
+      const { rows } = await testDb.ownerPool.query<{
+        menu_snapshot: { offers: { id: string; kind: string }[] };
+      }>("SELECT menu_snapshot FROM offers WHERE session_id = $1", [options.sessionId]);
+      const planChange = rows[0]?.menu_snapshot.offers.find(
+        (o) => o.kind === "downgrade" || o.kind === "switch_annual",
+      );
+      expect(planChange).toBeDefined();
+      await expect(api.agentAccept(raj, planChange?.id ?? "", meta)).rejects.toMatchObject({
+        code: "offer_unavailable",
+        message: expect.stringContaining("portal") as unknown,
+      });
+    });
+
     it("needs the options first, and only accepts an offer from them", async () => {
       const { api } = build();
       const raj = { ...agentOf(), subscriptionId: otherSubscriptionId };
