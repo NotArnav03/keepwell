@@ -28,9 +28,9 @@ import {
   type Classification as ClassificationT,
 } from "./prompts.js";
 
-// The agent runtime (ARCHITECTURE.md §6.5): Haiku classifies, Sonnet picks one action from the
-// policy's menu, the policy re-checks the pick, and every offer card renders from the Offer
-// object. Stateless: the sessions module hands it a fresh SessionContext on every call.
+// The agent runtime (ARCHITECTURE.md §6.5): Haiku classifies, a second Haiku call picks one action
+// from the policy's menu, the policy re-checks the pick, and every offer card renders from the
+// Offer object. Stateless: the sessions module hands it a fresh SessionContext on every call.
 
 /** Hard session limits (§6.5). The sessions module also refuses a 4th message. */
 export const MAX_SUBSCRIBER_MESSAGES = 3;
@@ -53,7 +53,7 @@ export interface AgentRuntimeOptions {
 
 type Emit = (event: AgentStreamEvent) => void;
 
-/** One Sonnet reply after our checks. `offer` is set only when the policy allowed the pick. */
+/** One conversation reply after our checks. `offer` is set only when the policy allowed the pick. */
 interface Checked {
   reply: Reply;
   offer: Offer | null;
@@ -116,6 +116,7 @@ export class AgentRuntime implements Agent {
           schema: Classification,
           maxTokens: 1024,
           signal,
+          sessionId: s.sessionId,
         }),
       );
       this.log.info({ ...log, classification }, "agent classified");
@@ -151,6 +152,7 @@ export class AgentRuntime implements Agent {
             schema: Reply,
             maxTokens: 2048,
             signal,
+            sessionId: s.sessionId,
           });
         } catch (err) {
           if (err instanceof LlmError && err.failure === "invalid_output" && attempt === 1) continue;

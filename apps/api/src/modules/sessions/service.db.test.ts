@@ -79,6 +79,7 @@ function build(
     payments?: PaymentLookup;
     subscription?: () => SubscriptionSnapshot;
     idleMs?: number;
+    abandonAfterMs?: number;
   } = {},
 ) {
   const events = new FakeDomainEvents();
@@ -120,6 +121,7 @@ function build(
     streamUrl: (id) => `https://api.keepwell.example/v1/sessions/${id}/stream`,
     pollMs: 50,
     ...(options.idleMs === undefined ? {} : { idleMs: options.idleMs }),
+    ...(options.abandonAfterMs === undefined ? {} : { abandonAfterMs: options.abandonAfterMs }),
   });
   return { api, events, audit, engine };
 }
@@ -162,9 +164,9 @@ async function payPalMoves(
 }
 
 /** Starts a session and has the policy's pause offer presented (the L1 "temporary" chip). */
-async function withPauseOffer(api: DbSessionsApi) {
+async function withPauseOffer(api: DbSessionsApi, reason: "temporary" | "quality_issue" = "temporary") {
   const created = await api.create(maya(), { channel: "widget" });
-  await api.reason(maya(), created.sessionId, { reason: "temporary" });
+  await api.reason(maya(), created.sessionId, { reason });
   const { rows } = await testDb.ownerPool.query<{
     picked_offer: { offer: { id: string; kind: string }; shownTextHash: string };
   }>("SELECT picked_offer FROM offers WHERE session_id = $1", [created.sessionId]);
@@ -406,6 +408,187 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
     );
   });
 
+  describe("review fixes", () => {
+    /** The engine's event for an Action, delivered again without changing anything (at-least-once). */
+    const redeliver = (api: DbSessionsApi, actionId: string, type: string, from: string, to: string) =>
+      api.onActionStateChanged({
+        type: "action.state_changed",
+        merchantId: M,
+        payload: { actionId, type, from, to, approveUrl: null, error: null },
+      } as unknown as DomainEvent<"action.state_changed">);
+    const stateOf = async (sessionId: string) =>
+      (
+        await testDb.ownerPool.query<{ state: string; outcome: string | null }>(
+          "SELECT state, outcome FROM sessions WHERE id = $1",
+          [sessionId],
+        )
+      ).rows[0];
+
+    it("ignores a late duplicate from an attempt a retry replaced", async () => {
+      const { api } = build();
+      const { sessionId, offerId, hash } = await withPauseOffer(api);
+      const first = await api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta);
+      await payPalMoves(api, first.actionIds[0] ?? "", "PENDING", "FAILED");
+      await api.accept(maya(), sessionId, offerId, { shownTextHash: hash }, meta);
+      expect(await stateOf(sessionId)).toMatchObject({ state: "awaiting_paypal" });
+
+      await redeliver(api, first.actionIds[0] ?? "", "suspend", "EXECUTING", "FAILED");
+      expect(await stateOf(sessionId)).toMatchObject({ state: "awaiting_paypal" });
+      // So keep is still refused, and can't record "kept" while the retry is being applied.
+      await expect(api.keep(maya(), sessionId)).rejects.toMatchObject({ code: "action_in_progress" });
+    });
+
+    it("records the save when a cancel that pre-empted it fails, whichever finishes first", async () => {
+      // The suspend is already executing at PayPal when the cancel is clicked (a PENDING one would be
+      // superseded by the cancel; see the last case), and applies after the cancel failed.
+      const { api } = build();
+      const a = await withPauseOffer(api);
+      const accepted = await api.accept(maya(), a.sessionId, a.offerId, { shownTextHash: a.hash }, meta);
+      await payPalMoves(api, accepted.actionIds[0] ?? "", "PENDING", "EXECUTING");
+      const cancel = await api.cancel(maya(), a.sessionId, {});
+      await payPalMoves(api, cancel.actionId, "PENDING", "FAILED");
+      // The suspend is still being applied, so the session keeps waiting on PayPal.
+      expect(await stateOf(a.sessionId)).toMatchObject({ state: "awaiting_paypal" });
+      await payPalMoves(api, accepted.actionIds[0] ?? "", "EXECUTING", "APPLIED");
+      expect(await stateOf(a.sessionId)).toEqual({ state: "closed", outcome: "saved_pause" });
+
+      // The suspend applies while the cancel is in flight, then the cancel fails.
+      const b = await withPauseOffer(api);
+      const acceptedB = await api.accept(maya(), b.sessionId, b.offerId, { shownTextHash: b.hash }, meta);
+      await payPalMoves(api, acceptedB.actionIds[0] ?? "", "PENDING", "EXECUTING");
+      const cancelB = await api.cancel(maya(), b.sessionId, {});
+      await payPalMoves(api, acceptedB.actionIds[0] ?? "", "EXECUTING", "APPLIED");
+      expect(await stateOf(b.sessionId)).toMatchObject({ state: "awaiting_paypal" });
+      await payPalMoves(api, cancelB.actionId, "PENDING", "FAILED");
+      expect(await stateOf(b.sessionId)).toEqual({ state: "closed", outcome: "saved_pause" });
+
+      // A suspend that hadn't started is superseded by the cancel, so when the cancel fails nothing
+      // is pending and the subscriber can cancel again or keep.
+      const c = await withPauseOffer(api);
+      const acceptedC = await api.accept(maya(), c.sessionId, c.offerId, { shownTextHash: c.hash }, meta);
+      const cancelC = await api.cancel(maya(), c.sessionId, {});
+      const superseded = await testDb.ownerPool.query<{ state: string }>(
+        "SELECT state FROM actions WHERE id = $1",
+        [acceptedC.actionIds[0]],
+      );
+      expect(superseded.rows[0]?.state).toBe("SUPERSEDED");
+      await payPalMoves(api, cancelC.actionId, "PENDING", "FAILED");
+      expect(await stateOf(c.sessionId)).toEqual({ state: "open", outcome: null });
+    });
+
+    it("gives the model the redacted message, never the email or phone number", async () => {
+      const said: string[] = [];
+      const inner = new AgentRuntime({
+        llm: null,
+        events: new FakeDomainEvents(),
+        audit: new FakeAudit(),
+        log: quiet,
+      });
+      const recording: Agent = {
+        start: (s) => inner.start(s),
+        respond: (s, text, stream) => {
+          said.push(text);
+          return inner.respond(s, text, stream);
+        },
+        respondToReason: (s, r, stream) => inner.respondToReason(s, r, stream),
+      };
+      const { api } = build({ agent: recording });
+      const { sessionId } = await api.create(maya(), { channel: "widget" });
+      await api.message(maya(), sessionId, { text: "reach me at maya@example.com or +91 98765 43210" });
+      expect(said).toEqual(["reach me at [email] or [phone]"]);
+    });
+
+    it("leaves a refund offer open when PayPal can't be reached, and refuses only when the payment isn't there", async () => {
+      let mode: "down" | "none" | "found" = "down";
+      const { api } = build({
+        payments: {
+          listTransactions: (_m, _s, range) => {
+            if (mode === "down") return Promise.reject(new Error("ECONNRESET"));
+            if (mode === "none") return Promise.resolve([]);
+            return Promise.resolve([{ id: "CAPTURE-1", status: "COMPLETED", time: range.start }]);
+          },
+        },
+      });
+      const offer = await withPauseOffer(api, "quality_issue");
+      expect(offer.kind).toBe("refund_partial");
+
+      await expect(
+        api.accept(maya(), offer.sessionId, offer.offerId, { shownTextHash: offer.hash }, meta),
+      ).rejects.toMatchObject({ code: "internal" });
+      const { rows } = await testDb.ownerPool.query<{ status: string }>(
+        "SELECT status FROM offers WHERE session_id = $1",
+        [offer.sessionId],
+      );
+      expect(rows[0]?.status).toBe("presented");
+
+      mode = "found";
+      const accepted = await api.accept(
+        maya(),
+        offer.sessionId,
+        offer.offerId,
+        { shownTextHash: offer.hash },
+        meta,
+      );
+      const action = await testDb.ownerPool.query<{ type: string; params: { transactionId: string } }>(
+        "SELECT type, params FROM actions WHERE id = $1",
+        [accepted.actionIds[0]],
+      );
+      expect(action.rows[0]).toMatchObject({ type: "refund", params: { transactionId: "CAPTURE-1" } });
+
+      // A lookup that worked and found nothing is a real refusal.
+      mode = "none";
+      const other = await withPauseOffer(api, "quality_issue");
+      await expect(
+        api.accept(maya(), other.sessionId, other.offerId, { shownTextHash: other.hash }, meta),
+      ).rejects.toMatchObject({ code: "offer_unavailable" });
+    });
+
+    it("calls a session with no stream events quiet, counting from when it started", async () => {
+      const { api } = build({ idleMs: 50 });
+      const { sessionId } = await api.create(maya(), { channel: "widget" });
+      // L1 sessions start with the chips event; remove it to stand in for an L0 session.
+      await testDb.ownerPool.query("DELETE FROM session_events WHERE session_id = $1", [sessionId]);
+      await new Promise((resolve) => setTimeout(resolve, 120));
+      const sub = await api.subscribe(maya(), sessionId, 0, () => undefined);
+      sub.unsubscribe();
+      expect(sub.idle).toBe(true);
+    });
+
+    it("drops the rest of an agent reply once the subscriber has cancelled", async () => {
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      const slow: Agent = {
+        start: (s) =>
+          new AgentRuntime({
+            llm: null,
+            events: new FakeDomainEvents(),
+            audit: new FakeAudit(),
+            log: quiet,
+          }).start(s),
+        respond: async (_s, _text, stream) => {
+          stream({ type: "agent.delta", text: "Before you go, " });
+          await gate;
+          stream({ type: "agent.delta", text: "here is a special offer" });
+          stream({ type: "agent.done", messageId: "0199a1b2-0000-7000-8000-00000000d0e0" });
+        },
+        respondToReason: () => Promise.resolve(),
+      };
+      const { api } = build({ agent: slow });
+      const { sessionId } = await api.create(maya(), { channel: "widget" });
+      const talking = api.message(maya(), sessionId, { text: "hmm" });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await api.cancel(maya(), sessionId, {});
+      release();
+      await talking;
+
+      const stream = await watch(api, sessionId);
+      stream.unsubscribe();
+      const deltas = stream.seen.filter(([, e]) => e.type === "agent.delta").map(([, e]) => e);
+      expect(deltas).toEqual([{ type: "agent.delta", text: "Before you go, " }]);
+      expect(stream.seen.some(([, e]) => e.type === "agent.done")).toBe(true);
+    });
+  });
+
   it("lets a cancel pre-empt an offer still being applied", async () => {
     const { api } = build();
     const { sessionId, offerId, hash } = await withPauseOffer(api);
@@ -465,6 +648,36 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("DbSessionsApi", { timeout: 60_
     await new Promise((resolve) => setTimeout(resolve, 400));
     stream.unsubscribe();
     expect(stream.seen.length).toBe(seen);
+  });
+
+  it("abandons sessions nobody touched, but not one waiting on PayPal or one just used", async () => {
+    const { api, events } = build({ abandonAfterMs: 100 });
+    const quiet = await api.create(maya(), { channel: "widget" });
+    const shown = await withPauseOffer(api);
+    const waiting = await withPauseOffer(api);
+    await api.accept(maya(), waiting.sessionId, waiting.offerId, { shownTextHash: waiting.hash }, meta);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const fresh = await api.create(maya(), { channel: "widget" });
+
+    expect(await api.abandonIdle()).toBeGreaterThanOrEqual(2);
+    const state = async (id: string) =>
+      (
+        await testDb.ownerPool.query<{ state: string; outcome: string | null }>(
+          "SELECT state, outcome FROM sessions WHERE id = $1",
+          [id],
+        )
+      ).rows[0];
+    expect(await state(quiet.sessionId)).toEqual({ state: "closed", outcome: "abandoned" });
+    expect(await state(shown.sessionId)).toEqual({ state: "closed", outcome: "abandoned" });
+    expect(await state(waiting.sessionId)).toEqual({ state: "awaiting_paypal", outcome: null });
+    expect(await state(fresh.sessionId)).toEqual({ state: "open", outcome: null });
+
+    const stream = await watch(api, quiet.sessionId);
+    stream.unsubscribe();
+    expect(stream.seen.at(-1)?.[1]).toMatchObject({ type: "session.closed", outcome: "abandoned" });
+    expect(events.emitted.filter((e) => e.type === "session.closed").length).toBeGreaterThanOrEqual(2);
+    // Cancel still works on an abandoned session.
+    await api.cancel(maya(), quiet.sessionId, {});
   });
 
   it("calls a quiet session idle, but never one waiting on PayPal", async () => {

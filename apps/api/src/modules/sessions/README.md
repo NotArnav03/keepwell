@@ -53,6 +53,7 @@ Wiring into `platform.ts` (Arnav, with #41, once #124 lands) needs:
 
 - a Postgres `PolicyStore` and `MerchantCatalog` (#124);
 - `onActionStateChanged` registered on `action.state_changed`;
+- the `sessions.abandon_sweep` job: `jobs.work("sessions.abandon_sweep", () => sessions.abandonIdle())` and `jobs.schedule("sessions.abandon_sweep", "*/5 * * * *", {})`. It closes `open` and `offer_presented` sessions untouched for 30 minutes as `abandoned`, never one waiting on PayPal, and cancel still works on them afterwards;
 - the secrets below.
 
 Secrets:

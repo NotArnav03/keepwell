@@ -1,7 +1,7 @@
 import { sql } from "drizzle-orm";
 import { fromDrizzle, PgBoss } from "pg-boss";
 import type { z } from "zod";
-import { brainJobs, growthJobs, platformJobs } from "@keepwell/contracts";
+import { brainJobs, growthJobs, platformJobs, surfacesJobs } from "@keepwell/contracts";
 import { APP_ROLE, type Tx } from "@keepwell/db";
 
 // Jobs on Postgres with pg-boss (ARCHITECTURE.md §6.15), typed by the job registries in
@@ -9,7 +9,7 @@ import { APP_ROLE, type Tx } from "@keepwell/db";
 // idempotencyKey becomes pg-boss's singletonKey, so a duplicate send is a no-op. A send can join
 // the caller's transaction: the job then exists exactly when the caller's writes commit.
 
-export const jobRegistry = { ...platformJobs, ...brainJobs, ...growthJobs } as const;
+export const jobRegistry = { ...platformJobs, ...brainJobs, ...growthJobs, ...surfacesJobs } as const;
 export type JobName = keyof typeof jobRegistry;
 export type JobPayload<N extends JobName> = z.infer<(typeof jobRegistry)[N]["payload"]>;
 
