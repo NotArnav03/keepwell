@@ -271,16 +271,28 @@ export class PayPalState {
   activate(merchantId: string, id: string): void {
     const subscription = this.getSubscription(merchantId, id);
     requireStatus(subscription, ["SUSPENDED"], "activate");
-    // Spike Q2: a short pause keeps the original next_billing_time and charges nothing.
-    // Assumed until the long-pause run: a date passed while suspended moves forward whole
-    // intervals, so nothing is charged at the moment of activation either.
+    // Spike Q2 (docs/spikes/Q2.md), as the sandbox does it:
+    // - a short pause (no billing time passed while suspended) brings back the same
+    //   next_billing_time and charges nothing;
+    // - a pause across billing times brings back the latest one that passed, already in the past,
+    //   and charges nothing at activation. PayPal bills that one cycle a little later (3 minutes
+    //   and 4.7 hours in our runs; renew() stands for it here). The cycles before it are never billed.
     const billing = subscription.billing_info;
-    const anchor = this.suspendedBilling.get(id) ?? billing?.last_payment?.time;
+    const { interval_unit, interval_count } = this.cycleOf(merchantId, subscription).frequency;
+    const lastPaid = billing?.last_payment?.time;
+    const anchor =
+      this.suspendedBilling.get(id) ??
+      (lastPaid === undefined
+        ? undefined
+        : paypalTime(addInterval(new Date(lastPaid), interval_unit, interval_count)));
     this.suspendedBilling.delete(id);
     if (billing && anchor !== undefined) {
-      const { interval_unit, interval_count } = this.cycleOf(merchantId, subscription).frequency;
       let next = new Date(anchor);
-      while (next <= this.clock()) next = addInterval(next, interval_unit, interval_count);
+      for (;;) {
+        const after = addInterval(next, interval_unit, interval_count);
+        if (after > this.clock()) break;
+        next = after;
+      }
       billing.next_billing_time = paypalTime(next);
     }
     this.setStatus(merchantId, subscription, "ACTIVE");

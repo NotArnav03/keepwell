@@ -1,0 +1,15 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/billing/subscriptions/I-KN5LRF5EU8E3/cancel",
+    "headers": {},
+    "body": {
+      "reason": "Keepwell spike Q2: done"
+    }
+  },
+  "response": {
+    "status": 204,
+    "debugId": "f6741605bd22d",
+    "body": null
+  }
+}

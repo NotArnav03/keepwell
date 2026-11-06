@@ -136,6 +136,37 @@ describe("subscription status changes", () => {
     expect((await billing()).next_billing_time).toBe(before);
   });
 
+  it("after a pause across billing times, brings back the latest one that passed and bills only that one (spike Q2)", () => {
+    let now = NOW;
+    const paused = createPayPalMock({ clock: () => now });
+    const maya = () => paused.state.getSubscription(PANTRY_PLAN_MERCHANT, MAYA);
+    const billing = () => {
+      const info = maya().billing_info;
+      if (!info) throw new Error("no billing info");
+      return info;
+    };
+    const first = new Date(billing().next_billing_time ?? "");
+    const cyclesBefore = billing().cycle_executions[0]?.cycles_completed;
+    const monthsAfter = (n: number) => {
+      const d = new Date(first);
+      d.setUTCMonth(d.getUTCMonth() + n);
+      return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+    };
+
+    paused.state.suspend(PANTRY_PLAN_MERCHANT, MAYA);
+    // Three monthly billing times pass while suspended; activation comes 3 hours after the third.
+    now = new Date(Date.parse(monthsAfter(2)) + 3 * 3600_000);
+    paused.state.activate(PANTRY_PLAN_MERCHANT, MAYA);
+    expect(billing().next_billing_time).toBe(monthsAfter(2)); // already past, as in the sandbox
+    expect(billing().cycle_executions[0]?.cycles_completed).toBe(cyclesBefore);
+    expect(billing().outstanding_balance.value).toBe("0.00");
+
+    // PayPal's later charge: one cycle, then the normal schedule.
+    paused.state.renew(MAYA);
+    expect(billing().cycle_executions[0]?.cycles_completed).toBe((cyclesBefore ?? 0) + 1);
+    expect(billing().next_billing_time).toBe(monthsAfter(3));
+  });
+
   it("creates a subscription that waits for the buyer, then charges the first cycle on approval", async () => {
     const created = await call("POST", "/v1/billing/subscriptions", {
       plan_id: "P-PANTRY-STANDARD",

@@ -25,5 +25,6 @@ Owner: <name> · Date: <yyyy-mm-dd>
 | `quick` | Suspend, activate 10 s later, watch billing for a minute: a pause that crosses no billing date. |
 | `pause`, then `resume` | Suspend now, activate after the next billing time has passed: what PayPal does with the missed cycle. |
 | `list` | Whether `GET /v1/billing/subscriptions` (the reconciler's sweep) works, by plan and by `status_updated_after`. |
+| `cancel` | Cancels the spike subscription so the daily $1.00 sandbox charge stops. Irreversible; `setup` makes a new one. |
 
 The subscription id lives in `.spike/sandbox.json` (gitignored). Read the saved fixtures before committing them; the scrubber replaces emails, payer and merchant ids, addresses, buyer names and approval tokens.
