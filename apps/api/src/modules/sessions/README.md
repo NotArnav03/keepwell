@@ -64,3 +64,7 @@ Secrets:
 Streams and the database: `subscribe` polls once a second only while it is needed. It stops when the session closes, and the route ends a stream with no event for 12 minutes (`idleMs`). A reconnect to a session that is quiet and not waiting on PayPal gets 204, so the browser stops retrying. The widget reopens the stream from its last event whenever the subscriber acts. An open tab therefore doesn't keep Neon's compute awake.
 
 Tests: `service.db.test.ts` runs against Postgres (`KEEPWELL_TEST_DATABASE_URL`, as in CI); locally `docker run -d -e POSTGRES_PASSWORD=postgres -p 55432:5432 postgres:18` is enough.
+
+## Rate limits
+
+`sessionRoutes` takes an optional `rateLimits` (#26). With `defaultSessionRateLimits()`, one IP gets 10 new sessions and 30 messages or reason taps a minute; past that the route answers 429 `limit_reached` with `Retry-After`. Cancel is never limited. The limits are in memory (one Render instance), and the daily LLM budget guard sits behind them. Behind Render's proxy, `request.ip` needs Fastify's `trustProxy`.
