@@ -25,3 +25,11 @@ Set these in the root `.env` (all public values; never put a secret here):
 | `API_PUBLIC_URL`, `WIDGET_CDN_URL` | Where the API and the widget are served |
 
 `pnpm --filter @keepwell/demo-store build` writes `dist/` for the Render static site.
+
+## Hosted
+
+`render.yaml` deploys it as `keepwell-store-staging` and `keepwell-store-demo` (free static sites). The build
+also bundles the widget and serves `v1.js` from the store's own origin, so there is no separate widget host.
+Each API lists the store's origin in `WIDGET_ALLOWED_ORIGINS`; if Render assigns a different hostname,
+change it there and in the store's `WIDGET_CDN_URL`. Someone on the team sets `PAYPAL_CLIENT_ID` and the three plan ids in the
+Render dashboard; until then the store runs in FAKE PAYPAL mode.

@@ -1,4 +1,5 @@
-# Render Blueprint for staging and prod-demo: the API and the merchant dashboard for each.
+# Render Blueprint for staging and prod-demo: the API, the merchant dashboard, the subscriber portal
+# and the Pantry Plan demo store for each.
 # Arnav (M1) applies it by hand.
 # Secrets use `sync: false`, so Render asks for them; they never live in this file.
 # Free plan (the project runs on ₹0): it sleeps after 15 idle minutes and wakes on the next request
@@ -79,9 +80,10 @@ services:
       # The seeded demo merchant's id in this environment's database.
       - key: DEMO_MERCHANT_ID
         sync: false
-      # Origins that call /v1/sessions directly (the demo store); comma-separated.
+      # Origins that call /v1/sessions directly: the Pantry Plan store below. Comma-separated. If
+      # Render gives the store a different hostname, change this and the store's WIDGET_CDN_URL.
       - key: WIDGET_ALLOWED_ORIGINS
-        sync: false
+        value: https://keepwell-store-staging.onrender.com
 
   # The merchant dashboard (apps/dashboard, M4) as a free static site on Render's CDN. /v1/* is
   # rewritten to the staging API, so the browser sees one origin: the session cookie stays
@@ -150,6 +152,40 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  # Pantry Plan (apps/demo-store, M3, #34): the fictional merchant judges subscribe on, on its own
+  # origin, so the widget runs on a third-party site the way a real merchant installs it. The build
+  # also bundles the widget (packages/widget) and serves v1.js from this same site, so no separate
+  # widget host is needed. Everything here is public: PAYPAL_CLIENT_ID is the sandbox app's public
+  # client id and the plan ids come from the seed script; no secret ever goes in a static site.
+  - type: web
+    name: keepwell-store-staging
+    runtime: static
+    branch: main
+    buildFilter:
+      paths:
+        - apps/demo-store/**
+        - packages/widget/**
+        - packages/contracts/**
+        - pnpm-lock.yaml
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/demo-store --filter=@keepwell/widget && pnpm --filter @keepwell/widget bundle && cp packages/widget/dist-bundle/v1.js apps/demo-store/dist/v1.js
+    staticPublishPath: apps/demo-store/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-staging.onrender.com
+      - key: WIDGET_CDN_URL
+        value: https://keepwell-store-staging.onrender.com
+      # Unset: the store runs in FAKE PAYPAL mode and every subscribe fails verification.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_PLAN_LITE
+        sync: false
+      - key: PAYPAL_PLAN_STANDARD
+        sync: false
+      - key: PAYPAL_PLAN_ANNUAL
+        sync: false
 
   # ── prod-demo: what judges use (ARCHITECTURE.md §4, docs/RUNBOOK-prod-demo.md) ──────────────────
   # The same build as staging, but deployed only by hand: auto-deploy is off, and Arnav deploys
@@ -223,9 +259,10 @@ services:
       # The seeded demo merchant's id in this environment's database.
       - key: DEMO_MERCHANT_ID
         sync: false
-      # Origins that call /v1/sessions directly (the demo store); comma-separated.
+      # Origins that call /v1/sessions directly: the Pantry Plan store below. Comma-separated. If
+      # Render gives the store a different hostname, change this and the store's WIDGET_CDN_URL.
       - key: WIDGET_ALLOWED_ORIGINS
-        sync: false
+        value: https://keepwell-store-demo.onrender.com
 
   - type: web
     name: keepwell-dashboard-demo
@@ -274,3 +311,32 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  # Pantry Plan (apps/demo-store, M3, #34): the fictional merchant judges subscribe on, on its own
+  # origin, so the widget runs on a third-party site the way a real merchant installs it. The build
+  # also bundles the widget (packages/widget) and serves v1.js from this same site, so no separate
+  # widget host is needed. Everything here is public: PAYPAL_CLIENT_ID is the sandbox app's public
+  # client id and the plan ids come from the seed script; no secret ever goes in a static site.
+  - type: web
+    name: keepwell-store-demo
+    runtime: static
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/demo-store --filter=@keepwell/widget && pnpm --filter @keepwell/widget bundle && cp packages/widget/dist-bundle/v1.js apps/demo-store/dist/v1.js
+    staticPublishPath: apps/demo-store/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-demo.onrender.com
+      - key: WIDGET_CDN_URL
+        value: https://keepwell-store-demo.onrender.com
+      # Unset: the store runs in FAKE PAYPAL mode and every subscribe fails verification.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_PLAN_LITE
+        sync: false
+      - key: PAYPAL_PLAN_STANDARD
+        sync: false
+      - key: PAYPAL_PLAN_ANNUAL
+        sync: false
