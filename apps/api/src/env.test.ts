@@ -15,7 +15,14 @@ describe("loadEnv", () => {
       PAYPAL_MOCK_URL: "http://localhost:4010",
       TRUST_PROXY_HOPS: 0,
       RESEND_API_BASE: "https://api.resend.com",
+      LLM_DAILY_BUDGET_USD: 0.25,
     });
+  });
+
+  it("reads the daily model budget, and rejects a negative one", () => {
+    expect(loadEnv({ LLM_DAILY_BUDGET_USD: "0.02" })).toMatchObject({ LLM_DAILY_BUDGET_USD: 0.02 });
+    expect(loadEnv({ LLM_DAILY_BUDGET_USD: "" })).toMatchObject({ LLM_DAILY_BUDGET_USD: 0.25 });
+    expect(() => loadEnv({ LLM_DAILY_BUDGET_USD: "-1" })).toThrow();
   });
 
   describe("PayPal", () => {

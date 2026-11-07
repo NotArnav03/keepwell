@@ -49,6 +49,10 @@ const EnvSchema = z
     // Win-back: where the exit-interview reply page lives, and the secret that signs its links.
     PORTAL_URL: optionalUrl,
     MAGIC_LINK_SECRET: z.preprocess(blank, z.string().min(16).optional()),
+    // Unset: no model calls anywhere; sessions run in L1 and insights use their fallback record.
+    ANTHROPIC_API_KEY: optionalString,
+    // Daily spend cap for every model call (agent, insights, copilot), in USD. Shared by one LlmBudget.
+    LLM_DAILY_BUDGET_USD: z.preprocess(blank, z.coerce.number().min(0).default(0.25)),
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
     SENTRY_DSN: optionalUrl,
   })
