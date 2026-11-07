@@ -17,6 +17,7 @@ import { opsRoutes } from "./modules/reconcile/ops.js";
 import { Reconciler } from "./modules/reconcile/reconciler.js";
 import { SubscriptionSync } from "./modules/reconcile/sync.js";
 import { webhookIntake } from "./modules/webhooks/intake.js";
+import { mountSurfaces } from "./modules/surfaces.js";
 import { WebhookProcessor } from "./modules/webhooks/processor.js";
 import { buildServer, type ReadinessCheck } from "./server.js";
 
@@ -68,6 +69,20 @@ export async function startPlatform(env: Env): Promise<Platform> {
     reconciler,
     paypal,
     notifier: notify.notifier,
+    log: app.log,
+  });
+
+  // M3: sessions, subscriber MCP, Judge Mode and the demo store backend (each only with its secrets).
+  await mountSurfaces({
+    app,
+    env,
+    db,
+    paypal,
+    engine,
+    events,
+    audit,
+    jobs,
+    judgePool: core.judgePool,
     log: app.log,
   });
 

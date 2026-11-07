@@ -15,6 +15,32 @@ describe("loadEnv", () => {
       PAYPAL_MOCK_URL: "http://localhost:4010",
       TRUST_PROXY_HOPS: 0,
       RESEND_API_BASE: "https://api.resend.com",
+      LLM_DAILY_BUDGET_USD: 0.1,
+    });
+  });
+
+  describe("subscriber surfaces", () => {
+    it("reads the widget origins as a list and treats blanks as unset", () => {
+      const env = loadEnv({
+        WIDGET_ALLOWED_ORIGINS: "http://localhost:5176, https://store.example ,",
+        SESSION_TICKET_SECRET: "",
+        DEMO_MERCHANT_ID: "",
+      });
+      expect(env.WIDGET_ALLOWED_ORIGINS).toEqual(["http://localhost:5176", "https://store.example"]);
+      expect(env.SESSION_TICKET_SECRET).toBeUndefined();
+      expect(env.DEMO_MERCHANT_ID).toBeUndefined();
+    });
+
+    it("refuses short secrets and a model budget above the $5 credit", () => {
+      expect(() => loadEnv({ SESSION_TICKET_SECRET: "short" })).toThrow(/SESSION_TICKET_SECRET/);
+      expect(() => loadEnv({ JUDGE_LEASE_SECRET: "short" })).toThrow(/JUDGE_LEASE_SECRET/);
+      expect(() => loadEnv({ LLM_DAILY_BUDGET_USD: "6" })).toThrow(/LLM_DAILY_BUDGET_USD/);
+      expect(loadEnv({ LLM_DAILY_BUDGET_USD: "0.25" }).LLM_DAILY_BUDGET_USD).toBe(0.25);
+    });
+
+    it("refuses an origin that is not a URL and a demo merchant id that is not a uuid", () => {
+      expect(() => loadEnv({ WIDGET_ALLOWED_ORIGINS: "not a url" })).toThrow(/WIDGET_ALLOWED_ORIGINS/);
+      expect(() => loadEnv({ DEMO_MERCHANT_ID: "pantry" })).toThrow(/DEMO_MERCHANT_ID/);
     });
   });
 

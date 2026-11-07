@@ -48,6 +48,39 @@ const EnvSchema = z
     UNSUBSCRIBE_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
     // Errors go to Sentry when set (free tier); nothing is sent otherwise.
     SENTRY_DSN: optionalUrl,
+    // --- Subscriber surfaces (M3): sessions, subscriber MCP, Judge Mode (modules/surfaces.ts) ---
+    // Unset: the agent runs in L1 only (reason chips, no model), and cancel works as always.
+    ANTHROPIC_API_KEY: optionalString,
+    // The daily cap for the whole deployment's model calls (#83). The credit is $5 in total.
+    LLM_DAILY_BUDGET_USD: z.preprocess(blank, z.coerce.number().positive().max(5).default(0.1)),
+    // The demo merchant (prod-demo's or staging's, from the seed): widget tokens and Judge Mode.
+    DEMO_MERCHANT_ID: z.preprocess(blank, z.uuid().optional()),
+    // Signs widget tokens for the demo merchant only (demoMerchantWidgetSecret).
+    WIDGET_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Signs the stream URL's read-only ticket. The sessions API mounts only when it is set.
+    SESSION_TICKET_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Signs the portal's cookie and its session tokens (the portal mounts separately).
+    MAGIC_LINK_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Signs Judge Mode's lease tokens. Judge Mode mounts only when this, the demo merchant and the
+    // widget secret are all set.
+    JUDGE_LEASE_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Comma-separated origins that may call /v1/sessions directly (merchant sites with the widget,
+    // the demo store). The portal and Judge Mode call through their own /v1 rewrite instead.
+    WIDGET_ALLOWED_ORIGINS: z.preprocess(
+      blank,
+      z
+        .string()
+        .transform((v) =>
+          v
+            .split(",")
+            .map((o) => o.trim())
+            .filter((o) => o !== ""),
+        )
+        .pipe(z.array(z.url()))
+        .optional(),
+    ),
+    // The portal's origin: emailed sign-in links, and the discovery document's "get a token" link.
+    PORTAL_URL: optionalUrl,
   })
   .superRefine((env, ctx) => {
     if (env.PAYPAL_USE_MOCK && env.APP_ENV !== "local") {
