@@ -78,6 +78,13 @@
       "when": 1794061112647,
       "tag": "0010_insight_views",
       "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1794061526347,
+      "tag": "0011_insight_action_details",
+      "breakpoints": true
     }
   ]
 }
