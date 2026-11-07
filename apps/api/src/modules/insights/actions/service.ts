@@ -48,8 +48,7 @@ export interface WinbackBatchResult {
 
 /**
  * Starts a win-back for each subscription. `queued` counts subscriptions that will be messaged.
- * The win-back module's `startBatch` is what should sit behind this; until it exists, the jobs
- * adapter reports every id as skipped.
+ * The win-back module's `startBatch` sits behind this (WinbackStartBatchSender in adapters.ts).
  */
 export interface WinbackBatchSender {
   send(merchantId: string, params: SendWinbackBatchInput): Promise<WinbackBatchResult>;

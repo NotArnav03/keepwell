@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { PANTRY_PLAN } from "@keepwell/contracts/fakes";
 import type { PublishPolicyRequest } from "@keepwell/contracts";
-import type { Db } from "@keepwell/db";
-import { applyChange, JobsWinbackSender, PolicyApiPublisher, type PolicyApi } from "./adapters.js";
+import { applyChange, WinbackStartBatchSender, PolicyApiPublisher, type PolicyApi } from "./adapters.js";
 import type { MerchantPrincipal } from "./service.js";
 
 const principal: MerchantPrincipal = {
@@ -82,35 +81,32 @@ describe("PolicyApiPublisher", () => {
   });
 });
 
-describe("JobsWinbackSender", () => {
-  it("skips every subscription until win-back startBatch exists", async () => {
-    let queried = 0;
-    let enqueued = 0;
-    const sender = new JobsWinbackSender(
-      {
-        forMerchant: () => {
-          queried += 1;
-          return Promise.reject(new Error("should not query"));
-        },
-      } as unknown as Db,
-      {
-        send: () => {
-          enqueued += 1;
-          return Promise.resolve(null);
-        },
+describe("WinbackStartBatchSender", () => {
+  const ids = ["0199a1b2-c3d4-7e5f-8a6b-000000000011", "0199a1b2-c3d4-7e5f-8a6b-000000000012"];
+
+  it("passes the merchant and ids to startBatch and returns its true counts", async () => {
+    const calls: [string, string[]][] = [];
+    const sender = new WinbackStartBatchSender({
+      startBatch: (merchantId, subscriptionIds) => {
+        calls.push([merchantId, subscriptionIds]);
+        return Promise.resolve({
+          queued: 1,
+          skipped: [{ subscriptionId: ids[1] ?? "", reason: "not_cancelled" }],
+        });
       },
-    );
-    const ids = ["0199a1b2-c3d4-7e5f-8a6b-000000000011", "0199a1b2-c3d4-7e5f-8a6b-000000000012"];
+    });
     await expect(
       sender.send(principal.merchantId, { subscriptionIds: ids, reason: "price" }),
-    ).resolves.toEqual({
-      queued: 0,
-      skipped: ids.map((subscriptionId) => ({
-        subscriptionId,
-        reason: "win-back batch is not available yet",
-      })),
+    ).resolves.toEqual({ queued: 1, skipped: [{ subscriptionId: ids[1], reason: "not_cancelled" }] });
+    expect(calls).toEqual([[principal.merchantId, ids]]);
+  });
+
+  it("lets a startBatch failure through, so approve() records the action as failed", async () => {
+    const sender = new WinbackStartBatchSender({
+      startBatch: () => Promise.reject(new Error("batch limit is 500")),
     });
-    expect(queried).toBe(0);
-    expect(enqueued).toBe(0);
+    await expect(
+      sender.send(principal.merchantId, { subscriptionIds: ids, reason: "price" }),
+    ).rejects.toThrow(/batch limit/);
   });
 });

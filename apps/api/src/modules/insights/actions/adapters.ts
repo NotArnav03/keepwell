@@ -1,6 +1,5 @@
 import { isDeepStrictEqual } from "node:util";
 import { PublishPolicyRequest } from "@keepwell/contracts";
-import type { Db } from "@keepwell/db";
 import type {
   MerchantPrincipal,
   PolicyPublisher,
@@ -72,30 +71,26 @@ function child(node: unknown, key: string, path: string, allowMissing = false): 
   return record[key];
 }
 
-/** What the real job queue offers: `winback.start` per subscription (keyed by subscription id). */
-export interface WinbackJobQueue {
-  send(name: "winback.start", payload: { subscriptionId: string }): Promise<string | null>;
+/**
+ * What win-back offers for a batch: `WinbackService.startBatch` satisfies it. Declared here so this
+ * module depends on the shape, not on win-back's internals (modules talk through interfaces).
+ */
+export interface WinbackBatchStarter {
+  startBatch(
+    merchantId: string,
+    subscriptionIds: string[],
+  ): Promise<{ queued: number; skipped: { subscriptionId: string; reason: string }[] }>;
 }
 
 /**
- * Win-back batch behind `WinbackBatchSender`. Cannot report real counts yet: `winback.start` only
- * acts on subscriptions that already have a case, so enqueueing it would record a send that did
- * not happen. Callers still pass `db` and `jobs`; `startBatch` replaces `send`.
+ * Win-back batch behind `WinbackBatchSender`. `startBatch` opens a due-now case for each CANCELLED
+ * subscription and queues the normal start, skips (with a reason) everything else, and is
+ * idempotent, so its `{ queued, skipped }` are the true counts that `approve()` records.
  */
-export class JobsWinbackSender implements WinbackBatchSender {
-  constructor(_db: Db, _jobs: WinbackJobQueue) {}
+export class WinbackStartBatchSender implements WinbackBatchSender {
+  constructor(private readonly winback: WinbackBatchStarter) {}
 
-  send(_merchantId: string, params: SendWinbackBatchInput): Promise<WinbackBatchResult> {
-    // TODO(win-back startBatch): replace this return with startBatch(merchantId, subscriptionIds)
-    // from the win-back module (do not import it until that PR merges) and return its
-    // { queued, skipped }. That function opens the cases. Until then every id is skipped, so
-    // approve() fails the action instead of saying the batch was sent.
-    return Promise.resolve({
-      queued: 0,
-      skipped: params.subscriptionIds.map((subscriptionId) => ({
-        subscriptionId,
-        reason: "win-back batch is not available yet",
-      })),
-    });
+  send(merchantId: string, params: SendWinbackBatchInput): Promise<WinbackBatchResult> {
+    return this.winback.startBatch(merchantId, params.subscriptionIds);
   }
 }
