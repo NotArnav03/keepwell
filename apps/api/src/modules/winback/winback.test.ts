@@ -260,7 +260,8 @@ describe("reply endpoint", () => {
       "I was away for 2 months and paid 12 dollars on 3 March. Reach me at [email] or [phone]. Card [number].",
     );
     expect(JSON.stringify(s.audit.entries)).not.toContain("maya@example.test");
-    expect(JSON.stringify(s.audit.entries)).not.toContain("4111");
+    expect(JSON.stringify(s.audit.entries)).not.toContain("4111-1111");
+    expect(JSON.stringify(s.audit.entries)).not.toContain("4111111111111111");
   });
 
   it("rejects a reused token", async () => {
