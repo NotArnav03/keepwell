@@ -75,7 +75,7 @@ export const merchantOnboardingRoutes: FastifyPluginCallback<MerchantOnboardingR
       );
     }
 
-    const secretEnc = encryptPayPalSecret(credentials.clientSecret, encryptionKey);
+    const secretEnc = encryptPayPalSecret(credentials.clientSecret, encryptionKey, principal.merchantId);
     const storedAt = new Date().toISOString();
     await options.db.forMerchant(principal.merchantId, async (tx) => {
       const updated = await tx

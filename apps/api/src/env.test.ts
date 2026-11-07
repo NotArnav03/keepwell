@@ -54,17 +54,20 @@ describe("loadEnv", () => {
       ).not.toThrow();
     });
 
-    it("requires a sufficiently long session secret and a dashboard origin when hosted", () => {
-      expect(() => loadEnv({ ...db, APP_ENV: "staging", SESSION_SECRET: "short" })).toThrow(/DASHBOARD_URL/);
+    it("boots a hosted environment without the dashboard variables (the merchant routes stay off)", () => {
+      const hosted = { ...db, APP_ENV: "staging", PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" };
+      const env = loadEnv(hosted);
+      expect(env.SESSION_SECRET).toBeUndefined();
+      expect(env.DASHBOARD_URL).toBeUndefined();
+      expect(env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY).toBeUndefined();
+    });
+
+    it("still checks the format of the dashboard variables when they are set", () => {
+      const hosted = { ...db, APP_ENV: "staging", PAYPAL_CLIENT_ID: "id", PAYPAL_CLIENT_SECRET: "secret" };
+      expect(() => loadEnv({ ...hosted, SESSION_SECRET: "short" })).toThrow(/32 bytes/);
       expect(() =>
-        loadEnv({
-          ...db,
-          APP_ENV: "staging",
-          SESSION_SECRET: "short",
-          DASHBOARD_URL: "https://dashboard.example.test",
-          PAYPAL_CREDENTIALS_ENCRYPTION_KEY: Buffer.alloc(32, 7).toString("base64"),
-        }),
-      ).toThrow(/32 bytes/);
+        loadEnv({ ...hosted, PAYPAL_CREDENTIALS_ENCRYPTION_KEY: Buffer.alloc(16, 1).toString("base64") }),
+      ).toThrow(/exactly 32 bytes/);
     });
   });
 

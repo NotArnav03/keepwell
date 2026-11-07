@@ -254,8 +254,10 @@ export class MerchantAuthenticator {
       csrfToken,
       expiresAt: Math.floor(this.now() / 1000) + SESSION_TTL_SECONDS,
     };
-    const sameSite = secure ? "None" : "Lax";
-    const cookie = `${SESSION_COOKIE}=${signClaims(claims, this.secret)}; Path=/v1/m; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; SameSite=${sameSite}${secure ? "; Secure" : ""}`;
+    // Lax, not None: the dashboard is served same-origin (its static site rewrites /v1/* to this API),
+    // and a cross-site cookie between two *.onrender.com hosts is blocked by Safari and partitioned
+    // by Firefox, so judges on those browsers couldn't stay signed in.
+    const cookie = `${SESSION_COOKIE}=${signClaims(claims, this.secret)}; Path=/v1/m; Max-Age=${SESSION_TTL_SECONDS}; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
     const identity = MerchantMeResponse.parse({
       merchant: { id: user.merchantId, slug: user.merchantSlug, name: user.merchantName },
       user: { id: user.userId, email: user.email, role: user.role },
@@ -265,8 +267,7 @@ export class MerchantAuthenticator {
   }
 
   clearCookie(secure: boolean): string {
-    const sameSite = secure ? "None" : "Lax";
-    return `${SESSION_COOKIE}=; Path=/v1/m; Max-Age=0; HttpOnly; SameSite=${sameSite}${secure ? "; Secure" : ""}`;
+    return `${SESSION_COOKIE}=; Path=/v1/m; Max-Age=0; HttpOnly; SameSite=Lax${secure ? "; Secure" : ""}`;
   }
 }
 

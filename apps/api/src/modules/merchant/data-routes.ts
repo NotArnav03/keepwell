@@ -1,10 +1,7 @@
 import { and, asc, eq, gt, gte, inArray, lte, sql } from "drizzle-orm";
 import type { FastifyPluginCallback, FastifyReply, FastifyRequest } from "fastify";
-import type { Pool } from "pg";
-import { z } from "zod";
 import {
   Action,
-  AuditEntry,
   DomainEventEnvelope,
   ErrorEnvelope,
   Id,
@@ -27,7 +24,8 @@ import {
   subscriptions,
   type Db,
 } from "@keepwell/db";
-import { MERCHANT_FEED_CHANNEL } from "../jobs/domain-events.js";
+import { AuditInvalidCursor, type DbAudit } from "../audit/log.js";
+import type { FeedHub } from "./feed-hub.js";
 import { MerchantAuthError, type MerchantAuthenticator } from "./auth.js";
 import { listAtRisk } from "../insights/risk/query.js";
 
@@ -42,7 +40,9 @@ const ClientError = new Map<number, string>([
 
 export interface MerchantDataRoutesOptions {
   db: Db;
-  pool: Pool;
+  /** One shared LISTEN connection (feed-hub.ts); streams only register a callback with it. */
+  feed: FeedHub;
+  audit: Pick<DbAudit, "list">;
   authenticator: MerchantAuthenticator;
 }
 
@@ -164,34 +164,14 @@ export const merchantDataRoutes: FastifyPluginCallback<MerchantDataRoutesOptions
     const principal = await options.authenticator.authenticate(request);
     const parsed = MerchantAuditQuery.safeParse(request.query);
     if (!parsed.success) return sendError(request, reply, 400, "Invalid audit filters.");
-    const cursor = parsed.data.cursor === undefined ? undefined : Number(parsed.data.cursor);
-    if (cursor !== undefined && (!Number.isSafeInteger(cursor) || cursor < 1)) {
-      return sendError(request, reply, 400, "Invalid audit cursor.");
+    // DbAudit.list: newest first, exact-value subject match, cursor validated (tests against Postgres).
+    try {
+      const page = await options.audit.list(principal.merchantId, parsed.data);
+      return reply.send(MerchantAuditResponse.parse(page));
+    } catch (error) {
+      if (error instanceof AuditInvalidCursor) return sendError(request, reply, 400, "Invalid audit cursor.");
+      throw error;
     }
-    const rows = await options.db.forMerchant(principal.merchantId, (tx) =>
-      tx
-        .select()
-        .from(auditLog)
-        .where(
-          and(
-            eq(auditLog.merchantId, principal.merchantId),
-            parsed.data.kind ? eq(auditLog.kind, parsed.data.kind) : undefined,
-            parsed.data.subject
-              ? sql`${auditLog.subjectIds}::text ILIKE ${`%${escapeLike(parsed.data.subject)}%`}`
-              : undefined,
-            cursor === undefined ? undefined : gt(auditLog.seq, cursor),
-          ),
-        )
-        .orderBy(asc(auditLog.seq))
-        .limit(PAGE_SIZE + 1),
-    );
-    const page = rows.slice(0, PAGE_SIZE);
-    return reply.send(
-      MerchantAuditResponse.parse({
-        entries: page.map((row) => AuditEntry.parse({ ...row, at: row.at.toISOString() })),
-        nextCursor: rows.length > PAGE_SIZE ? String(page.at(-1)?.seq ?? "") : null,
-      }),
-    );
   });
 
   app.get("/timeline", async (request, reply) => {
@@ -250,15 +230,6 @@ export const merchantDataRoutes: FastifyPluginCallback<MerchantDataRoutesOptions
     if (lastEventHeader && !lastEventId?.success) {
       return sendError(request, reply, 400, "Invalid event cursor.");
     }
-    const client = await options.pool.connect();
-    try {
-      await client.query(`LISTEN ${MERCHANT_FEED_CHANNEL}`);
-    } catch (error) {
-      client.release();
-      request.log.error({ err: error }, "merchant feed LISTEN failed");
-      return sendError(request, reply, 503, "Live activity is temporarily unavailable.");
-    }
-
     reply.hijack();
     reply.raw.writeHead(200, {
       "content-type": "text/event-stream; charset=utf-8",
@@ -340,35 +311,22 @@ export const merchantDataRoutes: FastifyPluginCallback<MerchantDataRoutesOptions
         }
       }
     };
-    const Notification = z.object({ merchantId: Id, eventId: Id });
-    const onNotification = (notification: { channel?: string | null; payload?: string | null }) => {
-      if (notification.channel !== MERCHANT_FEED_CHANNEL || !notification.payload) return;
-      let payload: unknown;
-      try {
-        payload = JSON.parse(notification.payload) as unknown;
-      } catch (error) {
-        request.log.warn({ err: error }, "malformed merchant feed notification");
-        return;
-      }
-      const message = Notification.safeParse(payload);
-      if (!message.success || message.data.merchantId !== principal.merchantId) return;
-      void drain();
-    };
-    client.on("notification", onNotification);
+    // A notification for this merchant, or null after the hub reconnected (some may have been lost):
+    // either way, re-read from the cursor.
+    const unsubscribe = options.feed.subscribe((merchantId) => {
+      if (merchantId === null || merchantId === principal.merchantId) void drain();
+    });
+    // The heartbeat also re-reads, so a stream still catches up if the hub is down for a while.
     const heartbeat = setInterval(() => {
-      if (!closed) reply.raw.write(": keep-alive\n\n");
+      if (closed) return;
+      reply.raw.write(": keep-alive\n\n");
+      void drain();
     }, 15_000);
     const cleanup = () => {
       if (closed) return;
       closed = true;
       clearInterval(heartbeat);
-      client.removeListener("notification", onNotification);
-      client
-        .query(`UNLISTEN ${MERCHANT_FEED_CHANNEL}`)
-        .catch((error: unknown) => {
-          request.log.warn({ err: error }, "merchant feed UNLISTEN failed");
-        })
-        .finally(() => client.release());
+      unsubscribe();
     };
     reply.raw.once("close", cleanup);
     await drain();

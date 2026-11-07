@@ -63,25 +63,14 @@ const EnvSchema = z
     SENTRY_DSN: optionalUrl,
   })
   .superRefine((env, ctx) => {
+    // SESSION_SECRET, DASHBOARD_URL and PAYPAL_CREDENTIALS_ENCRYPTION_KEY are optional on purpose: the
+    // merchant routes, onboarding and stored credentials switch on once they are set (platform.ts),
+    // so deploying this code never takes a running environment down. Only their format is checked.
     if (env.SESSION_SECRET && Buffer.byteLength(env.SESSION_SECRET, "utf8") < 32) {
       ctx.addIssue({
         code: "custom",
         path: ["SESSION_SECRET"],
         message: "SESSION_SECRET must be at least 32 bytes",
-      });
-    }
-    if (env.APP_ENV !== "local" && !env.SESSION_SECRET) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["SESSION_SECRET"],
-        message: `Required when APP_ENV=${env.APP_ENV}`,
-      });
-    }
-    if (env.APP_ENV !== "local" && !env.DASHBOARD_URL) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["DASHBOARD_URL"],
-        message: `Required when APP_ENV=${env.APP_ENV}`,
       });
     }
     if (env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY) {
@@ -96,13 +85,6 @@ const EnvSchema = z
           message: "Must be base64 encoding of exactly 32 bytes",
         });
       }
-    }
-    if (!env.PAYPAL_USE_MOCK && env.APP_ENV !== "local" && !env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY) {
-      ctx.addIssue({
-        code: "custom",
-        path: ["PAYPAL_CREDENTIALS_ENCRYPTION_KEY"],
-        message: `Required when APP_ENV=${env.APP_ENV} and PayPal mock is disabled`,
-      });
     }
     if (env.PAYPAL_USE_MOCK && env.APP_ENV !== "local") {
       ctx.addIssue({

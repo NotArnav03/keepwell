@@ -53,10 +53,11 @@ services:
       # shares one rate limit, too many lets a client pick its own address.
       - key: TRUST_PROXY_HOPS
         value: "3"
-      # Set the exact static-site origin so credentialed CORS and CSRF checks are restricted to it.
+      # The dashboard's own origin: credentialed CORS and CSRF checks are restricted to it.
       - key: DASHBOARD_URL
-        sync: false
-      # Random 32+ byte secret generated separately for each environment.
+        value: https://keepwell-dashboard-staging.onrender.com
+      # Random 32+ byte secret generated separately for each environment. Until it (and DASHBOARD_URL)
+      # is set the merchant routes stay off and the API boots as before.
       - key: SESSION_SECRET
         sync: false
       - key: OPS_TOKEN
@@ -238,6 +239,13 @@ services:
         value: "3"
       # Generate each secret fresh for prod-demo; never reuse staging's.
       - key: OPS_TOKEN
+        sync: false
+      - key: DASHBOARD_URL
+        value: https://keepwell-dashboard-demo.onrender.com
+      - key: SESSION_SECRET
+        sync: false
+      # base64 of exactly 32 random bytes (`openssl rand -base64 32`): encrypts merchants' stored PayPal secrets.
+      - key: PAYPAL_CREDENTIALS_ENCRYPTION_KEY
         sync: false
       - key: UNSUBSCRIBE_TOKEN_SECRET
         sync: false

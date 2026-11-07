@@ -89,7 +89,7 @@ describe("merchant authentication", () => {
     expect(identity.csrfToken).toHaveLength(43);
     expect(response.headers["set-cookie"]).toContain("HttpOnly");
     expect(response.headers["set-cookie"]).toContain("Secure");
-    expect(response.headers["set-cookie"]).toContain("SameSite=None");
+    expect(response.headers["set-cookie"]).toContain("SameSite=Lax");
   });
 
   it("does not reveal whether an email or password was incorrect", async () => {

@@ -16,6 +16,7 @@ import {
   merchantAuthRoutes,
 } from "./modules/merchant/auth.js";
 import { merchantDataRoutes } from "./modules/merchant/data-routes.js";
+import { PgFeedHub } from "./modules/merchant/feed-hub.js";
 import { merchantOnboardingRoutes } from "./modules/merchant/onboarding-routes.js";
 import { DbCredentialSource } from "./modules/merchant/credentials.js";
 import { policyRoutes } from "./modules/policy/routes.js";
@@ -157,6 +158,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   await app.register(notifyRoutes, { prefix: "/v1", db, audit, config: notifyConfig, log: app.log });
   await app.register(webhookIntake, { db, jobs });
   await app.register(reviseReturn, { prefix: "/v1", db, engine });
+  let feedHub: PgFeedHub | undefined;
   if (env.SESSION_SECRET && env.DASHBOARD_URL) {
     const authenticator = new MerchantAuthenticator(
       new MerchantAuthService(new DbMerchantAuthStore(db)),
@@ -168,7 +170,10 @@ export async function startPlatform(env: Env): Promise<Platform> {
       authenticator,
       secureCookies: env.NODE_ENV === "production",
     });
-    await app.register(merchantDataRoutes, { prefix: "/v1/m", db, pool, authenticator });
+    // One LISTEN connection for every open dashboard, not one per tab (the pool is shared with the workers).
+    feedHub = new PgFeedHub(pool, app.log);
+    await feedHub.start();
+    await app.register(merchantDataRoutes, { prefix: "/v1/m", db, feed: feedHub, audit, authenticator });
     await app.register(auditRoutes, {
       prefix: "/v1/m",
       audit,
@@ -219,7 +224,11 @@ export async function startPlatform(env: Env): Promise<Platform> {
     paypalCheck: () => paypal.checkAuth("status"),
     ...(env.OPS_TOKEN && { opsToken: env.OPS_TOKEN }),
   });
-  app.addHook("onClose", () => pool.end());
+  app.addHook("onClose", async () => {
+    // The hub holds a pool connection; pool.end() waits for it to be released.
+    feedHub?.close();
+    await pool.end();
+  });
 
   app.log.info({ paypal: env.PAYPAL_USE_MOCK ? "mock" : "sandbox" }, "platform started");
   return {

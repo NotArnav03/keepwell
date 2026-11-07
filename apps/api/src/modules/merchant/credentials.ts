@@ -15,10 +15,13 @@ export function parseCredentialKey(encoded: string): Buffer {
   return key;
 }
 
-export function encryptPayPalSecret(secret: string, key: Buffer): string {
+// The merchant id is bound in as GCM additional data, so a secret copied onto another merchant's row
+// fails to decrypt instead of being used for them.
+export function encryptPayPalSecret(secret: string, key: Buffer, merchantId: string): string {
   if (key.length !== 32) throw new Error("AES-256-GCM needs a 32-byte key");
   const iv = randomBytes(12);
   const cipher = createCipheriv(ALGORITHM, key, iv);
+  cipher.setAAD(Buffer.from(merchantId, "utf8"));
   const ciphertext = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
   const tag = cipher.getAuthTag();
   return [
@@ -29,7 +32,7 @@ export function encryptPayPalSecret(secret: string, key: Buffer): string {
   ].join(".");
 }
 
-export function decryptPayPalSecret(encrypted: string, key: Buffer): string {
+export function decryptPayPalSecret(encrypted: string, key: Buffer, merchantId: string): string {
   const [version, ivPart, tagPart, ciphertextPart, extra] = encrypted.split(".");
   if (version !== VERSION || !ivPart || !tagPart || ciphertextPart === undefined || extra !== undefined) {
     throw new Error("Stored PayPal credential has an unsupported format");
@@ -39,6 +42,7 @@ export function decryptPayPalSecret(encrypted: string, key: Buffer): string {
   const ciphertext = Buffer.from(ciphertextPart, "base64url");
   if (iv.length !== 12 || tag.length !== 16) throw new Error("Stored PayPal credential is malformed");
   const decipher = createDecipheriv(ALGORITHM, key, iv);
+  decipher.setAAD(Buffer.from(merchantId, "utf8"));
   decipher.setAuthTag(tag);
   return Buffer.concat([decipher.update(ciphertext), decipher.final()]).toString("utf8");
 }
@@ -64,10 +68,15 @@ export class DbCredentialSource implements CredentialSource {
     );
     if (row?.clientId && row.secretEnc) {
       try {
-        return { clientId: row.clientId, clientSecret: decryptPayPalSecret(row.secretEnc, this.key) };
+        return {
+          clientId: row.clientId,
+          clientSecret: decryptPayPalSecret(row.secretEnc, this.key, merchantId),
+        };
       } catch (cause) {
+        // "unauthorized", not "unavailable": a wrong key or a swapped secret is not transient, and
+        // "unavailable" is retryable, so every Action for this merchant would sit in RETRY_WAIT forever.
         const error = new PayPalGatewayError(
-          "unavailable",
+          "unauthorized",
           "Stored PayPal credentials could not be decrypted",
         );
         error.cause = cause;
