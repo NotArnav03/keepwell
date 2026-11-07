@@ -149,10 +149,13 @@ describe("merchant authentication", () => {
     const header = login.headers["set-cookie"];
     const pair = typeof header === "string" ? (header.split(";")[0] ?? "") : "";
     const token = pair.slice(pair.indexOf("=") + 1);
+    // Change the first character: the last base64url character carries unused bits, so swapping it
+    // can decode to the same bytes and leave the cookie valid (it failed roughly one run in four).
+    const flipped = `${token.startsWith("A") ? "B" : "A"}${token.slice(1)}`;
     const tampered = await app.inject({
       method: "GET",
       url: "/me",
-      headers: { cookie: `${pair.slice(0, pair.indexOf("="))}=${token.slice(0, -1)}x` },
+      headers: { cookie: `${pair.slice(0, pair.indexOf("="))}=${flipped}` },
     });
     expect(tampered.statusCode).toBe(401);
   });
