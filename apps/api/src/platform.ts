@@ -27,6 +27,8 @@ import { Jobs } from "./modules/jobs/jobs.js";
 import { DrizzleInsightStore, DrizzleSessionReader } from "./modules/insights/drizzle-store.js";
 import { InsightExtractor, noReplies } from "./modules/insights/extractor.js";
 import { registerInsights } from "./modules/insights/jobs.js";
+import { insightsOverview } from "./modules/insights/queries.js";
+import { insightsRoutes } from "./modules/insights/routes.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
 import { mountRecovery } from "./modules/recovery/mount.js";
 import { PayPalClient } from "./modules/paypal/client.js";
@@ -153,18 +155,29 @@ export async function startPlatform(env: Env): Promise<Platform> {
     jobs,
     registerDueWork: (name, fn) => reconciler.registerDueWork(name, fn),
   });
-  // Merchant auth (#48) isn't merged, so only the public unsubscribe route is mounted. Pass
-  // `authenticate` here when it lands to serve GET /v1/m/outbox (the Demo Inbox).
-  await app.register(notifyRoutes, { prefix: "/v1", db, audit, config: notifyConfig, log: app.log });
+  // Merchant sign-in: absent until SESSION_SECRET and DASHBOARD_URL are set, and every merchant route
+  // below waits for it. The public unsubscribe route never does.
+  const authenticator =
+    env.SESSION_SECRET && env.DASHBOARD_URL
+      ? new MerchantAuthenticator(
+          new MerchantAuthService(new DbMerchantAuthStore(db)),
+          env.SESSION_SECRET,
+          env.DASHBOARD_URL,
+        )
+      : undefined;
+  // With a signed-in merchant this also serves GET /v1/m/outbox (the Demo Inbox).
+  await app.register(notifyRoutes, {
+    prefix: "/v1",
+    db,
+    audit,
+    config: notifyConfig,
+    log: app.log,
+    ...(authenticator && { authenticate: (request) => authenticator.authenticate(request) }),
+  });
   await app.register(webhookIntake, { db, jobs });
   await app.register(reviseReturn, { prefix: "/v1", db, engine });
   let feedHub: PgFeedHub | undefined;
-  if (env.SESSION_SECRET && env.DASHBOARD_URL) {
-    const authenticator = new MerchantAuthenticator(
-      new MerchantAuthService(new DbMerchantAuthStore(db)),
-      env.SESSION_SECRET,
-      env.DASHBOARD_URL,
-    );
+  if (authenticator) {
     await app.register(merchantAuthRoutes, {
       prefix: "/v1/m",
       authenticator,
@@ -178,6 +191,12 @@ export async function startPlatform(env: Env): Promise<Platform> {
       prefix: "/v1/m",
       audit,
       authenticate: async (request) => authenticator.authenticate(request),
+    });
+    // GET /v1/m/insights?from&to (M5): the dashboard's insights panels.
+    await app.register(insightsRoutes, {
+      prefix: "/v1/m",
+      authenticate: (request) => authenticator.authenticate(request),
+      load: (merchantId, range, quoteLimit) => insightsOverview(db, merchantId, range, quoteLimit),
     });
     const policyService = new PolicyService({
       store: new DbPolicyStore(db),
