@@ -124,7 +124,7 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
             reasonCode: "x",
             failedCount: 1,
             playbook: "p",
-            state: "lost",
+            state: "closed",
           },
           {
             merchantId: A,

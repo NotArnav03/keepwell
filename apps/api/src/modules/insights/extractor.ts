@@ -101,7 +101,8 @@ export class InsightExtractor {
     const text = this.transcript(source);
     const hasSubscriberText = source.turns.some((t) => t.role === "subscriber" && t.text.trim() !== "");
     let model: ModelInsight | null = null;
-    if (hasSubscriberText && this.o.llm) model = await this.askModel(text, "sessionId" in ref ? ref.sessionId : null, { merchantId, ...ids });
+    if (hasSubscriberText && this.o.llm)
+      model = await this.askModel(text, "sessionId" in ref ? ref.sessionId : null, { merchantId, ...ids });
 
     const record = model
       ? this.toRecord(ref, model, source.knownNames)

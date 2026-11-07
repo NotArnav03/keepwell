@@ -66,6 +66,16 @@ describe("InsightExtractor", () => {
     expect(llm.calls[0]?.input).not.toMatch(/Maya|maya@example/);
   });
 
+  it("counts a session extraction toward that session's budget, and a win-back reply toward none", async () => {
+    const { llm, extractor } = setup();
+    llm.script("classify", { output: good });
+    llm.script("classify", { output: good });
+    const structured = vi.spyOn(llm, "structured");
+    await extractor.extract({ sessionId });
+    await extractor.extract({ replyId });
+    expect(structured.mock.calls.map(([call]) => call.sessionId)).toEqual([sessionId, null]);
+  });
+
   it("caps an over-long model quote at 20 words", async () => {
     const { llm, store, extractor } = setup();
     const quote = Array.from({ length: 40 }, (_, i) => `w${String(i)}`).join(" ");
