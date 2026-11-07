@@ -57,6 +57,13 @@
       "when": 1793982263236,
       "tag": "0007_dunning_cases_contract",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1794060669873,
+      "tag": "0008_winback",
+      "breakpoints": true
     }
   ]
 }

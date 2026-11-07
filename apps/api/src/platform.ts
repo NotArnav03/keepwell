@@ -6,6 +6,7 @@ import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
 import { reviseReturn } from "./modules/actions/revise-return.js";
 import { DbAudit } from "./modules/audit/log.js";
+import { registerWinback } from "./modules/winback/index.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
@@ -69,6 +70,20 @@ export async function startPlatform(env: Env): Promise<Platform> {
     paypal,
     notifier: notify.notifier,
     log: app.log,
+  });
+
+  // Win-back records every PayPal-side cancellation and sends one message through the notifier.
+  await registerWinback({
+    app,
+    db,
+    jobs,
+    events,
+    audit: core.audit,
+    reconciler,
+    paypal,
+    notifier: notify.notifier,
+    ...(env.PORTAL_URL && { portalUrl: env.PORTAL_URL }),
+    ...(env.MAGIC_LINK_SECRET && { tokenSecret: env.MAGIC_LINK_SECRET }),
   });
 
   await events.startWorker();
