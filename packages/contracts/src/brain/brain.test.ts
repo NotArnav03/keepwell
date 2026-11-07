@@ -202,6 +202,8 @@ describe("agent", () => {
       transcript: [{ role: "subscriber", text: "I'm travelling for two months", at: T }],
       presentedOfferId: "o1",
     });
+    roundTrips(SessionContext, { ...session, locale: "hi-IN" });
+    expect(SessionContext.safeParse({ ...session, locale: "h" }).success).toBe(false);
   });
 
   it("round-trips every AgentStreamEvent and rejects a bad consent hash", () => {

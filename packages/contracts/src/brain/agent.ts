@@ -36,6 +36,11 @@ export const SessionContext = z.object({
   /** The one offer already shown this session, if any. */
   presentedOfferId: z.string().nullable(),
   fallbackLevel: FallbackLevel,
+  /**
+   * The session's language (BCP 47) from CreateSessionRequest.locale. Template text uses it until
+   * the classifier hears the subscriber's own language, and for L1 chip taps, which carry no text.
+   */
+  locale: z.string().min(2).max(35).optional(),
 });
 export type SessionContext = z.infer<typeof SessionContext>;
 
