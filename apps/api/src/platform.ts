@@ -1,11 +1,12 @@
+import { randomBytes } from "node:crypto";
 import type { FastifyInstance } from "fastify";
-import { eq } from "drizzle-orm";
-import { actions, APP_ROLE_OPTIONS, createDb, runMigrations, type Db } from "@keepwell/db";
+import { and, eq } from "drizzle-orm";
+import { actions, APP_ROLE_OPTIONS, createDb, runMigrations, subscriptions, type Db } from "@keepwell/db";
 import { createPool, postgresReadiness, withStrictSsl } from "./db.js";
 import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
 import { reviseReturn } from "./modules/actions/revise-return.js";
-import { createLlmClient, LlmBudget, PgLlmUsageStore } from "./modules/agent/index.js";
+import { createAgent, createLlmClient, LlmBudget, PgLlmUsageStore } from "./modules/agent/index.js";
 import { DbAudit } from "./modules/audit/log.js";
 import { registerWinback } from "./modules/winback/index.js";
 import { auditRoutes } from "./modules/audit/routes.js";
@@ -27,6 +28,11 @@ import { Jobs } from "./modules/jobs/jobs.js";
 import { DrizzleInsightStore, DrizzleSessionReader } from "./modules/insights/drizzle-store.js";
 import { InsightExtractor, noReplies } from "./modules/insights/extractor.js";
 import { registerInsights } from "./modules/insights/jobs.js";
+import { DbSessionsApi } from "./modules/sessions/service.js";
+import { demoMerchantWidgetSecret, sessionAuthenticator, signStreamTicket } from "./modules/sessions/auth.js";
+import { defaultSessionRateLimits } from "./modules/sessions/rate-limit.js";
+import { sessionRoutes } from "./modules/sessions/routes.js";
+import { DbTimeMachine, judgeRoutes } from "./modules/demo/judge.js";
 import { insightsOverview } from "./modules/insights/queries.js";
 import { insightsRoutes } from "./modules/insights/routes.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
@@ -123,6 +129,45 @@ export async function startPlatform(env: Env): Promise<Platform> {
   });
   await registerInsights({ db, jobs, events, extractor, log: app.log });
 
+  // Subscriber side (handoff 5 A): the agent behind sessions. Off until SESSION_TICKET_SECRET is set.
+  const policyStore = new DbPolicyStore(db);
+  const catalog = new DbMerchantCatalog(db);
+  const apiPublicUrl = env.API_PUBLIC_URL ?? `http://localhost:${env.PORT}`;
+  const ticketSecret = env.SESSION_TICKET_SECRET;
+  const sessions = ticketSecret
+    ? new DbSessionsApi({
+        db,
+        agent: createAgent({
+          anthropicApiKey: env.ANTHROPIC_API_KEY,
+          dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
+          usageStore: new PgLlmUsageStore(db),
+          budget: llmBudget,
+          events,
+          audit,
+          log: app.log,
+        }),
+        engine,
+        events,
+        audit,
+        policies: policyStore,
+        catalog,
+        payments: paypal,
+        // The browser's EventSource can't send headers, so the stream URL carries a read-only ticket.
+        streamUrl: (sessionId, principal) =>
+          `${apiPublicUrl}/v1/sessions/${sessionId}/stream?ticket=${encodeURIComponent(
+            signStreamTicket({ sessionId, principal }, ticketSecret, new Date()),
+          )}`,
+        log: app.log,
+      })
+    : undefined;
+  if (sessions) {
+    events.on("action.state_changed", "sessions.action_update", (event) =>
+      sessions.onActionStateChanged(event),
+    );
+  } else {
+    app.log.warn("Sessions are disabled: configure SESSION_TICKET_SECRET");
+  }
+
   await events.startWorker();
   await jobs.work("webhook.process", async ({ webhookEventId }) => {
     await processor.process(webhookEventId);
@@ -147,6 +192,12 @@ export async function startPlatform(env: Env): Promise<Platform> {
   await jobs.schedule("due.sweep", "* * * * *", {});
   await jobs.work("pool.health", () => core.judgePool.health());
   await jobs.schedule("pool.health", "*/5 * * * *", {});
+  if (sessions) {
+    await jobs.work("sessions.abandon_sweep", async () => {
+      await sessions.abandonIdle();
+    });
+    await jobs.schedule("sessions.abandon_sweep", "*/5 * * * *", {});
+  }
 
   // Sends what recovery and win-back enqueue; the minute-by-minute sweep feeds the worker.
   await wireNotify({
@@ -237,6 +288,53 @@ export async function startPlatform(env: Env): Promise<Platform> {
     }
   } else {
     app.log.warn("Merchant authentication is disabled: configure SESSION_SECRET and DASHBOARD_URL");
+  }
+  if (sessions && ticketSecret) {
+    // The widget and the portal call these from other origins with bearer tokens, never cookies, so any
+    // origin may ask; the token decides who is allowed.
+    await app.register(sessionRoutes, {
+      prefix: "/v1",
+      sessions,
+      authenticate: sessionAuthenticator({
+        widgetSecret: demoMerchantWidgetSecret(env.DEMO_MERCHANT_ID ?? "", env.WIDGET_TOKEN_SECRET),
+        // The portal isn't mounted yet, so no portal token exists; this key keeps the verifier honest.
+        portalSecret: env.MAGIC_LINK_SECRET ?? randomBytes(32).toString("hex"),
+        ticketSecret,
+        subscriptionByPayPalId: async (merchantId, paypalSubscriptionId) => {
+          const [row] = await db.forMerchant(merchantId, (tx) =>
+            tx
+              .select({ id: subscriptions.id })
+              .from(subscriptions)
+              .where(
+                and(
+                  eq(subscriptions.merchantId, merchantId),
+                  eq(subscriptions.paypalSubscriptionId, paypalSubscriptionId),
+                ),
+              )
+              .limit(1),
+          );
+          return row?.id ?? null;
+        },
+      }),
+      allowOrigin: () => true,
+      rateLimits: defaultSessionRateLimits(),
+    });
+  }
+  if (env.JUDGE_LEASE_SECRET && env.WIDGET_TOKEN_SECRET && env.DEMO_MERCHANT_ID) {
+    await app.register(judgeRoutes, {
+      prefix: "/v1",
+      pool: core.judgePool,
+      timeMachine: new DbTimeMachine({ db, engine, audit }),
+      merchantId: env.DEMO_MERCHANT_ID,
+      leaseSecret: env.JUDGE_LEASE_SECRET,
+      widgetSecret: env.WIDGET_TOKEN_SECRET,
+      // The judge site reaches the API through its own /v1 rewrite, so no cross-origin call is needed.
+      allowOrigin: () => false,
+    });
+  } else {
+    app.log.warn(
+      "Judge Mode is disabled: configure JUDGE_LEASE_SECRET, WIDGET_TOKEN_SECRET and DEMO_MERCHANT_ID",
+    );
   }
   await app.register(opsRoutes, {
     db,
