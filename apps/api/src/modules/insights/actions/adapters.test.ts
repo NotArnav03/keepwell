@@ -28,6 +28,16 @@ describe("applyChange", () => {
     expect(() => applyChange({ a: 1 }, { path: "a.b", from: null, to: 1 })).toThrow(/does not exist/);
   });
 
+  it("refuses paths that reach the prototype chain or an array's length", () => {
+    const doc = { list: [1, 2, 3], pause: { maxMonths: 1 } };
+    for (const path of ["__proto__.polluted", "pause.__proto__", "pause.constructor.name", "list.length"]) {
+      expect(() => applyChange(doc, { path, from: undefined, to: 0 })).toThrow(/not allowed|does not exist/);
+    }
+    expect(() => applyChange(doc, { path: "pause.toString", from: undefined, to: 1 })).not.toThrow();
+    expect(doc.list).toHaveLength(3);
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+  });
+
   it("allows adding a key when `from` is undefined", () => {
     const doc: Record<string, unknown> = {};
     applyChange(doc, { path: "note", from: undefined, to: "hi" });

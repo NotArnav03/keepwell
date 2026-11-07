@@ -58,6 +58,10 @@ services:
       # time, which breaks every link already sent.
       - key: UNSUBSCRIBE_TOKEN_SECRET
         sync: false
+      # Signs portal magic links and win-back reply links: 32+ random characters, set once. Unset,
+      # win-back records cancellations but sends nothing, and a restart would invalidate sent links.
+      - key: MAGIC_LINK_SECRET
+        sync: false
       # Leave blank on staging: sandbox buyers' addresses (sb-...@personal.example.com) can't receive
       # mail, so real sends would only bounce. Messages still show in the Demo Inbox.
       - key: RESEND_API_KEY
@@ -228,6 +232,10 @@ services:
       - key: OPS_TOKEN
         sync: false
       - key: UNSUBSCRIBE_TOKEN_SECRET
+        sync: false
+      # Signs portal magic links and win-back reply links: 32+ random characters, set once. Unset,
+      # win-back records cancellations but sends nothing, and a restart would invalidate sent links.
+      - key: MAGIC_LINK_SECRET
         sync: false
       - key: RESEND_API_KEY
         sync: false

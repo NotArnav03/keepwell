@@ -44,6 +44,8 @@ export class PolicyApiPublisher implements PolicyPublisher {
   }
 }
 
+const UNSAFE_KEYS: ReadonlySet<string> = new Set(["__proto__", "constructor", "prototype"]);
+
 export function applyChange(
   root: Record<string, unknown>,
   change: UpdatePolicyInput["changes"][number],
@@ -51,6 +53,10 @@ export function applyChange(
   const keys = change.path.split(".");
   const last = keys.pop();
   if (last === undefined) throw new Error("Empty policy path");
+  // The path comes from a model-written proposal: never let it reach the prototype chain.
+  if ([...keys, last].some((key) => UNSAFE_KEYS.has(key))) {
+    throw new Error(`Policy path ${change.path} is not allowed`);
+  }
   let node: unknown = root;
   for (const key of keys) node = child(node, key, change.path);
   if (typeof node !== "object" || node === null) throw new Error(`Policy path ${change.path} does not exist`);
@@ -64,7 +70,9 @@ export function applyChange(
 function child(node: unknown, key: string, path: string, allowMissing = false): unknown {
   if (typeof node !== "object" || node === null) throw new Error(`Policy path ${path} does not exist`);
   const record = node as Record<string, unknown>;
-  if (!(key in record)) {
+  // Own keys only (`in` would follow the prototype chain), and arrays by index only (not `length`).
+  if (Array.isArray(node) && !/^\d+$/.test(key)) throw new Error(`Policy path ${path} does not exist`);
+  if (!Object.hasOwn(record, key)) {
     if (allowMissing) return undefined;
     throw new Error(`Policy path ${path} does not exist`);
   }
