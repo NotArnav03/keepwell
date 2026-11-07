@@ -1,0 +1,22 @@
+{
+  "request": {
+    "method": "PATCH",
+    "path": "/v1/billing/subscriptions/I-6EFTT451KLGH",
+    "headers": {},
+    "body": [
+      {
+        "op": "replace",
+        "path": "/plan/billing_cycles/@sequence==1/pricing_scheme/fixed_price",
+        "value": {
+          "currency_code": "USD",
+          "value": "0.50"
+        }
+      }
+    ]
+  },
+  "response": {
+    "status": 204,
+    "debugId": "f5403989dd54f",
+    "body": null
+  }
+}
