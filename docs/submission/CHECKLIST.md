@@ -1,6 +1,6 @@
 # Submission checklist (living file)
 
-Source: [TEAM-PLAN.md section 7](../TEAM-PLAN.md). Owner of this file: Om (M5); items verified by Arnav (M1). Last updated 1 Nov 2026 against `main`.
+Source: [TEAM-PLAN.md section 7](../TEAM-PLAN.md). Owner of this file: Om (M5); items verified by Arnav (M1). Last updated 7 Nov 2026 against `main`; refreshed again after the freeze.
 Status values: `done` (verified from the repo or a link), `in progress`, `TODO`, `blocked`.
 Deadline: submit by **12 Nov 2026, 20:00 IST** (real deadline 13 Nov 01:30 IST). After submission, no code changes.
 
@@ -33,7 +33,7 @@ Deadline: submit by **12 Nov 2026, 20:00 IST** (real deadline 13 Nov 01:30 IST).
 | 23 | Feature freeze respected | Everyone | TODO | 8 Nov 23:59 IST |
 | 24 | Submitted by 12 Nov 20:00 IST | Arnav | TODO | Representative submits |
 
-Spike status (docs/spikes): Q1 done. Q2 to Q10 have no file on `main` as of 1 Nov.
+Spike status (docs/spikes), 7 Nov: Q1, Q2, Q5 and Q10 have files on `main`; check the folder for the rest.
 
 ## Facts we must not claim until verified
 

@@ -1,6 +1,6 @@
 # Devpost write-up (draft)
 
-Owner: Om (M5). Drafted 1 Nov 2026 against what is on `main` that day. Sections follow the Devpost form order. Each section ends with **Still TODO**, listing facts that must be confirmed before this text is pasted into the form. Anything marked `TODO(shipping by 8 Nov)` must be reworded or deleted if it misses the feature freeze. Do not paste test credentials into this file.
+Owner: Om (M5). Drafted 1 Nov 2026, status refreshed 7 Nov against `main`, and refreshed again after the freeze. Sections follow the Devpost form order. Each section ends with **Still TODO**, listing facts that must be confirmed before this text is pasted into the form. Anything marked `TODO(shipping by 8 Nov)` must be reworded or deleted if it misses the feature freeze. Do not paste test credentials into this file.
 
 ---
 
@@ -30,7 +30,7 @@ On top of these: an insights pipeline turns every exit conversation into structu
 
 Every action is idempotent, reconciled against PayPal, and written to a hash-chained audit log.
 
-**State on `main` (1 Nov):** policy engine, agent runtime, claims checker, action engine, webhook pipeline, reconciler, audit log, widget. **Not yet on `main`:** real sessions module, recovery, win-back, notifications, insights, copilot, insight-to-action, MCP servers, dashboard, portal, Judge Mode, Pantry Plan store.
+**State on `main` (7 Nov):** policy engine, agent runtime, claims checker, action engine, webhook pipeline, reconciler, audit log, widget, LLM budget guard, eval harness and scoreboard, notifications outbox, failed-payment recovery, sessions module (not yet mounted in the running API), Judge Mode API and page, portal. **Not yet on `main`:** win-back, insights, copilot, insight-to-action, MCP servers, dashboard, Pantry Plan store.
 
 **Still TODO:** rewrite each paragraph above in past/present tense according to what actually ships by 8 Nov. Remove any moment that does not run end to end.
 
@@ -39,7 +39,7 @@ Every action is idempotent, reconciled against PayPal, and written to a hash-cha
 - **Monorepo:** pnpm and Turborepo, TypeScript (strict), CI on Linux and Windows with a secret scan.
 - **API:** Fastify with zod at every boundary, Drizzle ORM on Postgres (Neon, free tier) with row-level security for tenant isolation, pg-boss for jobs on the same Postgres (no Redis), pino logging.
 - **PayPal layer:** a gateway that is the only code allowed to call PayPal (OAuth cache, retries, debug ids, rate limiting); an action engine with a state machine and a per-subscription lock; a verified webhook pipeline; a reconciler; and a fake PayPal server (`packages/paypal-mock`) so tests and offline work need no credentials.
-- **Brain:** a pure policy engine (`packages/policy`) with property-based tests; an agent runtime using Claude Haiku 5.5 to classify and Claude Sonnet 5.5 to converse, with structured outputs validated by zod; a deterministic claims checker.
+- **Brain:** a pure policy engine (`packages/policy`) with property-based tests; an agent runtime using Claude Haiku 5.5 to converse, classify and tag, with structured outputs validated by zod; a deterministic claims checker.
 - **Surfaces:** a Preact widget in Shadow DOM, server-sent events for streaming. `TODO(shipping by 8 Nov)`: React and Vite dashboard with Bryntum Scheduler; MCP servers with `@modelcontextprotocol/sdk`.
 - **Hosting:** Render and Neon free tiers, Resend for email `TODO(shipping by 8 Nov)`.
 - **Process:** five people, each with a vertical workstream, meeting only through typed contracts; every teammate works with Claude Code under shared repo rules.
@@ -63,7 +63,7 @@ Everything runs on the PayPal sandbox.
 
 ## How AI is used
 
-Claude Sonnet 5.5 runs the conversation and the merchant copilot. Claude Haiku 5.5 classifies the cancel reason, tags insights, writes recovery copy and checks text. The design constrains the model rather than trusting it:
+Claude Haiku 5.5 runs the short conversation, classifies the cancel reason, tags insights and checks text. Claude Sonnet 5.5 powers the merchant copilot. Recovery and win-back emails are fixed templates, not model text. The design constrains the model rather than trusting it:
 
 - **Cancel never touches the LLM.** No model call, no agent step.
 - **The AI picks from a menu; the policy decides.** The policy engine computes what may be offered, the model chooses at most one, and the policy re-checks the pick, and checks again when the subscriber accepts.
