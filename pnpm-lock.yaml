@@ -53,6 +53,9 @@ importers:
       '@keepwell/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@keepwell/evals':
+        specifier: workspace:*
+        version: link:../../packages/evals
       '@keepwell/policy':
         specifier: workspace:*
         version: link:../../packages/policy
