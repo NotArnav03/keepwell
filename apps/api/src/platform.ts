@@ -1,7 +1,15 @@
 import { randomBytes } from "node:crypto";
-import type { FastifyInstance } from "fastify";
+import type { FastifyInstance, FastifyRequest } from "fastify";
 import { and, eq } from "drizzle-orm";
-import { actions, APP_ROLE_OPTIONS, createDb, runMigrations, subscriptions, type Db } from "@keepwell/db";
+import {
+  actions,
+  APP_ROLE_OPTIONS,
+  createDb,
+  runMigrations,
+  subscriptions,
+  type Db,
+  type Tx,
+} from "@keepwell/db";
 import { createPool, postgresReadiness, withStrictSsl } from "./db.js";
 import { databaseUrl, type Env } from "./env.js";
 import { DbActionEngine } from "./modules/actions/engine.js";
@@ -33,6 +41,19 @@ import { demoMerchantWidgetSecret, sessionAuthenticator, signStreamTicket } from
 import { defaultSessionRateLimits } from "./modules/sessions/rate-limit.js";
 import { sessionRoutes } from "./modules/sessions/routes.js";
 import { DbTimeMachine, judgeRoutes } from "./modules/demo/judge.js";
+import { PolicyApiPublisher, WinbackStartBatchSender } from "./modules/insights/actions/adapters.js";
+import { DeterministicEstimateProvider } from "./modules/insights/actions/estimate.js";
+import { insightActionRoutes } from "./modules/insights/actions/routes.js";
+import { InsightActionService } from "./modules/insights/actions/service.js";
+import { DbPlanProductResolver, SqlEstimateInputs } from "./modules/insights/actions/sql-inputs.js";
+import { DbInsightActionStore } from "./modules/insights/actions/store.js";
+import {
+  Copilot,
+  copilotRoutes,
+  DrizzleCopilotData,
+  DrizzleInsightActionStore,
+} from "./modules/insights/copilot/index.js";
+import { RateLimiter } from "./modules/portal/rate-limit.js";
 import { insightsOverview } from "./modules/insights/queries.js";
 import { insightsRoutes } from "./modules/insights/routes.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
@@ -99,7 +120,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   });
 
   // Win-back records every PayPal-side cancellation and sends one message through the notifier.
-  await registerWinback({
+  const winback = await registerWinback({
     app,
     db,
     jobs,
@@ -118,8 +139,9 @@ export async function startPlatform(env: Env): Promise<Platform> {
     store: new PgLlmUsageStore(db),
     dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
   });
+  const llm = createLlmClient({ anthropicApiKey: env.ANTHROPIC_API_KEY, budget: llmBudget, log: app.log });
   const extractor = new InsightExtractor({
-    llm: createLlmClient({ anthropicApiKey: env.ANTHROPIC_API_KEY, budget: llmBudget, log: app.log }),
+    llm,
     sessions: new DrizzleSessionReader(db),
     // The win-back module supplies the real reader once it owns a replies table.
     replies: noReplies,
@@ -249,20 +271,63 @@ export async function startPlatform(env: Env): Promise<Platform> {
       authenticate: (request) => authenticator.authenticate(request),
       load: (merchantId, range, quoteLimit) => insightsOverview(db, merchantId, range, quoteLimit),
     });
-    const policyService = new PolicyService({
-      store: new DbPolicyStore(db),
-      catalog: new DbMerchantCatalog(db),
-      events,
-      audit,
-    });
+    const policyService = new PolicyService({ store: policyStore, catalog, events, audit });
+    // The signed-in merchant user, for the routes that audit who clicked. Writes need the CSRF token.
+    const merchantPrincipal = async (request: FastifyRequest) => {
+      const user = await authenticator.authenticate(request, request.method !== "GET");
+      return { merchantId: user.merchantId, userLabel: user.email };
+    };
     await app.register(policyRoutes, {
       prefix: "/v1/m",
       service: policyService,
-      authenticate: async (request) => {
-        const user = await authenticator.authenticate(request, request.method !== "GET");
-        return { merchantId: user.merchantId, userLabel: user.email };
-      },
+      authenticate: merchantPrincipal,
     });
+    // Insight-to-action (M5): the copilot proposes, the merchant's click approves, the engine executes.
+    const estimates = new DeterministicEstimateProvider(new SqlEstimateInputs(db));
+    const insightActions = new InsightActionService<Tx>({
+      store: new DbInsightActionStore(db),
+      estimates,
+      engine,
+      audit,
+      events,
+      policy: new PolicyApiPublisher(policyService),
+      winback: new WinbackStartBatchSender(winback),
+      products: new DbPlanProductResolver(db),
+      log: app.log,
+      transact: (merchantId, fn) => db.forMerchant(merchantId, fn),
+    });
+    await app.register(insightActionRoutes, {
+      prefix: "/v1/m",
+      service: insightActions,
+      authenticate: merchantPrincipal,
+    });
+    if (llm) {
+      // About 20 messages an hour per merchant: a message takes up to three model rounds, and the
+      // global LlmBudget (shared with the agent) still caps the day's spend.
+      const copilotRounds = new RateLimiter({ limit: 60, windowMs: 3600_000 });
+      const copilot = new Copilot({
+        llm,
+        tools: {
+          data: new DrizzleCopilotData(db),
+          store: new DrizzleInsightActionStore(db),
+          estimates: {
+            estimate: async (merchantId, proposal) =>
+              (await estimates.estimate(merchantId, proposal)).estimate,
+          },
+          events,
+          audit,
+        },
+        budget: { allow: (merchantId) => Promise.resolve(copilotRounds.hit(merchantId).allowed) },
+        log: app.log,
+      });
+      await app.register(copilotRoutes, {
+        prefix: "/v1/m",
+        copilot,
+        authenticate: (request) => authenticator.authenticate(request, request.method !== "GET"),
+      });
+    } else {
+      app.log.warn("The copilot is disabled: ANTHROPIC_API_KEY is not set");
+    }
     if (!env.PAYPAL_USE_MOCK && env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY) {
       await app.register(merchantOnboardingRoutes, {
         prefix: "/v1/m",
