@@ -5,6 +5,7 @@ import {
   actions,
   APP_ROLE_OPTIONS,
   createDb,
+  plans,
   runMigrations,
   subscriptions,
   type Db,
@@ -41,6 +42,10 @@ import { demoMerchantWidgetSecret, sessionAuthenticator, signStreamTicket } from
 import { defaultSessionRateLimits } from "./modules/sessions/rate-limit.js";
 import { sessionRoutes } from "./modules/sessions/routes.js";
 import { DbTimeMachine, judgeRoutes } from "./modules/demo/judge.js";
+import { demoStoreRoutes } from "./modules/demo/store-routes.js";
+import { subscriberMcpRoutes } from "./modules/mcp/subscriber.js";
+import { DelegationService } from "./modules/portal/delegations.js";
+import { PgDelegationStore, PgPortalDirectory } from "./modules/portal/pg.js";
 import { PolicyApiPublisher, WinbackStartBatchSender } from "./modules/insights/actions/adapters.js";
 import { DeterministicEstimateProvider } from "./modules/insights/actions/estimate.js";
 import { insightActionRoutes } from "./modules/insights/actions/routes.js";
@@ -384,6 +389,34 @@ export async function startPlatform(env: Env): Promise<Platform> {
       allowOrigin: () => true,
       rateLimits: defaultSessionRateLimits(),
     });
+    // The subscriber's own agent (#41): MCP over streamable HTTP and its discovery document. Tools
+    // need a delegation token from the portal, so until the portal is mounted every call is a 401.
+    await app.register(subscriberMcpRoutes, {
+      sessions,
+      delegations: new DelegationService({
+        store: new PgDelegationStore(db),
+        directory: new PgPortalDirectory(db),
+        audit,
+      }),
+      publicUrl: apiPublicUrl.replace(/\/$/, ""),
+      portalUrl: env.PORTAL_URL ?? `${apiPublicUrl.replace(/\/$/, "")}/`,
+    });
+  }
+  // Pantry Plan's "backend" (#34): checks a new subscription with PayPal, then signs the shopper's
+  // widget tokens, as a real merchant's server would. Only the store's own origin may call it.
+  if (env.WIDGET_TOKEN_SECRET && env.DEMO_MERCHANT_ID) {
+    const storeOrigin = new URL(env.DEMO_STORE_URL ?? "http://localhost:5176").origin;
+    await app.register(demoStoreRoutes, {
+      prefix: "/v1",
+      gateway: paypal,
+      merchantId: env.DEMO_MERCHANT_ID,
+      plans: await demoStorePlans(db, env.DEMO_MERCHANT_ID),
+      signingSecret: env.WIDGET_TOKEN_SECRET,
+      allowOrigin: (origin) => origin === storeOrigin,
+      rateLimiter: new RateLimiter({ limit: 60, windowMs: 60_000 }),
+    });
+  } else {
+    app.log.warn("The demo store backend is disabled: configure WIDGET_TOKEN_SECRET and DEMO_MERCHANT_ID");
   }
   if (env.JUDGE_LEASE_SECRET && env.WIDGET_TOKEN_SECRET && env.DEMO_MERCHANT_ID) {
     await app.register(judgeRoutes, {
@@ -495,4 +528,15 @@ export async function createCore(env: Env, url: string, log: CoreLogger) {
   }
   const notify = createNotify({ db, audit, events, config: notifyConfig, log });
   return { pool, db, paypal, jobs, audit, events, engine, sync, reconciler, judgePool, notify, notifyConfig };
+}
+
+/** PayPal plan id → name for the plans Pantry Plan sells (the seed writes them). Read at boot. */
+async function demoStorePlans(db: Db, merchantId: string): Promise<Record<string, string>> {
+  const rows = await db.forMerchant(merchantId, (tx) =>
+    tx
+      .select({ id: plans.paypalPlanId, name: plans.name })
+      .from(plans)
+      .where(and(eq(plans.merchantId, merchantId), eq(plans.status, "ACTIVE"))),
+  );
+  return Object.fromEntries(rows.map((r) => [r.id, r.name]));
 }
