@@ -158,6 +158,24 @@ describe("PayPalClient", () => {
     expect(transactions).toHaveLength(8);
     expect(transactions[0]?.id).toMatch(/^[A-Z0-9]{17}$/);
   });
+
+  it("reads the regular billing cycle details for onboarding", async () => {
+    const summaries = await client().listPlans(M);
+    const summary = summaries.find((plan) => plan.name === "Standard");
+    expect(summary).toBeDefined();
+    if (!summary) return;
+
+    const plan = await client().getPlanDetails(M, summary.id);
+
+    expect(plan).toMatchObject({
+      id: summary.id,
+      name: "Standard",
+      intervalUnit: "MONTH",
+      intervalCount: 1,
+      priceValue: "12.00",
+      priceCurrency: "USD",
+    });
+  });
 });
 
 describe("PayPalClient against recorded sandbox answers", () => {

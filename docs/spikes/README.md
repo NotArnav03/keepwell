@@ -2,6 +2,8 @@
 
 One file per day-1 question (`Q1.md` … `Q10.md`; the list is in ARCHITECTURE.md §13).
 
+Ayush's spike results: [Q8 Bryntum licence](Q8.md) and [Q9 free-tier limits](Q9.md).
+
 Template:
 
 ```

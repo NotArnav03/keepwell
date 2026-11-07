@@ -1,8 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { z } from "zod";
 import type { DomainEvent } from "@keepwell/contracts";
 import { createDb, merchants, type Db } from "@keepwell/db";
 import { createTestDatabase, TEST_DATABASE_URL, type TestDatabase } from "@keepwell/db/testing";
-import { DbDomainEvents } from "./domain-events.js";
+import { DbDomainEvents, MERCHANT_FEED_CHANNEL } from "./domain-events.js";
 import { Jobs } from "./jobs.js";
 
 // Jobs and domain events against a real Postgres with pg-boss running.
@@ -90,6 +91,27 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Jobs and DbDomainEvents", { ti
       merchantId: M,
       simulated: false,
     });
+  });
+
+  it("notifies the merchant live-feed channel only with the committed event ids", async () => {
+    const listener = await testDb.appPool.connect();
+    const notifications: { channel?: string; payload?: string }[] = [];
+    const onNotification = (notice: { channel?: string; payload?: string }) => notifications.push(notice);
+    try {
+      await listener.query(`LISTEN ${MERCHANT_FEED_CHANNEL}`);
+      listener.on("notification", onNotification);
+      await db.forMerchant(M, (tx) => events.emit(actionChanged("PENDING"), tx));
+      await until(() => notifications.length > 0);
+      expect(notifications[0]?.channel).toBe(MERCHANT_FEED_CHANNEL);
+      const payload: unknown = JSON.parse(notifications[0]?.payload ?? "{}");
+      expect(z.object({ eventId: z.uuid(), merchantId: z.uuid() }).parse(payload)).toMatchObject({
+        merchantId: M,
+      });
+    } finally {
+      listener.removeListener("notification", onNotification);
+      await listener.query(`UNLISTEN ${MERCHANT_FEED_CHANNEL}`);
+      listener.release();
+    }
   });
 
   it("delivers nothing when the emitting transaction rolls back", async () => {

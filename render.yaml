@@ -31,6 +31,8 @@ services:
         sync: false
       - key: PAYPAL_CLIENT_SECRET
         sync: false
+      - key: PAYPAL_CREDENTIALS_ENCRYPTION_KEY
+        sync: false
       # No PAYPAL_WEBHOOK_ID: `pnpm seed` registers the webhook and stores its id on the merchant.
       # Read by the agent once it's wired in; blank until then.
       - key: ANTHROPIC_API_KEY
@@ -51,6 +53,13 @@ services:
       # shares one rate limit, too many lets a client pick its own address.
       - key: TRUST_PROXY_HOPS
         value: "3"
+      # The dashboard's own origin: credentialed CORS and CSRF checks are restricted to it.
+      - key: DASHBOARD_URL
+        value: https://keepwell-dashboard-staging.onrender.com
+      # Random 32+ byte secret generated separately for each environment. Until it (and DASHBOARD_URL)
+      # is set the merchant routes stay off and the API boots as before.
+      - key: SESSION_SECRET
+        sync: false
       - key: OPS_TOKEN
         sync: false
       # Email (modules/notify, #91). Signs unsubscribe links: 32+ random characters, and it must be
@@ -230,6 +239,13 @@ services:
         value: "3"
       # Generate each secret fresh for prod-demo; never reuse staging's.
       - key: OPS_TOKEN
+        sync: false
+      - key: DASHBOARD_URL
+        value: https://keepwell-dashboard-demo.onrender.com
+      - key: SESSION_SECRET
+        sync: false
+      # base64 of exactly 32 random bytes (`openssl rand -base64 32`): encrypts merchants' stored PayPal secrets.
+      - key: PAYPAL_CREDENTIALS_ENCRYPTION_KEY
         sync: false
       - key: UNSUBSCRIBE_TOKEN_SECRET
         sync: false

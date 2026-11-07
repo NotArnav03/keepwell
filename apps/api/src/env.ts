@@ -28,9 +28,15 @@ const EnvSchema = z
     PAYPAL_API_BASE: z.preprocess(blank, z.url().default("https://api-m.sandbox.paypal.com")),
     PAYPAL_CLIENT_ID: optionalString,
     PAYPAL_CLIENT_SECRET: optionalString,
+    // Base64-encoded, 32-byte AES-256-GCM key; encrypts per-merchant PayPal secrets at rest.
+    PAYPAL_CREDENTIALS_ENCRYPTION_KEY: optionalString,
     // Local only: talk to packages/paypal-mock (`pnpm dev:paypal-mock`) instead of the sandbox.
     PAYPAL_USE_MOCK: flag(false),
     PAYPAL_MOCK_URL: z.preprocess(blank, z.url().default("http://localhost:4010")),
+    // Merchant login signs short-lived HttpOnly cookies; use a random secret unique per environment.
+    SESSION_SECRET: optionalString,
+    // Exact origin of the dashboard; used for credentialed CORS and CSRF origin checks.
+    DASHBOARD_URL: optionalUrl,
     // Where PayPal sends a buyer back after approving a revise, and the base of other links.
     API_PUBLIC_URL: optionalUrl,
     // How many proxies sit in front of the API: 3 on Render (Cloudflare, edge, internal; check with
@@ -57,6 +63,29 @@ const EnvSchema = z
     SENTRY_DSN: optionalUrl,
   })
   .superRefine((env, ctx) => {
+    // SESSION_SECRET, DASHBOARD_URL and PAYPAL_CREDENTIALS_ENCRYPTION_KEY are optional on purpose: the
+    // merchant routes, onboarding and stored credentials switch on once they are set (platform.ts),
+    // so deploying this code never takes a running environment down. Only their format is checked.
+    if (env.SESSION_SECRET && Buffer.byteLength(env.SESSION_SECRET, "utf8") < 32) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["SESSION_SECRET"],
+        message: "SESSION_SECRET must be at least 32 bytes",
+      });
+    }
+    if (env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY) {
+      const key = Buffer.from(env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY, "base64");
+      if (
+        key.length !== 32 ||
+        key.toString("base64").replace(/=+$/, "") !== env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY.replace(/=+$/, "")
+      ) {
+        ctx.addIssue({
+          code: "custom",
+          path: ["PAYPAL_CREDENTIALS_ENCRYPTION_KEY"],
+          message: "Must be base64 encoding of exactly 32 bytes",
+        });
+      }
+    }
     if (env.PAYPAL_USE_MOCK && env.APP_ENV !== "local") {
       ctx.addIssue({
         code: "custom",
