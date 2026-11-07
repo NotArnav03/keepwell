@@ -41,7 +41,10 @@ export async function registerWinback(w: WinbackWiring): Promise<WinbackService>
     directory: drizzleSubscriptionDirectory(w.db, w.paypal),
     policy: w.policy ?? NEVER_INVITE,
     // Never reached when canSend is false: the worker and the sweep below are not registered.
-    notifier: w.notifier ?? { enqueue: () => Promise.reject(new Error("no Notifier mounted")) },
+    notifier: w.notifier ?? {
+      enqueue: () => Promise.reject(new Error("no Notifier mounted")),
+      supersede: () => Promise.resolve(false),
+    },
     audit: w.audit,
     jobs: w.jobs,
     log,

@@ -122,6 +122,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)(
         dueAt: "2030-01-09T00:00:00.000Z",
         content: { template: "dunning.update_payment_method" },
       });
+      // The notifier is called before the case row records the id, so wait for the row.
+      await until(async () => (await caseState())?.notificationId === notifier.queued[0]?.id);
       expect((await caseState())?.notificationId).toBe(notifier.queued[0]?.id);
     });
 
