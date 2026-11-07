@@ -135,6 +135,47 @@ services:
         source: /*
         destination: /index.html
 
+  # Judge Mode (apps/judge, M3, #142): the page judges land on. Same one-origin trick as the dashboard
+  # and portal: /v1/* goes to the API, so no CORS. /status is rewritten too, because the page shows the
+  # public status (GET /status). JUDGE_BUYER_EMAIL and JUDGE_BUYER_PASSWORD are left unset on purpose: the
+  # sandbox buyer is the pool's own payer, and anything in a build env ends up in a public page. Its login
+  # goes in the Devpost testing instructions. JUDGE_STORE_URL waits for Pantry Plan's own site (not in
+  # this Blueprint yet), so Arnav sets it in Render; unset, the page would link to localhost.
+  - type: web
+    name: keepwell-judge-staging
+    runtime: static
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/judge
+    staticPublishPath: apps/judge/dist
+    # Build only when the page or a package it bundles changes (the free plan's build minutes).
+    buildFilter:
+      paths:
+        - apps/judge/**
+        - packages/widget/**
+        - packages/contracts/**
+        - pnpm-lock.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-staging.onrender.com
+      - key: JUDGE_DASHBOARD_URL
+        value: https://keepwell-dashboard-staging.onrender.com
+      - key: JUDGE_EVALS_URL
+        value: https://keepwell-api-staging.onrender.com/evals
+      - key: JUDGE_STORE_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /v1/*
+        destination: https://keepwell-api-staging.onrender.com/v1/*
+      - type: rewrite
+        source: /status
+        destination: https://keepwell-api-staging.onrender.com/status
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
   # ── prod-demo: what judges use (ARCHITECTURE.md §4, docs/RUNBOOK-prod-demo.md) ──────────────────
   # The same build as staging, but deployed only by hand: auto-deploy is off, and Arnav deploys
   # the tagged commit with "Manual Deploy → Deploy a specific commit". Its database is a separate
@@ -239,6 +280,41 @@ services:
       - type: rewrite
         source: /v1/*
         destination: https://keepwell-api-demo.onrender.com/v1/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # Judge Mode (apps/judge, M3, #142): the page judges land on. Same one-origin trick as the dashboard
+  # and portal: /v1/* goes to the API, so no CORS. /status is rewritten too, because the page shows the
+  # public status (GET /status). JUDGE_BUYER_EMAIL and JUDGE_BUYER_PASSWORD are left unset on purpose: the
+  # sandbox buyer is the pool's own payer, and anything in a build env ends up in a public page. Its login
+  # goes in the Devpost testing instructions. JUDGE_STORE_URL waits for Pantry Plan's own site (not in
+  # this Blueprint yet), so Arnav sets it in Render; unset, the page would link to localhost.
+  - type: web
+    name: keepwell-judge-demo
+    runtime: static
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/judge
+    staticPublishPath: apps/judge/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-demo.onrender.com
+      - key: JUDGE_DASHBOARD_URL
+        value: https://keepwell-dashboard-demo.onrender.com
+      - key: JUDGE_EVALS_URL
+        value: https://keepwell-api-demo.onrender.com/evals
+      - key: JUDGE_STORE_URL
+        sync: false
+    routes:
+      - type: rewrite
+        source: /v1/*
+        destination: https://keepwell-api-demo.onrender.com/v1/*
+      - type: rewrite
+        source: /status
+        destination: https://keepwell-api-demo.onrender.com/status
       - type: rewrite
         source: /*
         destination: /index.html
