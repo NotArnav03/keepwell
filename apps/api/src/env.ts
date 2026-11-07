@@ -52,6 +52,13 @@ const EnvSchema = z
     // Signs unsubscribe links. Unset: a key that lives until restart (the platform logs a warning),
     // so set it anywhere links must keep working.
     UNSUBSCRIBE_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Subscriber surfaces (sessions, Judge Mode). Each is its own secret so one can rotate alone, and
+    // each feature stays off until its variables are set: 32+ random characters, set once.
+    SESSION_TICKET_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Signs widget tokens for the demo merchant only (sessions README); DEMO_MERCHANT_ID is that merchant.
+    WIDGET_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    DEMO_MERCHANT_ID: z.preprocess(blank, z.uuid().optional()),
+    JUDGE_LEASE_SECRET: z.preprocess(blank, z.string().min(32).optional()),
     // Win-back: where the exit-interview reply page lives, and the secret that signs its links.
     PORTAL_URL: optionalUrl,
     MAGIC_LINK_SECRET: z.preprocess(blank, z.string().min(16).optional()),

@@ -5,6 +5,7 @@ import { ErrorEnvelope, MerchantMeResponse } from "@keepwell/contracts";
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
 import {
+  MerchantAuthError,
   MerchantAuthService,
   MerchantAuthenticator,
   merchantAuthRoutes,
@@ -158,5 +159,10 @@ describe("merchant authentication", () => {
       headers: { cookie: `${pair.slice(0, pair.indexOf("="))}=${flipped}` },
     });
     expect(tampered.statusCode).toBe(401);
+  });
+
+  it("carries its status as statusCode, so other modules' route plugins answer 401 instead of 500", () => {
+    expect(new MerchantAuthError(401, "Sign in required.").statusCode).toBe(401);
+    expect(new MerchantAuthError(429, "Slow down.").statusCode).toBe(429);
   });
 });

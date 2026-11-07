@@ -99,6 +99,14 @@ export class MerchantAuthError extends Error {
   ) {
     super(message);
   }
+
+  /**
+   * The route plugins of other modules (insights, notify, audit, policy, copilot) turn a thrown error
+   * with a 4xx `statusCode` into that response. Without it a signed-out call answered 500.
+   */
+  get statusCode(): number {
+    return this.status;
+  }
 }
 
 export class MerchantAuthService {
