@@ -24,6 +24,7 @@ Owner: <name> · Date: <yyyy-mm-dd>
 | `status` | The subscription's billing fields and its transactions. |
 | `quick` | Suspend, activate 10 s later, watch billing for a minute: a pause that crosses no billing date. |
 | `pause`, then `resume` | Suspend now, activate after the next billing time has passed: what PayPal does with the missed cycle. |
+| `price [0.50]` | Spike Q4: PATCHes the subscription's `fixed_price` while the next billing is inside PayPal's 10-day window (always the case on this daily plan). Then `status` after the next billing time, and again a day or two later: the transactions show which charge first used the new price, or that none did. |
 | `list` | Whether `GET /v1/billing/subscriptions` (the reconciler's sweep) works, by plan and by `status_updated_after`. |
 | `cancel` | Cancels the spike subscription so the daily $1.00 sandbox charge stops. Irreversible; `setup` makes a new one. |
 
