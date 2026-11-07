@@ -485,7 +485,7 @@ All tables carry `merchant_id` (multi-tenant) and `created_at`. Money is stored 
 | `delegations` | subscription_id, scopes, token_hash, expires_at, revoked_at | M3 |
 | `audit_log` | seq, actor, kind, subject_ids, payload, prev_hash, hash | M1 |
 | `pool_subscriptions` | subscription_id, state (`available`/`leased`/`consumed`), leased_until | M1 |
-| `llm_usage` | day, feature, tokens, cost_estimate (for the budget guard) | M2 |
+| `llm_usage` | one row per model call: at, session_id, purpose, model, the four token counts, cost_nano_usd, duration_ms (the budget guard's daily spend and per-session limits; append-only for the app) | M2 (store: M1) |
 
 ---
 

@@ -1,4 +1,5 @@
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { ReasonCategory } from "@keepwell/contracts";
 import { amount, at, createdAt, currency, id, merchantId, enumText } from "./columns.js";
 import { merchants } from "./merchants.js";
@@ -20,15 +21,30 @@ export const dunningCases = pgTable(
     failedCount: integer().notNull(),
     nextRetryTime: at(),
     playbook: text().notNull(),
-    state: text({ enum: ["open", "recovered", "lost", "cancelled"] })
+    state: text({ enum: ["open", "recovered", "suspended", "closed"] })
       .notNull()
       .default("open"),
     recoveredValue: amount(),
     recoveredCurrency: currency(),
+    /** The balance a capture_outstanding Action was asked to collect. */
+    outstandingValue: amount(),
+    outstandingCurrency: currency(),
+    /** The queued dunning message (notifications.id); no FK, the outbox table is M5's other module. */
+    notificationId: uuid(),
+    captureActionId: uuid().references(() => actions.id),
+    simulated: boolean().notNull().default(false),
     openedAt: createdAt(),
+    updatedAt: createdAt(),
+    /** When it left open/suspended (recovered or closed). */
     closedAt: at(),
   },
-  (t) => [index().on(t.merchantId, t.state)],
+  (t) => [
+    index().on(t.merchantId, t.state),
+    // One live case per subscription: a concurrent duplicate insert fails instead of doubling up.
+    uniqueIndex("dunning_cases_one_active_per_subscription")
+      .on(t.subscriptionId)
+      .where(sql`${t.state} in ('open', 'suspended')`),
+  ],
 );
 
 export const notifications = pgTable(

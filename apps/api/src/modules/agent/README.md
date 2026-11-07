@@ -27,7 +27,11 @@ It is deterministic, with no model call: every reply passes through it, so it co
 
 ## Languages
 
-Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money, percentages and dates are formatted with `Intl`; money is formatted from its decimal string and never becomes a float. The classifier's `language` picks the locale, and anything else falls back to English. A reason-chip tap (L1) carries no text, so it uses English until `SessionContext` carries the session's locale.
+Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money, percentages and dates are formatted with `Intl`; money is formatted from its decimal string and never becomes a float. The classifier's `language` picks the locale. When it names a language we have no templates for, or before any model call (L1, the message limit), the session's `locale` is used (`SessionContext.locale`, from `CreateSessionRequest.locale`), then English. A reason-chip tap carries no text, so it always uses the session's locale.
+
+## Prompt versions
+
+`PROMPT_VERSION` in `prompts.ts` names the system prompts. `prompts.test.ts` pins each version's hash, so editing a prompt fails the test until the version is bumped. The version goes into every `offer.presented` audit entry and every eval run, so a result always says which prompt produced it.
 
 ## Model calls
 
@@ -53,7 +57,22 @@ Two failure cases are handled on purpose:
 - **The store can't be read:** the call is refused (fail closed), because we can't prove there's budget left.
 - **Usage can't be recorded after a successful call:** the reply still goes out and it's logged as an error, but the call's cost, time and tokens stay in memory and keep counting toward the caps. The budget retries the store on its next check or record and drops the entry once it's written.
 
-`createAgent` requires the daily cap and a store. M1 backs the store with an `llm_usage` table; `InMemoryLlmUsageStore` forgets spend on restart, so it's for dev and tests only.
+`createAgent` requires the daily cap and a store. M1 backs the store with the `llm_usage` table (`PgLlmUsageStore`, one row per call); `InMemoryLlmUsageStore` forgets spend on restart, so it's for dev and tests only.
+
+## Evals (#28)
+
+`evals/` runs the personas from `@keepwell/evals` through this runtime:
+
+- **Adversarial** (`evals.test.ts`, in CI on every PR, free): `AdversaryLlm` keeps the classifier honest and turns the reply model fully hostile: invented and tampered offer ids, prices and "last chance" in its text, talk of other offers, questions when none are allowed. All 404 personas must come out with 0 policy violations and 1 click to cancel, and the adversary must have been caught over 100 times each by the policy and the claims checker, so a pass can't come from an adversary that did nothing.
+- **Real** (costs money, run on purpose): Claude Haiku is the agent, writes the simulated subscriber's follow-up messages, and judges each conversation for dark patterns and language. Accept, cancel and chip taps stay scripted, so the gates measure the agent and not the simulator. Every call goes through this module's client and budget guard.
+
+```bash
+pnpm --filter @keepwell/api eval -- --mode adversarial        # free, all 404, writes results/adversarial.json
+pnpm --filter @keepwell/api eval -- --mode real --subset      # 51 personas, about $0.15
+pnpm --filter @keepwell/api eval -- --mode real               # all 404, about $1; set EVAL_BUDGET_USD to cap it
+```
+
+A real run reads `ANTHROPIC_API_KEY` from the environment or the repo's `.env`. When `EVAL_BUDGET_USD` (default 1.00) is spent, the remaining sessions fall to L1 as they would in production, and the results show it in `fallbackRate`.
 
 ## Tests
 
@@ -61,6 +80,5 @@ Two failure cases are handled on purpose:
 
 ## Not yet (later issues)
 
-- The session's locale in `SessionContext` (from `CreateSessionRequest.locale`), so L1 replies are localised too.
 - Per-IP rate limits on the session routes (#26): they belong with the HTTP layer, e.g. `@fastify/rate-limit` on `/v1/sessions/*`.
-- Prompt tuning against the evals (#28, #30).
+- Prompt tuning against a real eval run (#30).

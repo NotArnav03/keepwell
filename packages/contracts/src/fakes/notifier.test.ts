@@ -48,6 +48,15 @@ describe("FakeNotifier", () => {
     expect(notifier.queued).toHaveLength(0);
   });
 
+  it("supersedes a queued message once, only for its own merchant", async () => {
+    const notifier = new FakeNotifier(() => now);
+    const id = await notifier.enqueue(request);
+    expect(await notifier.supersede("019a3a2b-7c00-7000-8000-0000000000ff", id)).toBe(false);
+    expect(await notifier.supersede(request.merchantId, id)).toBe(true);
+    expect(notifier.queued[0]).toMatchObject({ status: "suppressed", suppressedBecause: "superseded" });
+    expect(await notifier.supersede(request.merchantId, id)).toBe(false);
+  });
+
   it("clears what it has queued", async () => {
     const notifier = new FakeNotifier(() => now);
     await notifier.enqueue(request);

@@ -53,6 +53,9 @@ importers:
       '@keepwell/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@keepwell/evals':
+        specifier: workspace:*
+        version: link:../../packages/evals
       '@keepwell/policy':
         specifier: workspace:*
         version: link:../../packages/policy
@@ -105,7 +108,27 @@ importers:
         specifier: 0.28.2
         version: 0.28.2
 
-  apps/judge: {}
+  apps/judge:
+    dependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@keepwell/widget':
+        specifier: workspace:*
+        version: link:../../packages/widget
+      preact:
+        specifier: 11.1.0
+        version: 11.1.0
+    devDependencies:
+      axe-core:
+        specifier: 4.14.0
+        version: 4.14.0
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      happy-dom:
+        specifier: 21.0.4
+        version: 21.0.4
 
   apps/portal:
     dependencies:
@@ -160,7 +183,17 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
-  packages/evals: {}
+  packages/evals:
+    dependencies:
+      '@keepwell/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@keepwell/policy':
+        specifier: workspace:*
+        version: link:../policy
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
 
   packages/paypal-mock:
     dependencies:

@@ -90,8 +90,21 @@ export const subscriberMcpRoutes: FastifyPluginCallback<SubscriberMcpOptions> = 
       void transport.close();
       void server.close();
     });
-    await server.connect(transport);
-    await transport.handleRequest(request.raw, reply.raw, request.body);
+    // Fastify no longer owns the reply, so a failure here would leave the client hanging: answer it.
+    try {
+      await server.connect(transport);
+      await transport.handleRequest(request.raw, reply.raw, request.body);
+    } catch (err) {
+      request.log.error({ err }, "subscriber MCP request failed");
+      if (!reply.raw.headersSent) {
+        reply.raw.writeHead(500, { "content-type": "application/json" });
+        reply.raw.end(
+          JSON.stringify({ jsonrpc: "2.0", error: { code: -32603, message: "Internal error" }, id: null }),
+        );
+      } else if (!reply.raw.writableEnded) {
+        reply.raw.end();
+      }
+    }
   });
 
   // Stateless: no server-initiated stream to open and no session to end.

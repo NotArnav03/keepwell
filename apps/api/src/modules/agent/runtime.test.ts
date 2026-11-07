@@ -1,11 +1,22 @@
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
-import type { AgentStreamEvent, SessionContext, TranscriptTurn } from "@keepwell/contracts";
+import {
+  ReasonCategory,
+  type AgentStreamEvent,
+  type SessionContext,
+  type TranscriptTurn,
+} from "@keepwell/contracts";
 import { FakeAudit, FakeDomainEvents, PANTRY_PLAN, pantryPlanSubscription } from "@keepwell/contracts/fakes";
 import { computeMenu } from "@keepwell/policy";
 import { FakeLlmClient } from "./fake-llm.js";
 import { LlmError, type AgentLogger } from "./llm.js";
-import { CLASSIFY_SYSTEM, CONVERSE_SYSTEM, type Classification, type Reply } from "./prompts.js";
+import {
+  CLASSIFY_SYSTEM,
+  CONVERSE_SYSTEM,
+  PROMPT_VERSION,
+  type Classification,
+  type Reply,
+} from "./prompts.js";
 import { AgentRuntime, TEMPLATES } from "./runtime.js";
 
 const NOW = new Date("2026-11-01T10:00:00.000Z");
@@ -364,5 +375,111 @@ describe("AgentRuntime.respondToReason (L1)", () => {
     const { runtime, push, offers } = setup();
     await runtime.respondToReason(session({ presentedOfferId: "offer-pause-1" }), "temporary", push);
     expect(offers()).toHaveLength(0);
+  });
+});
+
+describe("every reason category (#24)", () => {
+  const REASONS = ReasonCategory.options;
+
+  it.each(REASONS)("L0, %s: presents a fitting offer from that reason's menu, or closes", async (reason) => {
+    const menu = menuFor(reason);
+    const first = menu.offers[0];
+    const llm = new FakeLlmClient().script("classify", classified({ reason }));
+    if (first)
+      llm.script(
+        "converse",
+        replied({ action: "present_offer", offerId: first.id, message: "Here's an option." }),
+      );
+    const { runtime, push, text, offers, audit } = setup(llm);
+
+    await runtime.respond(session(), "I'm leaving", push);
+
+    if (first) {
+      expect(offers()[0]?.offer).toEqual(first);
+      expect(audit.byKind("offer.presented")[0]?.payload).toMatchObject({ reason });
+    } else {
+      // Nothing fits this reason: a polite close, and no second model call.
+      expect(offers()).toHaveLength(0);
+      expect(text()).toBe(TEMPLATES.en.close);
+      expect(llm.calls.filter((c) => c.purpose === "converse")).toHaveLength(0);
+    }
+  });
+
+  it.each(REASONS)(
+    "L0, %s: a cancel intent closes at once, with no offer and no reply call",
+    async (reason) => {
+      const llm = new FakeLlmClient().script("classify", classified({ reason, intent: "cancel_now" }));
+      const { runtime, push, text, offers } = setup(llm);
+      await runtime.respond(session(), "Just cancel it, please.", push);
+      expect(offers()).toHaveLength(0);
+      expect(text()).toBe(TEMPLATES.en.close);
+      expect(llm.calls.map((c) => c.purpose)).toEqual(["classify"]);
+    },
+  );
+
+  it.each(REASONS.filter((r) => r !== "unknown"))(
+    "L1, %s: the chip shows the policy's default for it, or closes",
+    async (reason) => {
+      const defaultId = menuFor("unknown").defaultByReason[reason];
+      const { runtime, push, text, offers } = setup(null);
+      await runtime.respondToReason(session({ fallbackLevel: "L1" }), reason, push);
+      if (defaultId) {
+        expect(offers()[0]?.offer.id).toBe(defaultId);
+        // The default must also be allowed for this specific reason, not just on the full menu.
+        expect(menuFor(reason).offers.map((o) => o.id)).toContain(defaultId);
+      } else {
+        expect(offers()).toHaveLength(0);
+        expect(text()).toBe(TEMPLATES.en.close);
+      }
+    },
+  );
+
+  it("covers both outcomes with the Pantry Plan policy", () => {
+    const withOffers = REASONS.filter((r) => menuFor(r).offers.length > 0);
+    expect(withOffers.length).toBeGreaterThan(0);
+    expect(withOffers.length).toBeLessThan(REASONS.length);
+  });
+});
+
+describe("the session's language (#24)", () => {
+  it("answers an L1 chip tap in the session's language", async () => {
+    const { runtime, push, text, offers } = setup(null);
+    await runtime.respondToReason(session({ fallbackLevel: "L1", locale: "es-MX" }), "temporary", push);
+    expect(text()).toBe(TEMPLATES.es.offer);
+    expect(offers()[0]?.cardText).toMatch(/^Pausa/);
+  });
+
+  it("falls to L1 in the session's language", async () => {
+    const { runtime, push, text } = setup(null);
+    await runtime.respond(session({ locale: "hi" }), "मुझे रद्द करना है", push);
+    expect(text()).toBe(TEMPLATES.hi.l1);
+  });
+
+  it("uses the session's language when the classifier hears one we have no templates for", async () => {
+    const llm = new FakeLlmClient().script("classify", classified({ language: "fr", intent: "cancel_now" }));
+    const { runtime, push, text } = setup(llm);
+    await runtime.respond(session({ locale: "es" }), "je veux annuler", push);
+    expect(text()).toBe(TEMPLATES.es.close);
+  });
+
+  it("prefers the subscriber's own language over the session's", async () => {
+    const llm = new FakeLlmClient().script("classify", classified({ language: "hi", intent: "cancel_now" }));
+    const { runtime, push, text } = setup(llm);
+    await runtime.respond(session({ locale: "en-US" }), "मुझे रद्द करना है", push);
+    expect(text()).toBe(TEMPLATES.hi.close);
+  });
+
+  it("stays in English without a session language", async () => {
+    const { runtime, push, text } = setup(null);
+    await runtime.respondToReason(session({ fallbackLevel: "L1" }), "missing_feature", push);
+    expect(text()).toBe(TEMPLATES.en.close);
+  });
+});
+
+describe("prompt versions (#24)", () => {
+  it("records the prompt version with every offer", async () => {
+    const { runtime, push, audit } = setup(null);
+    await runtime.respondToReason(session({ fallbackLevel: "L1" }), "temporary", push);
+    expect(audit.byKind("offer.presented")[0]?.payload).toMatchObject({ promptVersion: PROMPT_VERSION });
   });
 });

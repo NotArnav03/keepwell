@@ -41,6 +41,9 @@ services:
       # The service's own URL: PayPal sends buyers back here after a revise.
       - key: API_PUBLIC_URL
         value: https://keepwell-api-staging.onrender.com
+      # The portal's origin: emailed sign-in links, and the help and reactivate links in M5's emails.
+      - key: PORTAL_URL
+        value: https://keepwell-portal-staging.onrender.com
       # Three proxies sit in front of the service (seen with /ops/whoami on 3 Nov): Cloudflare, then
       # Render's edge, then an internal 10.x proxy, and the socket itself is a proxy at 127.0.0.1.
       # X-Forwarded-For arrives as "<anything the client sent>, <client>, <cloudflare>, <10.x>", so
@@ -99,6 +102,39 @@ services:
         source: /*
         destination: /index.html
 
+  # The hosted subscriber portal (apps/portal, M3, #138): magic-link sign-in, the widget full-page,
+  # delegation tokens. Same one-origin trick as the dashboard: /v1/* is rewritten to the API so the
+  # portal session cookie stays first-party. API_PUBLIC_URL is read at build time for the page's
+  # data-api-origin (the widget checks PayPal's return message against it). The sign-in routes
+  # answer once the portal is wired into platform.ts (see docs/HANDOFF-M1.md §5); until then they 404.
+  - type: web
+    name: keepwell-portal-staging
+    runtime: static
+    branch: main
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/portal
+    staticPublishPath: apps/portal/dist
+    # Build only when the portal or a package it bundles changes (the free plan's build minutes).
+    buildFilter:
+      paths:
+        - apps/portal/**
+        - packages/widget/**
+        - packages/contracts/**
+        - pnpm-lock.yaml
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-staging.onrender.com
+      - key: PORTAL_MERCHANT_SLUG
+        value: pantry-plan
+    routes:
+      - type: rewrite
+        source: /v1/*
+        destination: https://keepwell-api-staging.onrender.com/v1/*
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
   # ── prod-demo: what judges use (ARCHITECTURE.md §4, docs/RUNBOOK-prod-demo.md) ──────────────────
   # The same build as staging, but deployed only by hand: auto-deploy is off, and Arnav deploys
   # the tagged commit with "Manual Deploy → Deploy a specific commit". Its database is a separate
@@ -141,6 +177,9 @@ services:
       # If Render gives the service a different hostname, change this and the dashboard rewrites.
       - key: API_PUBLIC_URL
         value: https://keepwell-api-demo.onrender.com
+      # The portal's origin: emailed sign-in links, and the help and reactivate links in M5's emails.
+      - key: PORTAL_URL
+        value: https://keepwell-portal-demo.onrender.com
       # Same proxy chain as staging; check with /ops/whoami after the first deploy.
       - key: TRUST_PROXY_HOPS
         value: "3"
@@ -173,6 +212,33 @@ services:
       - type: rewrite
         source: /ops/whoami
         destination: https://keepwell-api-demo.onrender.com/ops/whoami
+      - type: rewrite
+        source: /*
+        destination: /index.html
+
+  # The hosted subscriber portal (apps/portal, M3, #138): magic-link sign-in, the widget full-page,
+  # delegation tokens. Same one-origin trick as the dashboard: /v1/* is rewritten to the API so the
+  # portal session cookie stays first-party. API_PUBLIC_URL is read at build time for the page's
+  # data-api-origin (the widget checks PayPal's return message against it). The sign-in routes
+  # answer once the portal is wired into platform.ts (see docs/HANDOFF-M1.md §5); until then they 404.
+  - type: web
+    name: keepwell-portal-demo
+    runtime: static
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/portal
+    staticPublishPath: apps/portal/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-demo.onrender.com
+      - key: PORTAL_MERCHANT_SLUG
+        value: pantry-plan
+    routes:
+      - type: rewrite
+        source: /v1/*
+        destination: https://keepwell-api-demo.onrender.com/v1/*
       - type: rewrite
         source: /*
         destination: /index.html

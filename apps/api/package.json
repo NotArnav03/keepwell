@@ -13,12 +13,14 @@
     "test": "vitest run --passWithNoTests",
     "seed": "node --env-file-if-exists=../../.env --import tsx src/cli/seed.ts",
     "spike": "node --env-file-if-exists=../../.env --import tsx src/cli/sandbox-spike.ts",
-    "pool:refill": "node --env-file-if-exists=../../.env --import tsx src/cli/pool-refill.ts"
+    "pool:refill": "node --env-file-if-exists=../../.env --import tsx src/cli/pool-refill.ts",
+    "eval": "node --env-file-if-exists=../../.env --import tsx src/modules/agent/evals/cli.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.135.0",
     "@keepwell/contracts": "workspace:*",
     "@keepwell/db": "workspace:*",
+    "@keepwell/evals": "workspace:*",
     "@keepwell/policy": "workspace:*",
     "@modelcontextprotocol/sdk": "1.32.2",
     "@sentry/node": "11.8.0",

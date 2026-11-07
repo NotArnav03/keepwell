@@ -31,7 +31,7 @@ Conventions:
 - `PolicyDocument` limits are bounded (`version ≥ 1`, `maxCycles ≥ 1`, percents 1–100, counts ≥ 0).
 - New `PolicyContext` (input to `computeMenu`/`evaluate`): `now`, `channel`, `reason`, `cancelIntent`, `offersPresentedThisSession`, `subscription: SubscriptionSnapshot`, `history: SubscriberHistory` (saves and pauses in 365 days, last pause end, refunds in 30 days) and `plans: PlanInfo[]`. Time is passed in so the engine stays pure.
 - `Channel` now lives in `shared.ts` (moved by M3 in #22).
-- New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`.
+- New `SessionContext` (input to every `Agent` call, loaded fresh by M3 so the agent is stateless): ids, channel, policy, subscription, history, plans, `menu | null`, `transcript`, `presentedOfferId`, `fallbackLevel`, and an optional `locale` (from `CreateSessionRequest.locale`; template text and L1 replies use it until the classifier detects the subscriber's language).
 - `AgentStreamEvent` is the part of `SessionStreamEvent` the agent emits (`agent.delta`, `agent.done`, `offer.presented`, `reason.chips`, `fallback.changed`); `shownTextHash` is sha256 hex. M3's `SessionStreamEvent` = this union + `action.update`, `session.closed`, `error`.
 - `brainEventPayloads` (`session.offer_presented`, `policy.published`) are registered in `domainEventPayloads`; `brainJobs` has `llm.budget_reset` keyed by UTC day.
 - `reasonPreferences[reason]` is an allowlist as well as a ranking: unlisted kinds are not offered for that reason, and `"none"` ends the list. Unranked reasons use `DEFAULT_REASON_PREFERENCES` from `packages/policy`.
@@ -355,9 +355,10 @@ export const SessionStreamEvent = z.discriminatedUnion("type", [
 
 | Method + path | Auth | Purpose |
 |---|---|---|
-| `POST /demo/leases` | – (rate limited) | Lease a pooled subscription → `{ leaseId, subscriberToken, expiresAt }` |
-| `DELETE /demo/leases/:id` | DEMO | Return to pool (or mark consumed) |
-| `POST /demo/time-machine/resume/:subscriptionId` | DEMO | Run the scheduled resume now (real `activate`) |
+| `POST /demo/leases` | – (10 issued leases an hour per IP; a `pool_empty` answer doesn't count) | Lease a pooled subscription for 30 minutes → `201 { leaseId, leaseToken, expiresAt, subscriptionId }`. `leaseToken` is the DEMO bearer (`JudgeLeaseClaims`, its own secret). Every DEMO route checks `JudgePool.holds` too, so a returned lease's token is `401` at once, even when the next judge holds the same entry. Empty pool → `503 pool_empty`: show the fallback |
+| `POST /demo/leases/:id/token` | DEMO | `{ token, expiresAt }`: a 10-minute widget token for the leased subscription, for the widget's token callback |
+| `DELETE /demo/leases/:id` | DEMO | Return to pool → `{ result: "available" \| "restoring" \| "consumed" }`, decided from PayPal's state. Settles only this exact lease (`release(…, leasedUntil)`) |
+| `POST /demo/time-machine/resume/:subscriptionId` | DEMO (that lease's subscription only) | Run the pause's scheduled resume now (a real `activate`) → `{ resumed, actionId, label: "TIME SHIFT", simulated: true, note }`; audited as `demo.time_shift` with `simulated: true`. A second press reports the resume that already ran |
 | `POST /demo/time-machine/dunning/:subscriptionId` | DEMO | Send scheduled dunning now |
 | `POST /demo/simulate/payment-failed/:subscriptionId` | DEMO | Inject a **SIMULATED** failure (only if spike Q5 fails) |
 | `POST /demo-store/subscriptions` | – | Pantry Plan's "backend": `{ paypalSubscriptionId }` → GETs it from PayPal; only ACTIVE/APPROVED on a Pantry Plan plan → `{ status, planName, shopperToken }` |
@@ -442,6 +443,8 @@ interface Notifier {
   // Inserts an outbox row in the caller's transaction; notify.dispatch sends it later. Returns the notification id.
   // Rejects (never throws synchronously) if the request breaks the contract.
   enqueue(n: NotificationRequest, tx?: Tx): Promise<string>;
+  // Withdraws a still-queued message (suppressed because "superseded"); false if already sent/sending/suppressed.
+  supersede(merchantId: string, notificationId: string, tx?: Tx): Promise<boolean>;
 }
 // NotificationRequest = { merchantId, subscriptionId | null, to, content: NotificationContent, dueAt?, simulated (default false) }
 // NotificationContent = discriminated union on `template`; each payload holds facts only (amounts, dates, links).

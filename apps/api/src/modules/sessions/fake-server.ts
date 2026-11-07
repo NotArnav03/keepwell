@@ -13,6 +13,7 @@ import {
 } from "@keepwell/contracts";
 import {
   FakeAudit,
+  FakeJudgePool,
   FakePayPalGateway,
   FakeSessionsApi,
   PANTRY_PLAN,
@@ -21,6 +22,7 @@ import {
 } from "@keepwell/contracts/fakes";
 import { loadEnv } from "../../env.js";
 import { buildServer } from "../../server.js";
+import { judgeRoutes } from "../demo/judge.js";
 import { demoStoreRoutes } from "../demo/store-routes.js";
 import { FakeSubscriberAgent } from "../mcp/fake.js";
 import { subscriberMcpRoutes } from "../mcp/subscriber.js";
@@ -211,6 +213,35 @@ await app.register(subscriberMcpRoutes, {
   delegations: portalDelegations,
   publicUrl,
   portalUrl,
+});
+
+// Judge Mode (#39) over a fake pool: `pnpm dev:judge` leases these. Each fake subscription has
+// its scenario's script, so which offer a lease shows depends on which one it got, unlike the
+// real agent. The time machine makes an activate Action, which the fake PayPal moves.
+const judgePool = new FakeJudgePool();
+for (const scenario of ["pause", "downgrade", "none"] as const) {
+  const pooled = subscriptions[SCENARIOS.indexOf(scenario)];
+  if (pooled) judgePool.add(pooled.merchantId, pooled.id, pooled.paypalSubscriptionId);
+}
+await app.register(judgeRoutes, {
+  prefix: "/v1",
+  pool: judgePool,
+  timeMachine: {
+    resumeNow: async (merchantId, subscriptionId) => {
+      const action = await api.actions.create({
+        merchantId,
+        subscriptionId,
+        origin: "schedule",
+        type: "activate",
+        params: { reason: "The pause is over" },
+      });
+      return { actionId: action.id, note: "TIME SHIFT (fake): the resume ran now." };
+    },
+  },
+  merchantId: PANTRY_PLAN.merchantId,
+  leaseSecret: process.env.JUDGE_LEASE_SECRET || "local-fake-judge-secret",
+  widgetSecret: signingSecret,
+  allowOrigin: () => true,
 });
 
 // PayPal's approval page for downgrades and annual switches, faked: Approve or Cancel.

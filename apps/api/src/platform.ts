@@ -9,6 +9,7 @@ import { DbAudit } from "./modules/audit/log.js";
 import { DbDomainEvents } from "./modules/jobs/domain-events.js";
 import { Jobs } from "./modules/jobs/jobs.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
+import { mountRecovery } from "./modules/recovery/mount.js";
 import { PayPalClient } from "./modules/paypal/client.js";
 import { MOCK_CREDENTIALS, singleAppCredentials } from "./modules/paypal/credentials.js";
 import { DbJudgePool } from "./modules/pool/pool.js";
@@ -55,6 +56,19 @@ export async function startPlatform(env: Env): Promise<Platform> {
   // Handlers before workers: an event reaches the handlers registered when it is emitted.
   events.on("subscription.synced", "actions.confirm", async (event) => {
     await engine.confirmFromSync(event.merchantId, event.payload.snapshot);
+  });
+
+  // Growth: failed-payment recovery. Its handlers and due work register before the workers start.
+  await mountRecovery({
+    db,
+    jobs,
+    events,
+    audit,
+    engine,
+    reconciler,
+    paypal,
+    notifier: notify.notifier,
+    log: app.log,
   });
 
   await events.startWorker();
