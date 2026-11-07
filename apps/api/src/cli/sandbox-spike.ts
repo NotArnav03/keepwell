@@ -18,7 +18,7 @@ import { recordingFetch, type Exchange } from "../modules/paypal/recorder.js";
 // where the product goes through the action engine. Sandbox only (the gateway refuses live hosts).
 // --mock runs the same steps against paypal-mock, to try the script without credentials.
 
-const STEPS = ["setup", "status", "quick", "pause", "resume", "list", "cancel"] as const;
+const STEPS = ["setup", "status", "quick", "pause", "resume", "price", "list", "cancel"] as const;
 type Step = (typeof STEPS)[number];
 
 const MERCHANT = "sandbox-spike";
@@ -55,6 +55,10 @@ const State = z.object({
   /** When `pause` ran, and the billing time PayPal showed just before it. */
   pausedAt: z.string().optional(),
   nextBillingBeforePause: z.string().optional(),
+  /** Spike Q4: when `price` ran, what it set, and the billing time PayPal showed just before. */
+  pricePatchedAt: z.string().optional(),
+  pricePatchedTo: z.string().optional(),
+  nextBillingAtPatch: z.string().optional(),
 });
 type State = z.infer<typeof State>;
 
@@ -235,6 +239,12 @@ const steps: Record<Step, () => Promise<void>> = {
   async status() {
     table([await read("now")]);
     await transactions();
+    if (state.pricePatchedAt) {
+      out(
+        `\nprice patch (spike Q4): set to ${state.pricePatchedTo} at ${state.pricePatchedAt}; next billing then was ${state.nextBillingAtPatch}`,
+      );
+      out("Charges after that time show which billing first used the new price.");
+    }
   },
 
   /** A short pause: suspend, activate a few seconds later, and watch billing for a minute. */
@@ -278,6 +288,34 @@ const steps: Record<Step, () => Promise<void>> = {
     out(
       "\nRun `pnpm spike status` again in an hour or so: PayPal may charge a missed cycle later, not at once.",
     );
+  },
+
+  /**
+   * Spike Q4: PayPal applies a price override only to billings at least 10 days away. The spike plan
+   * bills every day, so the next billing is always inside that window: the PATCH is the "too close" case.
+   * Usage: `pnpm spike price [0.50]`. Then `pnpm spike status` after the next billing time, and again
+   * a day or two later: the transactions show which charge first used the new price (or that none did).
+   */
+  async price() {
+    question = "q4";
+    const value = args.filter((a) => !a.startsWith("--"))[1] ?? "0.50";
+    if (!/^\d+\.\d{2}$/.test(value)) throw new Error("Give the price as dollars and cents, like 0.50");
+    const before = await read("before");
+    if (before.status !== "ACTIVE")
+      throw new Error(`The subscription is ${before.status}; Q4 needs it ACTIVE`);
+    const { debugId } = await paypal.patchPrice(MERCHANT, subscriptionId(), { value, currency: "USD" });
+    out(`PATCH fixed_price ${value} accepted (debug id ${debugId})`);
+    table([before, await read("after PATCH")]);
+    state = {
+      ...state,
+      pricePatchedAt: new Date().toISOString(),
+      pricePatchedTo: value,
+      nextBillingAtPatch: before.nextBilling,
+    };
+    saveState(state);
+    out(`\nNext billing was ${before.nextBilling}, under 10 days away. Run \`pnpm spike status\` after it,`);
+    out("and again a day or two later: which charge is the first at the new price, if any?");
+    out("A PATCH PayPal refuses is an answer too: keep the debug id.");
   },
 
   /** Ends the spike: cancels its subscription so the daily $1.00 sandbox charge stops. Irreversible. */
