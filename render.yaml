@@ -73,15 +73,16 @@ services:
         sync: false
       # Subscriber surfaces (handoff 5 A). 32+ random characters each, set once, different per
       # environment. Sessions stay off without SESSION_TICKET_SECRET; Judge Mode stays off without
-      # JUDGE_LEASE_SECRET, WIDGET_TOKEN_SECRET and DEMO_MERCHANT_ID (the seeded demo merchant's id).
+      # JUDGE_LEASE_SECRET and WIDGET_TOKEN_SECRET.
       - key: SESSION_TICKET_SECRET
         sync: false
       - key: WIDGET_TOKEN_SECRET
         sync: false
       - key: JUDGE_LEASE_SECRET
         sync: false
+      # Not a secret: the seeded demo merchant's fixed id (PANTRY_PLAN.merchantId in contracts).
       - key: DEMO_MERCHANT_ID
-        sync: false
+        value: 0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b
       # Leave blank on staging: sandbox buyers' addresses (sb-...@personal.example.com) can't receive
       # mail, so real sends would only bounce. Messages still show in the Demo Inbox.
       - key: RESEND_API_KEY
@@ -266,15 +267,16 @@ services:
         sync: false
       # Subscriber surfaces (handoff 5 A). 32+ random characters each, set once, different per
       # environment. Sessions stay off without SESSION_TICKET_SECRET; Judge Mode stays off without
-      # JUDGE_LEASE_SECRET, WIDGET_TOKEN_SECRET and DEMO_MERCHANT_ID (the seeded demo merchant's id).
+      # JUDGE_LEASE_SECRET and WIDGET_TOKEN_SECRET.
       - key: SESSION_TICKET_SECRET
         sync: false
       - key: WIDGET_TOKEN_SECRET
         sync: false
       - key: JUDGE_LEASE_SECRET
         sync: false
+      # Not a secret: the seeded demo merchant's fixed id (PANTRY_PLAN.merchantId in contracts).
       - key: DEMO_MERCHANT_ID
-        sync: false
+        value: 0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
