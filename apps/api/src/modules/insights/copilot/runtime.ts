@@ -105,7 +105,9 @@ export class Copilot {
       let step: z.infer<typeof Step>;
       try {
         step = await llm.structured({
-          purpose: "converse",
+          purpose: "copilot",
+          // Not tied to a subscriber session; the copilot is bounded by the daily budget and its own deadline.
+          sessionId: null,
           system: COPILOT_SYSTEM,
           input,
           schema: Step,
