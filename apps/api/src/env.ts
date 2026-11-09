@@ -59,6 +59,8 @@ const EnvSchema = z
     WIDGET_TOKEN_SECRET: z.preprocess(blank, z.string().min(32).optional()),
     DEMO_MERCHANT_ID: z.preprocess(blank, z.uuid().optional()),
     JUDGE_LEASE_SECRET: z.preprocess(blank, z.string().min(32).optional()),
+    // Pantry Plan's origin: the only one allowed to call /v1/demo-store/*. Unset: the local dev server.
+    DEMO_STORE_URL: optionalUrl,
     // Win-back: where the exit-interview reply page lives, and the secret that signs its links.
     PORTAL_URL: optionalUrl,
     MAGIC_LINK_SECRET: z.preprocess(blank, z.string().min(16).optional()),

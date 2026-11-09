@@ -1,4 +1,5 @@
-# Render Blueprint for staging and prod-demo: the API and the merchant dashboard for each.
+# Render Blueprint for staging and prod-demo: the API, the merchant dashboard, the subscriber portal,
+# the judge page and the Pantry Plan demo store for each.
 # Arnav (M1) applies it by hand.
 # Secrets use `sync: false`, so Render asks for them; they never live in this file.
 # Free plan (the project runs on ₹0): it sleeps after 15 idle minutes and wakes on the next request
@@ -83,6 +84,10 @@ services:
       # Not a secret: the seeded demo merchant's fixed id (PANTRY_PLAN.merchantId in contracts).
       - key: DEMO_MERCHANT_ID
         value: 0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b
+      # Pantry Plan's origin: the only caller allowed on /v1/demo-store/*. If Render gives the store a
+      # different hostname, change it here, in the store's WIDGET_CDN_URL and in JUDGE_STORE_URL.
+      - key: DEMO_STORE_URL
+        value: https://keepwell-store-staging.onrender.com
       # Leave blank on staging: sandbox buyers' addresses (sb-...@personal.example.com) can't receive
       # mail, so real sends would only bounce. Messages still show in the Demo Inbox.
       - key: RESEND_API_KEY
@@ -164,8 +169,8 @@ services:
   # and portal: /v1/* goes to the API, so no CORS. /status is rewritten too, because the page shows the
   # public status (GET /status). JUDGE_BUYER_EMAIL and JUDGE_BUYER_PASSWORD are left unset on purpose: the
   # sandbox buyer is the pool's own payer, and anything in a build env ends up in a public page. Its login
-  # goes in the Devpost testing instructions. JUDGE_STORE_URL waits for Pantry Plan's own site (not in
-  # this Blueprint yet), so Arnav sets it in Render; unset, the page would link to localhost.
+  # goes in the Devpost testing instructions. JUDGE_STORE_URL is Pantry Plan's site
+  # (keepwell-store-*, below).
   - type: web
     name: keepwell-judge-staging
     runtime: static
@@ -189,7 +194,7 @@ services:
       - key: JUDGE_EVALS_URL
         value: https://keepwell-api-staging.onrender.com/evals
       - key: JUDGE_STORE_URL
-        sync: false
+        value: https://keepwell-store-staging.onrender.com
     routes:
       - type: rewrite
         source: /v1/*
@@ -200,6 +205,40 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  # Pantry Plan (apps/demo-store, M3, #34): the fictional merchant judges subscribe on, on its own
+  # origin, so the widget runs on a third-party site the way a merchant installs it. The build also
+  # bundles the widget (packages/widget) and serves v1.js from this site, so there's no widget host.
+  # Everything here is public: PAYPAL_CLIENT_ID is the sandbox app's client id and the plan ids come
+  # from the seed. No secret ever goes in a static site's build env.
+  - type: web
+    name: keepwell-store-staging
+    runtime: static
+    branch: main
+    buildFilter:
+      paths:
+        - apps/demo-store/**
+        - packages/widget/**
+        - packages/contracts/**
+        - pnpm-lock.yaml
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/demo-store --filter=@keepwell/widget && pnpm --filter @keepwell/widget bundle && cp packages/widget/dist-bundle/v1.js apps/demo-store/dist/v1.js
+    staticPublishPath: apps/demo-store/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-staging.onrender.com
+      - key: WIDGET_CDN_URL
+        value: https://keepwell-store-staging.onrender.com
+      # Unset: the store runs in FAKE PAYPAL mode, and a real API refuses its fake subscriptions.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_PLAN_LITE
+        sync: false
+      - key: PAYPAL_PLAN_STANDARD
+        sync: false
+      - key: PAYPAL_PLAN_ANNUAL
+        sync: false
 
   # ── prod-demo: what judges use (ARCHITECTURE.md §4, docs/RUNBOOK-prod-demo.md) ──────────────────
   # The same build as staging, but deployed only by hand: auto-deploy is off, and Arnav deploys
@@ -277,6 +316,10 @@ services:
       # Not a secret: the seeded demo merchant's fixed id (PANTRY_PLAN.merchantId in contracts).
       - key: DEMO_MERCHANT_ID
         value: 0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b
+      # Pantry Plan's origin: the only caller allowed on /v1/demo-store/*. If Render gives the store a
+      # different hostname, change it here, in the store's WIDGET_CDN_URL and in JUDGE_STORE_URL.
+      - key: DEMO_STORE_URL
+        value: https://keepwell-store-demo.onrender.com
       - key: RESEND_API_KEY
         sync: false
       - key: EMAIL_FROM
@@ -336,8 +379,8 @@ services:
   # and portal: /v1/* goes to the API, so no CORS. /status is rewritten too, because the page shows the
   # public status (GET /status). JUDGE_BUYER_EMAIL and JUDGE_BUYER_PASSWORD are left unset on purpose: the
   # sandbox buyer is the pool's own payer, and anything in a build env ends up in a public page. Its login
-  # goes in the Devpost testing instructions. JUDGE_STORE_URL waits for Pantry Plan's own site (not in
-  # this Blueprint yet), so Arnav sets it in Render; unset, the page would link to localhost.
+  # goes in the Devpost testing instructions. JUDGE_STORE_URL is Pantry Plan's site
+  # (keepwell-store-*, below).
   - type: web
     name: keepwell-judge-demo
     runtime: static
@@ -355,7 +398,7 @@ services:
       - key: JUDGE_EVALS_URL
         value: https://keepwell-api-demo.onrender.com/evals
       - key: JUDGE_STORE_URL
-        sync: false
+        value: https://keepwell-store-demo.onrender.com
     routes:
       - type: rewrite
         source: /v1/*
@@ -366,3 +409,32 @@ services:
       - type: rewrite
         source: /*
         destination: /index.html
+
+  # Pantry Plan (apps/demo-store, M3, #34): the fictional merchant judges subscribe on, on its own
+  # origin, so the widget runs on a third-party site the way a merchant installs it. The build also
+  # bundles the widget (packages/widget) and serves v1.js from this site, so there's no widget host.
+  # Everything here is public: PAYPAL_CLIENT_ID is the sandbox app's client id and the plan ids come
+  # from the seed. No secret ever goes in a static site's build env.
+  - type: web
+    name: keepwell-store-demo
+    runtime: static
+    branch: main
+    autoDeployTrigger: "off"
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm turbo run build --filter=@keepwell/demo-store --filter=@keepwell/widget && pnpm --filter @keepwell/widget bundle && cp packages/widget/dist-bundle/v1.js apps/demo-store/dist/v1.js
+    staticPublishPath: apps/demo-store/dist
+    envVars:
+      - key: NODE_VERSION
+        value: "24"
+      - key: API_PUBLIC_URL
+        value: https://keepwell-api-demo.onrender.com
+      - key: WIDGET_CDN_URL
+        value: https://keepwell-store-demo.onrender.com
+      # Unset: the store runs in FAKE PAYPAL mode, and a real API refuses its fake subscriptions.
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_PLAN_LITE
+        sync: false
+      - key: PAYPAL_PLAN_STANDARD
+        sync: false
+      - key: PAYPAL_PLAN_ANNUAL
+        sync: false
