@@ -8,6 +8,9 @@ import { EmailProviderError, type EmailProvider } from "./providers.js";
 import { renderTemplate } from "./templates.js";
 import { hashEmail, unsubscribeUrl } from "./unsubscribe-token.js";
 
+/** Sent whatever the caps and the unsubscribe list say: the subscriber asked for it a moment ago. */
+const REQUESTED_TEMPLATE = "portal.sign_in";
+
 // The notify.dispatch job (CONTRACTS.md §3, idempotent on notificationId).
 //
 // Lifecycle: queued -> sending -> sent | queued again (retry) | failed | suppressed.
@@ -113,9 +116,12 @@ export function createDispatcher(deps: DispatcherDeps) {
             eq(emailUnsubscribes.emailHash, hashEmail(row.to)),
           ),
         );
-      if (unsubscribed) return suppress("unsubscribed");
+      // A sign-in link the subscriber just asked for is not marketing: neither the unsubscribe list
+      // nor the frequency cap may hold it back.
+      const requested = row.template === REQUESTED_TEMPLATE;
+      if (unsubscribed && !requested) return suppress("unsubscribed");
 
-      const nextAllowed = await nextAllowedSendTime(tx, row, at);
+      const nextAllowed = requested ? null : await nextAllowedSendTime(tx, row, at);
       if (nextAllowed) {
         if (nextAllowed.getTime() - row.createdAt.getTime() > MAX_CAP_DEFERRAL_MS) {
           return suppress("frequency_cap");
@@ -173,6 +179,8 @@ export function createDispatcher(deps: DispatcherDeps) {
           eq(notifications.merchantId, row.merchantId),
           eq(notifications.to, row.to),
           ne(notifications.id, row.id),
+          // Sign-in links don't use up the allowance of the messages that are held to it.
+          ne(notifications.template, REQUESTED_TEMPLATE),
           or(
             and(eq(notifications.status, "sent"), gte(notifications.sentAt, weekAgo)),
             eq(notifications.status, "sending"),

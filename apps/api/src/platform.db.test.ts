@@ -9,6 +9,7 @@ import { startPlatform, type Platform } from "./platform.js";
 // calls: the mock is never reached by these requests.
 
 const STORE = "https://keepwell-store-staging.onrender.com";
+const PORTAL = "https://keepwell-portal-staging.onrender.com/";
 
 describe.skipIf(TEST_DATABASE_URL === undefined)(
   "startPlatform: subscriber surfaces",
@@ -31,6 +32,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)(
           WIDGET_TOKEN_SECRET: "w".repeat(40),
           DEMO_MERCHANT_ID: PANTRY_PLAN.merchantId,
           DEMO_STORE_URL: STORE,
+          PORTAL_URL: PORTAL,
+          MAGIC_LINK_SECRET: "m".repeat(40),
         }),
       );
       await platform.app.ready();
@@ -47,6 +50,32 @@ describe.skipIf(TEST_DATABASE_URL === undefined)(
       expect(doc.json<{ mcp: { url: string } }>().mcp.url).toBe("https://api.example/mcp/subscriber");
       const mcp = await platform.app.inject({ method: "POST", url: "/mcp/subscriber", payload: {} });
       expect(mcp.statusCode).toBe(401);
+    });
+
+    it("mounts the portal: sign-in requests always answer 202, a bad link goes back to the portal", async () => {
+      const request = await platform.app.inject({
+        method: "POST",
+        url: "/v1/portal/magic-link",
+        payload: { merchantSlug: "nobody", email: "maya@example.com" },
+      });
+      expect(request.statusCode).toBe(202);
+      const verify = await platform.app.inject({ method: "GET", url: "/v1/portal/verify?token=not-a-link" });
+      expect(verify.statusCode).toBe(302);
+      expect(verify.headers.location).toBe(`${PORTAL}?error=link_expired`);
+    });
+
+    it("lets only the portal's origin send its cookie", async () => {
+      const preflight = (origin: string) =>
+        platform.app.inject({
+          method: "OPTIONS",
+          url: "/v1/portal/me",
+          headers: { origin, "access-control-request-method": "GET" },
+        });
+      const allowed = await preflight(new URL(PORTAL).origin);
+      expect(allowed.headers["access-control-allow-origin"]).toBe(new URL(PORTAL).origin);
+      expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
+      const other = await preflight("https://elsewhere.example");
+      expect(other.headers["access-control-allow-origin"]).toBeUndefined();
     });
 
     it("serves Pantry Plan's backend to the store's origin only", async () => {

@@ -142,5 +142,19 @@ export function renderTemplate(content: NotificationContent, unsubscribeUrl: str
         ),
       };
     }
+    case "portal.sign_in": {
+      const p = content.payload;
+      return {
+        subject: "Your sign-in link",
+        bodyText: compose(
+          null,
+          [
+            `Use this link to sign in and manage or cancel your subscription: ${p.signInUrl}`,
+            `It works once and expires in ${p.expiresInMinutes} minutes. If you didn't ask for it, ignore this email.`,
+          ],
+          unsubscribeUrl,
+        ),
+      };
+    }
   }
 }
