@@ -16,15 +16,15 @@ webhook.process   (processor.ts)
   status "processed"
 ```
 
-**Diff-of-truth:** the domain events come from comparing our stored snapshot with what PayPal returns *now*, not from the webhook's `event_type`. A webhook that arrives late, twice or never can't put us in a wrong state. A suspend undone a second later produces no change events at all.
+**Diff-of-truth:** the domain events come from comparing our stored snapshot with what PayPal returns _now_, not from the webhook's `event_type`. A webhook that arrives late, twice or never can't put us in a wrong state. A suspend undone a second later produces no change events at all.
 
-| Diff | Event |
-|---|---|
-| any field we track changed (or first sight) | `subscription.synced` with the snapshot |
-| status | `subscription.status_changed`, plus `subscription.cancelled_externally` when it became CANCELLED with no Keepwell cancel Action (the win-back trigger) |
-| plan id | `subscription.plan_changed` |
-| `failed_payments_count` went up | `subscription.payment_failed` with PayPal's reason code and next retry |
-| a newer `last_payment` | `subscription.payment_completed` |
+| Diff                                        | Event                                                                                                                                                  |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| any field we track changed (or first sight) | `subscription.synced` with the snapshot                                                                                                                |
+| status                                      | `subscription.status_changed`, plus `subscription.cancelled_externally` when it became CANCELLED with no Keepwell cancel Action (the win-back trigger) |
+| plan id                                     | `subscription.plan_changed`                                                                                                                            |
+| `failed_payments_count` went up             | `subscription.payment_failed` with PayPal's reason code and next retry                                                                                 |
+| a newer `last_payment`                      | `subscription.payment_completed`                                                                                                                       |
 
 Snapshots keep a hash of the subscriber's email (to match a portal login), never the address. The stored PayPal JSON has `email_address` and `payer_id` removed. The action engine registers `confirmFromSync` on `subscription.synced`, so a webhook showing the target status confirms APPLIED Actions with no extra PayPal call.
 

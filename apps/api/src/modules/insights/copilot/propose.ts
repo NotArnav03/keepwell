@@ -24,7 +24,7 @@ export interface NewInsightAction {
   params: Record<string, unknown>;
   rationale: string;
   estimate: Estimate;
-  proposedBy: "copilot";
+  proposedBy: InsightAction["proposedBy"];
 }
 
 export interface InsightActionStore {
@@ -55,6 +55,7 @@ export async function proposeAction(
   deps: ProposeActionDeps,
   merchantId: string,
   input: { kind: string; params: Record<string, unknown>; rationale: string },
+  proposedBy: InsightAction["proposedBy"] = "copilot",
 ): Promise<ProposeOutcome> {
   const parsed = InsightActionProposal.safeParse({ kind: input.kind, params: input.params });
   if (!parsed.success) return { ok: false, error: `invalid proposal: ${parsed.error.message}` };
@@ -72,7 +73,7 @@ export async function proposeAction(
       params: proposal.params,
       rationale: input.rationale,
       estimate,
-      proposedBy: "copilot",
+      proposedBy,
     },
     async (tx, insightActionId) => {
       await deps.events.emit(
@@ -85,7 +86,7 @@ export async function proposeAction(
           actor: "agent",
           kind: "insight_action.proposed",
           subjectIds: { insightActionId },
-          payload: { kind: proposal.kind, proposedBy: "copilot", rationale: input.rationale, estimate },
+          payload: { kind: proposal.kind, proposedBy, rationale: input.rationale, estimate },
           simulated: false,
         },
         tx,

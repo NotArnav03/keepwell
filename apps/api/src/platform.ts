@@ -43,7 +43,9 @@ import { defaultSessionRateLimits } from "./modules/sessions/rate-limit.js";
 import { sessionRoutes } from "./modules/sessions/routes.js";
 import { DbTimeMachine, judgeRoutes } from "./modules/demo/judge.js";
 import { demoStoreRoutes } from "./modules/demo/store-routes.js";
+import { merchantMcpRoutes, SqlAtRiskSource } from "./modules/mcp/merchant.js";
 import { subscriberMcpRoutes } from "./modules/mcp/subscriber.js";
+import { ApiKeyService, apiKeyRoutes } from "./modules/merchant/api-keys.js";
 import { DelegationService } from "./modules/portal/delegations.js";
 import { MagicLinkService } from "./modules/portal/magic-link.js";
 import { NotifyMagicLinkMailer } from "./modules/portal/notify-mailer.js";
@@ -308,6 +310,23 @@ export async function startPlatform(env: Env): Promise<Platform> {
       prefix: "/v1/m",
       service: insightActions,
       authenticate: merchantPrincipal,
+    });
+    // Keys for the merchant MCP server (#45), and the server itself: an outside agent reads the
+    // merchant's numbers and may propose actions, which still need a click in the dashboard.
+    const apiKeys = new ApiKeyService({ db, audit });
+    await app.register(apiKeyRoutes, { prefix: "/v1/m", service: apiKeys, authenticator });
+    await app.register(merchantMcpRoutes, {
+      keys: apiKeys,
+      tools: {
+        data: new DrizzleCopilotData(db),
+        store: new DrizzleInsightActionStore(db),
+        estimates: {
+          estimate: async (merchantId, proposal) => (await estimates.estimate(merchantId, proposal)).estimate,
+        },
+        events,
+        audit,
+      },
+      atRisk: new SqlAtRiskSource(db),
     });
     if (llm) {
       // About 20 messages an hour per merchant: a message takes up to three model rounds, and the

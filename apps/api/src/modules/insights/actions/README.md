@@ -12,12 +12,12 @@ Getting or listing an insight action adds `execution` to the response. It is der
 { status: "pending" | "confirmed" | "failed" | "not_applicable", error?: { code, message } }
 ```
 
-| Engine Action | `execution` |
-|---|---|
-| `PENDING`, `EXECUTING`, `RETRY_WAIT`, `AWAITING_BUYER`, `APPLIED` | `{ status: "pending" }` |
-| `CONFIRMED` | `{ status: "confirmed" }` |
-| `FAILED`, `ABANDONED`, `SUPERSEDED` | `{ status: "failed", error? }` using the Action's error when it has one |
-| no `actionId`, or the Action row is not visible to this merchant | `{ status: "not_applicable" }` |
+| Engine Action                                                     | `execution`                                                             |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `PENDING`, `EXECUTING`, `RETRY_WAIT`, `AWAITING_BUYER`, `APPLIED` | `{ status: "pending" }`                                                 |
+| `CONFIRMED`                                                       | `{ status: "confirmed" }`                                               |
+| `FAILED`, `ABANDONED`, `SUPERSEDED`                               | `{ status: "failed", error? }` using the Action's error when it has one |
+| no `actionId`, or the Action row is not visible to this merchant  | `{ status: "not_applicable" }`                                          |
 
 `update_policy` and `send_winback_batch` do not create an engine Action, so they are `not_applicable`. A queue should read `execution.status` before treating a `create_plan` as a success. `APPLIED` is still pending: confirmation is a later read of PayPal.
 

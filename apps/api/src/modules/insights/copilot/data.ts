@@ -63,6 +63,8 @@ export class DrizzleInsightActionStore implements InsightActionStore {
         kind: row.kind,
         params: row.params,
         estimate: row.estimate,
+        rationale: row.rationale,
+        proposedBy: row.proposedBy,
         state: "proposed",
       });
       await onStored(tx, id);

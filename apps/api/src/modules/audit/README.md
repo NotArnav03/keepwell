@@ -22,6 +22,7 @@ await db.forMerchant(merchantId, async (tx) => {
   - **Page size:** `limit` is 1–100, default 50.
 
   Entries come back exactly as they were hashed. The route is added once #124's `MerchantAuditQuery` contract is on `main`.
+
 - **`GET /v1/m/audit/verify`** (`routes.ts`) serves it to the dashboard (#51). It isn't registered yet, because merchant auth (#48) plugs in through `authenticate`.
 
 The tests run against a real Postgres. For each column, they edit an entry the only way still possible (as the owner, with the trigger switched off) and check that `verify()` names that entry.

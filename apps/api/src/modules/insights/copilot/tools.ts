@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { Money, ReasonCategory } from "@keepwell/contracts";
+import { Money, ReasonCategory, type InsightAction } from "@keepwell/contracts";
 import { DateRange, type InsightsResponse, type OverviewKpis } from "../queries.js";
 import { proposeAction, type ProposeActionDeps } from "./propose.js";
 
@@ -109,6 +109,7 @@ export async function executeTool(
   merchantId: string,
   tool: ToolName,
   rawArgs: unknown,
+  proposedBy: InsightAction["proposedBy"] = "copilot",
 ): Promise<ToolOutcome> {
   const bad = (e: z.ZodError): ToolOutcome => ({
     ok: false,
@@ -140,7 +141,7 @@ export async function executeTool(
     case "propose_action": {
       const a = ProposeArgs.safeParse(rawArgs);
       if (!a.success) return bad(a.error);
-      return proposeAction(deps, merchantId, a.data);
+      return proposeAction(deps, merchantId, a.data, proposedBy);
     }
   }
 }

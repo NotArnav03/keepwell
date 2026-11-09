@@ -33,6 +33,8 @@ describe.skipIf(TEST_DATABASE_URL === undefined)(
           DEMO_MERCHANT_ID: PANTRY_PLAN.merchantId,
           DEMO_STORE_URL: STORE,
           PORTAL_URL: PORTAL,
+          SESSION_SECRET: "s".repeat(40),
+          DASHBOARD_URL: "https://dashboard.example/",
           MAGIC_LINK_SECRET: "m".repeat(40),
         }),
       );
@@ -50,6 +52,20 @@ describe.skipIf(TEST_DATABASE_URL === undefined)(
       expect(doc.json<{ mcp: { url: string } }>().mcp.url).toBe("https://api.example/mcp/subscriber");
       const mcp = await platform.app.inject({ method: "POST", url: "/mcp/subscriber", payload: {} });
       expect(mcp.statusCode).toBe(401);
+    });
+
+    it("mounts the merchant API keys and the merchant MCP server, both closed to strangers", async () => {
+      const keys = await platform.app.inject({ method: "GET", url: "/v1/m/api-keys" });
+      expect(keys.statusCode).toBe(401);
+      const mcp = await platform.app.inject({ method: "POST", url: "/mcp/merchant", payload: {} });
+      expect(mcp.statusCode).toBe(401);
+      const wrongKey = await platform.app.inject({
+        method: "POST",
+        url: "/mcp/merchant",
+        payload: {},
+        headers: { authorization: "Bearer kwk_not-a-real-key" },
+      });
+      expect(wrongKey.statusCode).toBe(401);
     });
 
     it("mounts the portal: sign-in requests always answer 202, a bad link goes back to the portal", async () => {
