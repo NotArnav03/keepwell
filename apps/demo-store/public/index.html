@@ -4,6 +4,12 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Pantry Plan · Weekly meal plans</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,500;0,6..72,600;1,6..72,400&display=swap"
+    />
     <link rel="stylesheet" href="style.css" />
   </head>
   <body>
@@ -12,14 +18,35 @@
       <nav><a href="account.html">My account</a></nav>
     </header>
     <main>
-      <h1>Cook more, waste less.</h1>
-      <p class="lead">
-        A weekly meal plan and shopping list built from what's already in your pantry. Cancel any time.
-      </p>
-      <p class="fake-badge">
-        FAKE PAYPAL: local development mode, no PayPal involved. Configure a sandbox client id for the real
-        flow.
-      </p>
+      <div class="hero">
+        <div>
+          <h1>Cook more, <em>waste less.</em></h1>
+          <p class="lead">
+            A weekly meal plan and shopping list built from what's already in your pantry. Cancel any time.
+          </p>
+          <p class="fake-badge">
+            FAKE PAYPAL: local development mode, no PayPal involved. Configure a sandbox client id for the
+            real flow.
+          </p>
+        </div>
+        <aside class="menu" aria-label="This week's menu">
+          <h2>This week's menu</h2>
+          <ul>
+            <li><span>Mon</span><span>Lemon chicken, orzo, peas</span></li>
+            <li><span>Tue</span><span>Black bean tacos, lime slaw</span></li>
+            <li><span>Wed</span><span>Mushroom barley soup</span></li>
+            <li><span>Thu</span><span>Miso salmon, rice, greens</span></li>
+            <li><span>Fri</span><span>Pantry pasta, whatever's left</span></li>
+          </ul>
+          <p>Built from what you already have. Five dinners, one list.</p>
+        </aside>
+      </div>
+      <ul class="how">
+        <li>Pick a plan</li>
+        <li>Pay with PayPal</li>
+        <li>Cancel in one click, any time</li>
+      </ul>
+      <h2>Choose your plan</h2>
       <section id="plans" class="plans" aria-label="Plans"></section>
       <p id="status" role="status" aria-live="polite"></p>
     </main>
