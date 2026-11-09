@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { dunningCases, insights, merchants, sessions, subscriptions, type Db, type Tx } from "@keepwell/db";
 import { uuidv7 } from "@keepwell/contracts/fakes";
 import { handleRefreshViewsJob } from "./jobs.js";
-import { insightsOverview, overviewKpis } from "./queries.js";
+import { insightsOverview, merchantOverview, overviewKpis } from "./queries.js";
 
 // The SQL tests, shared by the Postgres 18 run (queries.test.ts, CI) and any other opener.
 
@@ -298,6 +298,44 @@ export function describeQueries(open: () => Promise<OpenedDb>): void {
 
       it("rejects a backwards range", () => {
         expect(() => overviewKpis(db, A, { from: "2026-11-01", to: "2026-10-01" })).toThrow();
+      });
+    });
+
+    describe("merchantOverview", () => {
+      it("builds the dashboard's figures from the same sessions as the KPIs", async () => {
+        const overview = await merchantOverview(db, A, range);
+        expect(overview).toMatchObject({
+          from: "2026-10-19T00:00:00.000Z",
+          to: "2026-11-01T23:59:59.999Z",
+          saveRate: { savedSessions: 2, eligibleSessions: 3 },
+          recoveredRevenue: { value: "15.50", currency: "USD" },
+        });
+        // Both saves are on the same 12.00/month subscription: it counts once.
+        expect(overview.mrrSaved).toEqual({ value: "12.00", currency: "USD" });
+        expect(overview.outcomesByOffer).toEqual([
+          { offer: "discount", count: 1 },
+          { offer: "none", count: 1 },
+          { offer: "pause", count: 1 },
+        ]);
+        // Abandoned and cancelled sessions count here too; the one with no outcome and the simulated one do not.
+        expect(overview.outcomesByReason).toEqual([{ reason: "unknown", count: 4 }]);
+      });
+
+      it("is all zeros, in the merchant's own currency, for an empty range", async () => {
+        const overview = await merchantOverview(db, A, { from: "2025-01-01", to: "2025-01-07" });
+        expect(overview).toMatchObject({
+          mrrSaved: { value: "0.00", currency: "USD" },
+          recoveredRevenue: { value: "0.00", currency: "USD" },
+          saveRate: { savedSessions: 0, eligibleSessions: 0 },
+          outcomesByOffer: [],
+          outcomesByReason: [],
+        });
+      });
+
+      it("never mixes in another merchant's rows", async () => {
+        const overview = await merchantOverview(db, B, range);
+        expect(overview.saveRate).toEqual({ savedSessions: 0, eligibleSessions: 1 });
+        expect(overview.mrrSaved.value).toBe("0.00");
       });
     });
 

@@ -1,6 +1,6 @@
 import type { FastifyPluginCallback, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
-import { ErrorEnvelope } from "@keepwell/contracts";
+import { ErrorEnvelope, MerchantOverviewQuery, MerchantOverviewResponse } from "@keepwell/contracts";
 import { InsightsResponse, type DateRange } from "./queries.js";
 
 // GET /v1/m/insights?from&to (CONTRACTS.md §4, owner M5). Merchant auth belongs to M4 and plugs in
@@ -11,6 +11,8 @@ export interface InsightsRoutesOptions {
   authenticate: (request: FastifyRequest) => Promise<{ merchantId: string }>;
   /** Reads the aggregates for one merchant. In production: insightsOverview bound to the Db. */
   load: (merchantId: string, range: DateRange, quoteLimit: number) => Promise<InsightsResponse>;
+  /** The dashboard's first screen (GET /overview). In production: merchantOverview bound to the Db. */
+  loadOverview: (merchantId: string, range: DateRange) => Promise<MerchantOverviewResponse>;
 }
 
 const Query = z
@@ -42,6 +44,17 @@ export const insightsRoutes: FastifyPluginCallback<InsightsRoutesOptions> = (app
     const { from, to, quotes } = parsed.data;
     const result = await options.load(merchantId, { from, to }, quotes);
     return reply.send(InsightsResponse.parse(result));
+  });
+
+  // GET /v1/m/overview?from&to (ISO date-times, as the dashboard sends them): the figures on the first screen.
+  app.get("/overview", async (request, reply) => {
+    const { merchantId } = await options.authenticate(request);
+    const parsed = MerchantOverviewQuery.safeParse(request.query);
+    if (!parsed.success) {
+      return sendError(request, reply, 400, "invalid_request", z.prettifyError(parsed.error));
+    }
+    const range = { from: parsed.data.from.slice(0, 10), to: parsed.data.to.slice(0, 10) };
+    return reply.send(MerchantOverviewResponse.parse(await options.loadOverview(merchantId, range)));
   });
 
   done();

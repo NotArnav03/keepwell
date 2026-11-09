@@ -62,7 +62,7 @@ import {
   DrizzleInsightActionStore,
 } from "./modules/insights/copilot/index.js";
 import { RateLimiter } from "./modules/portal/rate-limit.js";
-import { insightsOverview } from "./modules/insights/queries.js";
+import { insightsOverview, merchantOverview } from "./modules/insights/queries.js";
 import { insightsRoutes } from "./modules/insights/routes.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
 import { mountRecovery } from "./modules/recovery/mount.js";
@@ -278,6 +278,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
       prefix: "/v1/m",
       authenticate: (request) => authenticator.authenticate(request),
       load: (merchantId, range, quoteLimit) => insightsOverview(db, merchantId, range, quoteLimit),
+      loadOverview: (merchantId, range) => merchantOverview(db, merchantId, range),
     });
     const policyService = new PolicyService({ store: policyStore, catalog, events, audit });
     // The signed-in merchant user, for the routes that audit who clicked. Writes need the CSRF token.
