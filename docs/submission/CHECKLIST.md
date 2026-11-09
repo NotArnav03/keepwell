@@ -17,7 +17,7 @@ Deadline: submit by **12 Nov 2026, 20:00 IST** (real deadline 13 Nov 01:30 IST).
 | 7 | README: hosted demo URL | Arnav | TODO | `TODO(url)`. `render.yaml` names `keepwell-*-demo`. This repo does not show those hosts answer |
 | 8 | README: Judge Mode link | Aditya | TODO | Page and API are on `main` (`apps/judge`, `POST /v1/demo/leases` when `JUDGE_LEASE_SECRET`, `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` are set). The hosted link is still `TODO(url)` |
 | 9 | README: eval results | Ishan | in progress | Harness and `packages/evals/results/adversarial.json` are on `main` (scripted model). README cites that file. No real-model run is committed. `platform.ts` does not register `GET /evals` |
-| 10 | README: chaos report | Arnav | in progress | [CHAOS-REPORT.md](../CHAOS-REPORT.md) exists (9 Nov). Agent drills are written. API, widget, dashboard and email rows are Open |
+| 10 | README: chaos report | Arnav | in progress | [CHAOS-REPORT.md](../CHAOS-REPORT.md) exists (9 Nov). Agent and notification (M5) drills are written. API, widget and dashboard rows are Open |
 | 11 | README: honest note on anything simulated | Om | done | "What is simulated" matches Q4, Q5, the Judge Mode time machine (`POST /v1/demo/time-machine/resume/:subscriptionId`), and the Demo Inbox rule that simulated mail is not sent |
 | 12 | Hosted demo on `prod-demo` working from a clean browser | Arnav | TODO | Test in a fresh profile, also with the API asleep (cold start) |
 | 13 | Judge Mode tested by someone outside the team | Aditya | TODO | Planned 10 Nov |

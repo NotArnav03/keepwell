@@ -182,7 +182,7 @@ The harness in [packages/evals](packages/evals/README.md) has 404 personas: 300 
 
 ## Chaos testing
 
-Chaos day is 9 Nov. The report is [docs/CHAOS-REPORT.md](docs/CHAOS-REPORT.md). It records the agent drills (revoked Anthropic key, spent daily budget, prompt injection against a scripted jailbroken model). The API-kill, dropped-webhook, PayPal 5xx, widget, dashboard and email-provider rows in that file are Open. `TODO(results)`: those open sections. Quote only what the report records.
+Chaos day is 9 Nov. The report is [docs/CHAOS-REPORT.md](docs/CHAOS-REPORT.md). It records the agent drills (revoked Anthropic key, spent daily budget, prompt injection against a scripted jailbroken model) and the notification drills (the same `payment_failed` delivered three times opens one case and queues one message; with the email provider down the message is retried and sent once). The API-kill, dropped-webhook, PayPal 5xx, widget and dashboard rows in that file are Open. `TODO(results)`: those open sections. Quote only what the report records.
 
 ## What is simulated
 
