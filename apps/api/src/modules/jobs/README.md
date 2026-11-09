@@ -7,7 +7,7 @@ Background jobs on Postgres with pg-boss, and the Postgres-backed `DomainEvents`
 ```ts
 const jobs = await Jobs.start({ connectionString: ownerUrl, log });
 await jobs.work("action.execute", ({ actionId }) => engine.execute(merchantId, actionId));
-await jobs.send("action.execute", { actionId }, { tx });   // joins the caller's transaction
+await jobs.send("action.execute", { actionId }, { tx }); // joins the caller's transaction
 await jobs.schedule("due.sweep", "* * * * *", {});
 ```
 

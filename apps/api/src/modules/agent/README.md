@@ -17,6 +17,7 @@ Each message has 8 s in total. A timeout, an API error, a refusal or two invalid
 ## Claims checker
 
 The offer card carries every term, so the model's text carries none. `checkClaims(text, offer)` rejects:
+
 - **figures:** digits in any script, currency signs, `%`, and number words;
 - **dates and durations:** month and day names, "tomorrow", "months", "semanas", "महीने";
 - **promises:** "free", "guaranteed", "forever", "gratis", "मुफ़्त";
@@ -44,16 +45,18 @@ Cards and template replies come in English, Hindi and Spanish (`i18n.ts`). Money
 ## Budget guard
 
 `LlmBudget` (`budget.ts`) runs before every model call (#26):
+
 - **Daily cap:** today's spend (UTC) plus the call's worst case must fit under `LLM_DAILY_BUDGET_USD`. Each day starts at zero, so there's nothing to reset.
 - **Session limits:** 20 s of model time and 60,000 tokens per session (§6.5).
 
 When either is reached, the call fails as `unavailable` and the session drops to L1. Cancel is unaffected.
 
-**Reservations.** The check and the spend are far apart in time (a call takes seconds), so `reserve()` checks the budget and, in the same synchronous step, holds the call's worst-case cost: every input byte priced as a cache write, plus the full `maxTokens` of output. Calls that overlap see each other's holds, so a burst can't all pass the same check and overshoot the cap. The client releases the hold once the real usage is recorded, whether the call succeeded or not. The totals are in-process, which is right for one Render instance. A call that is *refused* costs nothing; one that fits is held for at most its own deadline. Model time can't be estimated in advance, so only finished calls count toward a session's 20 s.
+**Reservations.** The check and the spend are far apart in time (a call takes seconds), so `reserve()` checks the budget and, in the same synchronous step, holds the call's worst-case cost: every input byte priced as a cache write, plus the full `maxTokens` of output. Calls that overlap see each other's holds, so a burst can't all pass the same check and overshoot the cap. The client releases the hold once the real usage is recorded, whether the call succeeded or not. The totals are in-process, which is right for one Render instance. A call that is _refused_ costs nothing; one that fits is held for at most its own deadline. Model time can't be estimated in advance, so only finished calls count toward a session's 20 s.
 
 After every call, including a failed one (its time still counts), the tokens, cost and duration go to the `LlmUsageStore`. Cost is in whole nano-dollars, from the list prices in `budget.ts` (checked against the pricing page on 2026-11-06); a model with no price is refused before the call rather than counted as free. A timed-out or aborted call is recorded with 0 tokens, though Anthropic may still bill the generation, so spend can be slightly under-counted.
 
 Two failure cases are handled on purpose:
+
 - **The store can't be read:** the call is refused (fail closed), because we can't prove there's budget left.
 - **Usage can't be recorded after a successful call:** the reply still goes out and it's logged as an error, but the call's cost, time and tokens stay in memory and keep counting toward the caps. The budget retries the store on its next check or record and drops the entry once it's written.
 

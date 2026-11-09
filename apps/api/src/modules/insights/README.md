@@ -2,13 +2,13 @@
 
 Why subscribers leave (ARCHITECTURE.md §6.12). Insights are never on the critical path: if the model is down, the extraction job retries and the session is untouched.
 
-| Piece | What it does |
-|---|---|
+| Piece          | What it does                                                                                                                                                                                                                                                               |
+| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `extractor.ts` | `insights.extract`: loads the transcript (or win-back reply), scrubs it, asks Haiku through the agent module's `LlmClient`, stores an `InsightRecord`. Bad output is regenerated once, then a fallback record is stored. An unavailable model throws `InsightsRetryLater`. |
-| `scrub.ts` | Deterministic redaction of emails, numbers and names; 20-word quote cap. |
-| `jobs.ts` | `session.closed` subscription, `enqueueExtract` (for win-back replies), worker bodies, retry options, hourly cron for `insights.refresh_views`. |
-| `queries.ts` | All merchant-facing numbers, as SQL: `overviewKpis` (for `GET /m/overview`) and `insightsOverview` (for `GET /m/insights`). |
-| `routes.ts` | `GET /insights?from&to&quotes` (register under `/v1/m`). |
+| `scrub.ts`     | Deterministic redaction of emails, numbers and names; 20-word quote cap.                                                                                                                                                                                                   |
+| `jobs.ts`      | `session.closed` subscription, `enqueueExtract` (for win-back replies), worker bodies, retry options, hourly cron for `insights.refresh_views`.                                                                                                                            |
+| `queries.ts`   | All merchant-facing numbers, as SQL: `overviewKpis` (for `GET /m/overview`) and `insightsOverview` (for `GET /m/insights`).                                                                                                                                                |
+| `routes.ts`    | `GET /insights?from&to&quotes` (register under `/v1/m`).                                                                                                                                                                                                                   |
 
 Aggregates read `insight_daily`, a `security_barrier` view over a materialized view (migration 0005) that `insights.refresh_views` rebuilds hourly from `acrossMerchants`. The refresh function turns `app.cross_tenant` on for the rebuild and restores the previous value before it returns. Top quotes and the overview KPIs read live tables.
 

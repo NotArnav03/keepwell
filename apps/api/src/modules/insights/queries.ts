@@ -1,6 +1,12 @@
 import { sql } from "drizzle-orm";
 import { z } from "zod";
-import { Money, ReasonCategory, SessionOutcome } from "@keepwell/contracts";
+import {
+  Money,
+  ReasonCategory,
+  SessionOutcome,
+  type MerchantOverviewResponse,
+  type OfferKind,
+} from "@keepwell/contracts";
 import type { Db, Tx } from "@keepwell/db";
 
 // Every number a merchant sees on the overview and insights screens comes from these queries
@@ -97,6 +103,105 @@ export function overviewKpis(db: Db, merchantId: string, rangeInput: DateRange):
       mrrAtRisk: atRisk.map(toMoney),
     });
   });
+}
+
+// ---------- the dashboard's overview (GET /m/overview) ----------
+
+const OFFER_OF_OUTCOME: Partial<Record<SessionOutcome, OfferKind>> = {
+  saved_pause: "pause",
+  saved_downgrade: "downgrade",
+  saved_annual: "switch_annual",
+  saved_discount: "discount",
+  saved_refund: "refund_partial",
+  // A session that ended in a cancel had no offer take effect.
+  cancelled: "none",
+};
+
+/**
+ * The overview screen, from the same queries as `overviewKpis`. The headline money is in the
+ * merchant's main currency (the one most of its subscriptions are priced in); the dashboard's
+ * contract has one amount per figure, so another currency's totals are left out of the headline.
+ *
+ * - `mrrSaved`: the monthly value, as priced today, of the subscriptions that a save kept in the
+ *   range and that are still active or paused. Each subscription counts once.
+ * - `outcomesByOffer`: sessions closed in the range, by the offer that took effect ("none": cancelled).
+ * - `outcomesByReason`: every session closed in the range, by the reason the subscriber gave.
+ * Simulated (Judge Mode and demo) sessions never count.
+ */
+export async function merchantOverview(
+  db: Db,
+  merchantId: string,
+  rangeInput: DateRange,
+): Promise<MerchantOverviewResponse> {
+  const range = DateRange.parse(rangeInput);
+  const kpis = await overviewKpis(db, merchantId, range);
+  return db.forMerchant(merchantId, async (tx) => {
+    const [main] = await rows(
+      tx,
+      sql`select price_currency::text as currency from subscriptions
+          group by 1 order by count(*) desc, 1 limit 1`,
+    );
+    const currency = main ? z.object({ currency: z.string() }).parse(main).currency : "USD";
+    const inCurrency = (all: Money[]): Money =>
+      all.find((m) => m.currency === currency) ?? Money.parse({ value: "0.00", currency });
+
+    const saved = await rows(
+      tx,
+      sql`select coalesce(s.override_currency, s.price_currency)::text as currency,
+                 round(sum(
+                   coalesce(s.override_value, s.price_value) / s.interval_count
+                   * case s.interval_unit
+                       when 'DAY' then 30.0 when 'WEEK' then 52.0 / 12 when 'MONTH' then 1.0 else 1.0 / 12 end
+                 ), 2)::numeric(14,2)::text as value
+          from subscriptions s
+          where s.status in ('ACTIVE', 'SUSPENDED')
+            and s.id in (
+              select subscription_id from sessions
+              where not simulated and outcome like 'saved\_%'
+                and closed_at >= ${lower(range)} and closed_at < ${upper(range)})
+          group by 1 order by 1`,
+    );
+
+    const outcomeRows = (
+      await rows(
+        tx,
+        sql`select outcome::text as outcome, (count(*))::int as count from sessions
+            where not simulated and outcome is not null
+              and closed_at >= ${lower(range)} and closed_at < ${upper(range)}
+            group by 1`,
+      )
+    ).map((r) => z.object({ outcome: SessionOutcome, count: z.number() }).parse(r));
+    const byOffer = new Map<OfferKind, number>();
+    for (const row of outcomeRows) {
+      const offer = OFFER_OF_OUTCOME[row.outcome];
+      if (offer) byOffer.set(offer, (byOffer.get(offer) ?? 0) + row.count);
+    }
+
+    const reasonRows = (
+      await rows(
+        tx,
+        sql`select reason::text as reason, (count(*))::int as count from sessions
+            where not simulated and outcome is not null
+              and closed_at >= ${lower(range)} and closed_at < ${upper(range)}
+            group by 1 order by 2 desc, 1`,
+      )
+    ).map((r) => z.object({ reason: ReasonCategory, count: z.number() }).parse(r));
+
+    return {
+      from: `${range.from}T00:00:00.000Z`,
+      to: `${range.to}T23:59:59.999Z`,
+      mrrSaved: inCurrency(saved.map(toMoney)),
+      saveRate: { savedSessions: kpis.saves, eligibleSessions: kpis.saves + kpis.cancels },
+      recoveredRevenue: inCurrency(kpis.recoveredRevenue),
+      outcomesByOffer: [...byOffer].map(([offer, count]) => ({ offer, count })).sort(byCountThen("offer")),
+      outcomesByReason: reasonRows,
+    };
+  });
+}
+
+function byCountThen<K extends string>(key: K) {
+  return (a: Record<K, string> & { count: number }, b: Record<K, string> & { count: number }) =>
+    b.count - a.count || a[key].localeCompare(b[key]);
 }
 
 // ---------- insights aggregates (GET /m/insights) ----------

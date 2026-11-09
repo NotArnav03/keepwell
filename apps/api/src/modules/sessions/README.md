@@ -10,15 +10,15 @@ pnpm dev:fake-sessions        # http://localhost:3000, local only, nothing store
 
 The bearer token picks a scenario: `Authorization: Bearer fake:<scenario>` (append `:portal` for a portal session). No header means `pause`.
 
-| Scenario | What the agent offers |
-|---|---|
-| `pause` | Pause 2 months |
+| Scenario    | What the agent offers                                                            |
+| ----------- | -------------------------------------------------------------------------------- |
+| `pause`     | Pause 2 months                                                                   |
 | `downgrade` | Lite at 6.00 USD. The Action waits on a fake PayPal approval page (`approveUrl`) |
-| `annual` | Standard Annual at 120.00 USD |
-| `discount` | 25% off for 3 cycles |
-| `refund` | 6.00 USD back on the last payment |
-| `none` | Nothing, only Cancel |
-| `l1` | AI down: reason chips; `price`, `temporary` and `low_usage` have default offers |
+| `annual`    | Standard Annual at 120.00 USD                                                    |
+| `discount`  | 25% off for 3 cycles                                                             |
+| `refund`    | 6.00 USD back on the last payment                                                |
+| `none`      | Nothing, only Cancel                                                             |
+| `l1`        | AI down: reason chips; `price`, `temporary` and `low_usage` have default offers  |
 
 `streamUrl` carries `?fake=<scenario>`, so `new EventSource(streamUrl)` works without headers. Actions move like PayPal: EXECUTING after 0.3 s, APPLIED after about 1 s, CONFIRMED 5 s later.
 
@@ -34,12 +34,12 @@ curl -X POST localhost:3000/v1/sessions/<id>/messages -H 'content-type: applicat
 
 `service.ts` is `DbSessionsApi`: the fake's rules, kept in Postgres.
 
-| Table | What it holds |
-|---|---|
-| `sessions` | state, reason, fallback level, outcome |
-| `offers` | one row per session: the menu computed at start, the one offer shown (card text and hash), the answer, the consent |
-| `messages` | the transcript, redacted (`redact.ts`: emails, phone and card numbers) |
-| `session_events` | every SSE frame, numbered per session, for replay from `Last-Event-ID` |
+| Table            | What it holds                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `sessions`       | state, reason, fallback level, outcome                                                                             |
+| `offers`         | one row per session: the menu computed at start, the one offer shown (card text and hash), the answer, the consent |
+| `messages`       | the transcript, redacted (`redact.ts`: emails, phone and card numbers)                                             |
+| `session_events` | every SSE frame, numbered per session, for replay from `Last-Event-ID`                                             |
 
 - Every write locks the session's row, so concurrent clicks and PayPal's answers apply in order.
 - `subscribe` watches before it replays, then follows by an in-process wake (`feed.ts`) plus a 1 s poll, so events written by another instance or by the domain-event worker still arrive.
