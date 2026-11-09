@@ -28,3 +28,14 @@ Mounting it in `platform.ts` comes with the sessions module's wiring (#32).
    Then ask: "Pause my Pantry Plan subscription."
 
 For the recorded Claude Desktop demo, use the deployed URL once it is mounted on staging.
+
+## Merchant MCP server (#45)
+
+`POST /mcp/merchant`, streamable HTTP and stateless like the subscriber server. It runs retention from Claude Desktop (or any MCP client) with a **merchant API key**.
+
+- **Keys:** the dashboard creates them (`POST /v1/m/api-keys`, owner or admin, CSRF-checked) with a name and scopes, and shows the token once. It looks like `kwk_` plus 43 characters. Only its sha256 is stored (`merchant_api_keys`, row-level security like every tenant table). `GET` lists keys without tokens, `DELETE /v1/m/api-keys/:id` revokes at once. Creating and revoking are in the audit log by key id and name, never by token.
+- **Auth:** `Authorization: Bearer kwk_...`. Anything else is `401`. The key is checked again at every tool call, so a revoked key stops mid-session. Rate limits: 300 a minute per IP (before the key is looked at), 120 per key.
+- **Tools** (a key sees only the ones its scopes allow): `query_metric`, `search_quotes`, `compare_cohorts`, `list_plans` (the copilot's read-only tools, same validation and SQL), `list_at_risk` (open failed-payment cases, no names or emails) and `propose_action`.
+- **Nothing executes from here.** `propose_action` only inserts an `insight_actions` row in state `proposed` (`proposed_by = merchant_mcp`, with the rationale), emits `insight_action.proposed` and writes an audit entry. A signed-in merchant user approves or rejects it in the dashboard, and only then does the action engine act. A free plan or an unknown kind is refused in code.
+- **Try it:** create a key in the dashboard, then `claude mcp add --transport http keepwell-merchant https://<api>/mcp/merchant --header "Authorization: Bearer kwk_..."` and ask "How many saves did we get last week, and what's at risk?".
+

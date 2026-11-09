@@ -75,3 +75,21 @@ export const delegations = pgTable("delegations", {
   revokedAt: at(),
   createdAt: createdAt(),
 });
+
+/**
+ * Keys for the merchant MCP server (§6.14, #45): an external agent such as Claude Desktop reads the
+ * merchant's metrics and may propose actions, which still need a click in the dashboard.
+ */
+export const merchantApiKeys = pgTable("merchant_api_keys", {
+  id: id(),
+  merchantId: merchantId().references(() => merchants.id),
+  name: text().notNull(),
+  /** The first characters of the token, so a merchant can tell their keys apart. Not a secret. */
+  prefix: text().notNull(),
+  /** sha256 of the token; the token is shown once at creation and never stored. */
+  tokenHash: text().notNull().unique(),
+  scopes: text().array().notNull(),
+  createdAt: createdAt(),
+  lastUsedAt: at(),
+  revokedAt: at(),
+});
