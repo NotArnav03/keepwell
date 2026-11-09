@@ -9,7 +9,7 @@ import type {
 } from "@keepwell/evals";
 import { ScriptedSubscriber } from "@keepwell/evals";
 import { resolveLocale } from "../i18n.js";
-import type { LlmClient } from "../llm.js";
+import { LlmError, type LlmClient } from "../llm.js";
 
 // The two extra roles in a real-model run, both Claude Haiku through the agent's own client (so
 // the budget guard covers them): a simulated subscriber and a judge.
@@ -20,7 +20,8 @@ const SimulatedLine = z.object({ message: z.string().min(1).max(400) });
 
 /**
  * Decisions (accept, cancel, chip taps) stay scripted, so the gates measure the agent and not the
- * simulator. The model only writes the words of follow-up messages, so they vary like real people's.
+ * simulator. The model only writes the words of follow-up messages, so they vary like real people's;
+ * when it is unavailable the scripted words are sent.
  * The first message is the scripted one, so the classifier is scored against a known label.
  */
 export class SimulatedSubscriber implements Subscriber {
@@ -39,16 +40,23 @@ export class SimulatedSubscriber implements Subscriber {
       (t) =>
         `subscriber: ${t.subscriber}\nassistant: ${t.agentText}${t.cardText ? `\n[offer card: ${t.cardText}]` : ""}`,
     );
-    const line = await this.llm.structured({
-      purpose: "simulate",
-      sessionId: null,
-      system: SIMULATE_SYSTEM,
-      input: `<persona>\n${view.persona.brief}\n</persona>\n\n<intent>\n${move.text}\n</intent>\n\n<chat>\n${chat.join("\n")}\n</chat>`,
-      schema: SimulatedLine,
-      maxTokens: 512,
-      signal: AbortSignal.timeout(this.deadlineMs),
-    });
-    return { type: "say", text: line.message };
+    try {
+      const line = await this.llm.structured({
+        purpose: "simulate",
+        sessionId: null,
+        system: SIMULATE_SYSTEM,
+        input: `<persona>\n${view.persona.brief}\n</persona>\n\n<intent>\n${move.text}\n</intent>\n\n<chat>\n${chat.join("\n")}\n</chat>`,
+        schema: SimulatedLine,
+        maxTokens: 512,
+        signal: AbortSignal.timeout(this.deadlineMs),
+      });
+      return { type: "say", text: line.message };
+    } catch (err) {
+      // A spent budget, a revoked key or a slow model must not end a paid run: the persona says its
+      // scripted line instead, as an unavailable judge leaves a session unjudged.
+      if (err instanceof LlmError) return move;
+      throw err;
+    }
   }
 }
 

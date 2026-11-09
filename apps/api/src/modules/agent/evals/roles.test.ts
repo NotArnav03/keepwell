@@ -52,6 +52,22 @@ describe("SimulatedSubscriber", () => {
     expect(llm.calls[0]?.input).toContain(vague.messages[1]);
   });
 
+  it("sends the scripted words when the model is unavailable (revoked key, spent budget)", async () => {
+    const llm = new ByPurpose({});
+    const sim = new SimulatedSubscriber(llm);
+    const second = await sim.next(view({ turns: [{ ...turn, subscriber: vague.messages[0] as string }] }));
+    expect(second).toEqual({ type: "say", text: vague.messages[1] });
+    expect(llm.calls).toHaveLength(1);
+  });
+
+  it("does not hide errors that are not the model being unavailable", async () => {
+    const llm: LlmClient = { structured: () => Promise.reject(new TypeError("bug")) };
+    const sim = new SimulatedSubscriber(llm);
+    await expect(
+      sim.next(view({ turns: [{ ...turn, subscriber: vague.messages[0] as string }] })),
+    ).rejects.toThrow("bug");
+  });
+
   it("never asks the model to decide: clicks stay scripted", async () => {
     const llm = new ByPurpose({});
     const sim = new SimulatedSubscriber(llm);
