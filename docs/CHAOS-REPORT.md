@@ -8,7 +8,7 @@ Each owner breaks their component on purpose and records whether the system beha
 | Arnav (M1) | API killed mid-action, dropped webhooks, PayPal 5xx | Open |
 | Aditya (M3) | API down → widget L2, SSE reconnect | Open |
 | Ayush (M4) | Dashboard with API errors, empty states | Open |
-| Om (M5) | Email provider down, duplicate `payment_failed` | Open |
+| Om (M5) | Email provider down, duplicate `payment_failed` | Done, below |
 
 ## M2: the agent (Ishan)
 
@@ -71,3 +71,39 @@ This matches the committed `packages/evals/results/adversarial.json`.
 
 - No real Haiku or Sonnet output: all three drills run without a working key. The real run (#30, about $1 of the $5 credit) is still to do and is the only evidence on tone, language and dark patterns.
 - A live staging drill (revoke the key in Render, watch a Judge Mode session): the same code path, but it needs access to Render. Arnav, if you run it, add what you see here.
+
+## M5: notifications and recovery (Om)
+
+Both drills run as one test file, `apps/api/src/modules/recovery/chaos.db.test.ts`, on `main` at `04a4bab` (the commit this branch was cut from), against a real Postgres 18, the real recovery engine, the real notifier and dispatcher, the real pg-boss jobs and the real domain-event worker. Only two things are stand-ins: the email provider (an in-memory fake that is told to fail) and the PayPal subscription read. They passed (2 tests).
+
+### 1. Duplicate `payment_failed`
+
+Matrix row: *Webhook duplicate → ignored.*
+
+**How:** the same `subscription.payment_failed` event (same subscription, same failed count) is emitted three times through the event worker, then the test waits 3 seconds for any duplicate handler or evaluate job to act.
+
+| Result | |
+|---|---|
+| Dunning cases for the subscription | **1** |
+| Messages in the outbox | **1** (`dunning.update_payment_method`, status `queued`) |
+
+### 2. Email provider down
+
+Matrix row: *Email provider down → outbox retries with backoff; Demo Inbox still shows the message.*
+
+**How:** the provider answers a retryable `503` to the first two sends of that message.
+
+| Result | |
+|---|---|
+| After the first failure | message stays `queued`, `attempts` 1, retry scheduled; nothing sent; the dunning case is not lost |
+| Retry schedule | +60 s, then +240 s |
+| Third attempt | `sent`, `attempts` 3 |
+| A replayed dispatch after it was sent | `skipped`; the provider received the message **once** |
+
+`notify.db.test.ts` covers the rest of this row: a permanent rejection (`422`) is not retried, the attempt limit ends in `failed`, and a message whose send keeps failing still shows in the Demo Inbox.
+
+### What this does not cover
+
+- No real Resend call: sandbox mode never sends real email, so a real provider outage is simulated by the fake provider. The retry logic is the same code path.
+- The hosted staging deploy was not drilled (no access to Render's dashboard). Arnav or Ishan can cut the `RESEND_API_KEY` there and watch the Demo Inbox.
+
