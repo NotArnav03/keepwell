@@ -1,18 +1,34 @@
+/* Pantry Plan: a fictional meal-plan shop with its own look (a farmers' market, not a bank), so the
+   Keepwell widget is seen running on someone else's site. */
 :root {
-  color: #2b2118;
-  background: #fbf7f0;
+  --paper: #fbf6ec;
+  --card: #fffdf8;
+  --ink: #2b2118;
+  --ink2: #5e4f40;
+  --rule: #e4d8c4;
+  --terracotta: #a73d1a;
+  --terracotta-dark: #86300f;
+  --basil: #3d6a38;
+  --mustard: #e6ab2a;
+  --display: "Newsreader", Georgia, "Times New Roman", serif;
+  --sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: var(--ink);
+  background: var(--paper);
   font:
-    16px/1.5 Georgia,
-    "Times New Roman",
-    serif;
+    16px/1.55 var(--sans),
+    sans-serif;
+}
+* {
+  box-sizing: border-box;
 }
 body {
   margin: 0;
+  background: var(--paper);
 }
 header.site,
 main,
 footer {
-  max-width: 56rem;
+  max-width: 62rem;
   margin: 0 auto;
   padding: 1rem 1.25rem;
 }
@@ -20,103 +36,314 @@ header.site {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding-top: 1.5rem;
 }
 .brand {
-  font-weight: bold;
-  font-size: 1.3rem;
-  color: #7c2d12;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--terracotta);
+  font-family: var(--display);
+  font-size: 1.7rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
   text-decoration: none;
 }
+.brand::before {
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 50% 50% 50% 0;
+  background: var(--basil);
+  content: "";
+  transform: rotate(-45deg);
+}
+nav a {
+  font-weight: 600;
+}
 a {
-  color: #7c2d12;
+  color: var(--terracotta);
+  text-underline-offset: 3px;
+}
+h1,
+h2,
+h3 {
+  font-family: var(--display);
+  font-weight: 500;
+  letter-spacing: -0.02em;
 }
 h1 {
-  font-size: 2rem;
-  margin: 1rem 0 0.25rem;
+  max-width: 14ch;
+  margin: 1.5rem 0 0.5rem;
+  font-size: clamp(2.8rem, 7vw, 4.6rem);
+  line-height: 1;
+}
+h1 em {
+  color: var(--terracotta);
 }
 .lead {
-  font-size: 1.15rem;
-  color: #57493b;
+  max-width: 34rem;
+  color: var(--ink2);
+  font-size: 1.2rem;
 }
+
+/* the hero: a headline, and this week's menu on a card */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+  align-items: center;
+  gap: 2.5rem;
+  padding: 1rem 0 2rem;
+}
+
+.menu {
+  position: relative;
+  padding: 1.5rem 1.5rem 1.25rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--card);
+  box-shadow: 6px 6px 0 var(--mustard);
+  transform: rotate(1.2deg);
+}
+
+.menu h2 {
+  margin: 0 0 0.75rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 3px double var(--ink);
+  font-size: 1.35rem;
+  text-align: center;
+}
+
+.menu ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.menu li {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.35rem 0;
+}
+
+.menu li::after {
+  order: 1;
+  flex: 1;
+  border-bottom: 1.5px dotted #b9a98f;
+  content: "";
+  transform: translateY(-0.25em);
+}
+
+.menu li span:last-child {
+  order: 2;
+  font-family: var(--display);
+  font-size: 1.05rem;
+  font-style: italic;
+}
+
+.menu li span:first-child {
+  color: var(--basil);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.menu p {
+  margin: 0.75rem 0 0;
+  color: var(--ink2);
+  font-size: 0.82rem;
+  text-align: center;
+}
+
+.how {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem 2rem;
+  margin: 0;
+  padding: 1rem 0;
+  border-top: 1.5px solid var(--ink);
+  border-bottom: 1px solid var(--rule);
+  list-style: none;
+  font-weight: 600;
+}
+
+.how li::before {
+  margin-right: 0.5rem;
+  color: var(--terracotta);
+  content: "✓";
+}
+
+main > h2 {
+  margin: 2.5rem 0 0.25rem;
+  font-size: 2rem;
+}
+
 .plans {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
-  gap: 1rem;
-  margin: 1.5rem 0;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1.25rem;
+  margin: 1.25rem 0 2rem;
 }
+
 .plan {
-  background: #fff;
-  border: 1px solid #e7dccb;
-  border-radius: 10px;
-  padding: 1.25rem;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--card);
 }
-.plan h2 {
-  margin: 0;
+
+/* a ticket: a notch on each side, a dashed tear line above the price */
+.plan::before,
+.plan::after {
+  position: absolute;
+  top: 5.2rem;
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--ink);
+  border-radius: 50%;
+  background: var(--paper);
+  content: "";
 }
+
+.plan::before {
+  left: -8px;
+  clip-path: inset(0 0 0 50%);
+}
+
+.plan::after {
+  right: -8px;
+  clip-path: inset(0 50% 0 0);
+}
+
+.plan h2,
+.plan h3 {
+  margin: 0 0 1.6rem;
+  font-size: 1.7rem;
+}
+
 .price {
-  font-size: 1.4rem;
   margin: 0.25rem 0 1rem;
+  padding-top: 1rem;
+  border-top: 1.5px dashed #b9a98f;
+  font-family: var(--display);
+  font-size: 2.4rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
 }
+
+.button-slot {
+  margin-top: auto;
+}
+
 .button,
 button {
   display: inline-block;
-  font: inherit;
-  padding: 0.6rem 1rem;
-  border-radius: 8px;
-  border: 1px solid #7c2d12;
-  background: #7c2d12;
+  padding: 0.65rem 1.2rem;
+  border: 1.5px solid var(--terracotta);
+  border-radius: 4px;
+  background: var(--terracotta);
   color: #fff;
-  text-decoration: none;
   cursor: pointer;
+  font: inherit;
+  font-weight: 650;
+  text-decoration: none;
 }
+
+.button:hover,
+button:hover {
+  border-color: var(--terracotta-dark);
+  background: var(--terracotta-dark);
+}
+
 .button.secondary {
-  background: #fff;
-  color: #7c2d12;
+  background: transparent;
+  color: var(--terracotta);
 }
+
+.button.secondary:hover {
+  color: #fff;
+}
+
 button.link {
-  background: none;
   border: none;
-  color: #7c2d12;
+  background: none;
+  color: var(--terracotta);
   text-decoration: underline;
 }
+
+button.link:hover {
+  background: none;
+  color: var(--terracotta-dark);
+}
+
 .details {
   display: grid;
+  max-width: 34rem;
   grid-template-columns: max-content 1fr;
-  gap: 0.25rem 1.5rem;
+  gap: 0.4rem 1.5rem;
+  margin: 1.5rem 0;
+  padding: 1.25rem 1.5rem;
+  border: 1.5px solid var(--ink);
+  border-radius: 4px;
+  background: var(--card);
 }
+
 .details dt {
-  color: #57493b;
+  color: var(--ink2);
 }
+
 .details dd {
   margin: 0;
-  font-family: ui-monospace, monospace;
+  font-family: ui-monospace, "IBM Plex Mono", monospace;
+  font-size: 0.92rem;
 }
+
 .actions {
   display: flex;
-  gap: 1rem;
   align-items: center;
+  gap: 1rem;
   margin-top: 1.5rem;
 }
+
 #status[data-tone="error"] {
   color: #9a1c1c;
 }
+
 .fake-badge {
   display: none;
-  background: #fef3c7;
-  border: 1px solid #f59e0b;
   padding: 0.5rem 0.75rem;
-  border-radius: 6px;
-  font-family: system-ui, sans-serif;
-  font-size: 0.9rem;
+  border: 1.5px dashed var(--mustard);
+  border-radius: 4px;
+  background: #fff6dc;
+  font-size: 0.88rem;
 }
+
 body[data-fake="true"] .fake-badge {
   display: block;
 }
+
 footer {
-  color: #7a6a58;
+  margin-top: 2rem;
+  border-top: 1px solid var(--rule);
+  color: var(--ink2);
   font-size: 0.85rem;
 }
+
 :focus-visible {
-  outline: 3px solid #f59e0b;
+  outline: 3px solid var(--mustard);
   outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .hero {
+    grid-template-columns: 1fr;
+  }
+
+  .menu {
+    transform: none;
+  }
 }
