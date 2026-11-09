@@ -621,7 +621,46 @@ input[type="checkbox"] {
 }
 
 .kpi-grid {
-  display: contents;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  border-top: 3px double var(--kw-border-strong);
+  border-bottom: 1px solid var(--kw-border-strong);
+}
+
+/* a figure in the strip: no box, a rule between, a serif number */
+.kpi-grid .metric {
+  padding: var(--kw-space-md) var(--kw-space-lg);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.kpi-grid .metric:first-child {
+  padding-left: 0;
+}
+
+.kpi-grid .metric + .metric {
+  border-left: 1px solid var(--kw-border-strong);
+}
+
+.kpi-grid .metric h2 {
+  margin: 0 0 0.25rem;
+  color: var(--kw-muted);
+  font-family: var(--kw-font-sans);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.kpi-grid .metric p {
+  margin: 0;
+  font-family: var(--kw-font-serif);
+  font-size: 1.7rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
 .two-column {
