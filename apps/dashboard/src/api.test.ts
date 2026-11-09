@@ -1,7 +1,23 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { MerchantApi } from "./api.js";
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe("MerchantApi", () => {
+  it("calls the browser's own fetch the way a browser allows (not as a method of the client)", async () => {
+    // A real browser throws "Illegal invocation" when fetch runs with any `this` but the window.
+    const browserFetch = vi.fn(function (this: unknown) {
+      if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation");
+      return Promise.resolve(new Response(JSON.stringify({ subscriptions: [], nextCursor: null })));
+    });
+    vi.stubGlobal("fetch", browserFetch);
+    const api = new MerchantApi("https://keepwell.example/v1");
+    await expect(api.listSubscriptions()).resolves.toEqual({ subscriptions: [], nextCursor: null });
+    expect(browserFetch).toHaveBeenCalledOnce();
+  });
+
   it("validates queries, uses the v1 route, and includes the merchant cookie", async () => {
     const fetcher = vi
       .fn<typeof fetch>()
