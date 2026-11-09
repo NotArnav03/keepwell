@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { Fragment, useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import {
   type AuditEntry,
   type MerchantFeedEvent,
@@ -7,30 +7,52 @@ import {
   type MerchantSubscriptionDetailResponse,
   type MerchantSubscriptionListQuery,
   type MerchantTimelineResponse,
-  type SessionStreamEvent,
-  PolicyDraft,
-  type PolicyDraft as PolicyDraftType,
-  type PolicyDryRunResponse,
-  type PolicyVersionResponse,
 } from "@keepwell/contracts";
 import { MerchantApi, MerchantApiError } from "./api.js";
 import { explainAuditEntry } from "./views.js";
-import { previewPolicyDraft } from "./policy-editor.js";
 import { ApiKeys } from "./ApiKeys.js";
+import { PolicyEditor } from "./PolicyEditor.js";
+import { Seal } from "./Seal.js";
+import { condenseTranscript } from "./transcript.js";
+import { TimelineChart } from "./TimelineChart.js";
 import { InsightsPage } from "./insights/InsightsPage.js";
-import { themeStyles, type Theme } from "@keepwell/ui";
+import { preferredTheme, themeStyles, type Theme } from "@keepwell/ui";
+import {
+  actionTone,
+  formatDate,
+  formatDateTime,
+  formatMoney,
+  formatPercent,
+  formatRelative,
+  humanize,
+  kindInfo,
+  OFFER_LABELS,
+  REASON_LABELS,
+  statusInfo,
+} from "./fmt.js";
+import {
+  EmptyState,
+  Icon,
+  Mark,
+  PageHeading,
+  RankedBars,
+  RiskStrip,
+  SegmentedBar,
+  StatusBadge,
+  type IconName,
+} from "./ui.js";
 
 type Page =
   "overview" | "subscribers" | "timeline" | "audit" | "policies" | "onboarding" | "insights" | "api-keys";
-const NAV: { id: Page; label: string }[] = [
-  { id: "overview", label: "Overview" },
-  { id: "subscribers", label: "Subscribers" },
-  { id: "timeline", label: "Timeline" },
-  { id: "audit", label: "Audit log" },
-  { id: "policies", label: "Policies" },
-  { id: "onboarding", label: "Onboarding" },
-  { id: "insights", label: "Insights" },
-  { id: "api-keys", label: "API keys" },
+const NAV: { id: Page; label: string; icon: IconName; group: string }[] = [
+  { id: "overview", label: "Overview", icon: "overview", group: "Monitor" },
+  { id: "insights", label: "Insights", icon: "insights", group: "Monitor" },
+  { id: "subscribers", label: "Subscribers", icon: "subscribers", group: "Monitor" },
+  { id: "timeline", label: "Timeline", icon: "timeline", group: "Monitor" },
+  { id: "policies", label: "Policies", icon: "policies", group: "Control" },
+  { id: "audit", label: "Audit log", icon: "audit", group: "Control" },
+  { id: "api-keys", label: "API keys", icon: "keys", group: "Connect" },
+  { id: "onboarding", label: "Onboarding", icon: "onboarding", group: "Connect" },
 ];
 
 const api = new MerchantApi();
@@ -94,25 +116,65 @@ function Login({ onSignedIn }: { onSignedIn: (identity: MerchantMeResponse) => v
 
   return (
     <main className="login-wrap">
-      <form
-        className="panel login-form"
-        onSubmit={(event) => {
-          void submit(event);
-        }}
-      >
-        <p className="eyebrow">MERCHANT WORKSPACE</p>
-        <h1>Sign in to Keepwell</h1>
-        {error && <ErrorMessage message={error} />}
-        <label htmlFor="merchantSlug">Merchant slug (if provided by your administrator)</label>
-        <input id="merchantSlug" name="merchantSlug" autoComplete="organization" />
-        <label htmlFor="email">Email</label>
-        <input id="email" name="email" type="email" autoComplete="username" required />
-        <label htmlFor="password">Password</label>
-        <input id="password" name="password" type="password" autoComplete="current-password" required />
-        <button type="submit" disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-      </form>
+      <aside className="login-aside" aria-hidden="true">
+        <span className="brand">
+          <span className="brand-name">
+            <Mark />
+            Keepwell
+          </span>
+          <span className="brand-sub">Retention ledger</span>
+        </span>
+        <p className="statement-big">
+          Cancelling should take <em>one click.</em>
+        </p>
+        <div className="receipt">
+          <div className="receipt-title">
+            <span>Audit chain · extract</span>
+          </div>
+          <div>
+            <span>#0041 offer.presented</span>
+            <span>a41f…9c02</span>
+          </div>
+          <div>
+            <span>#0042 offer.declined</span>
+            <span>77d0…b8e1</span>
+          </div>
+          <div>
+            <span>#0043 session.cancel_requested</span>
+            <span>1be6…44a7</span>
+          </div>
+          <div>
+            <span>chain</span>
+            <span>intact</span>
+          </div>
+        </div>
+      </aside>
+      <div className="login-main">
+        <form
+          className="login-form"
+          onSubmit={(event) => {
+            void submit(event);
+          }}
+        >
+          <div>
+            <p className="eyebrow">Merchant workspace</p>
+            <h1>Sign in to Keepwell</h1>
+            <p className="muted">Use the account your administrator created for you.</p>
+          </div>
+          {error && <ErrorMessage message={error} />}
+          <label htmlFor="merchantSlug">
+            Merchant slug <span className="muted">(optional)</span>
+          </label>
+          <input id="merchantSlug" name="merchantSlug" autoComplete="organization" />
+          <label htmlFor="email">Email</label>
+          <input id="email" name="email" type="email" autoComplete="username" required />
+          <label htmlFor="password">Password</label>
+          <input id="password" name="password" type="password" autoComplete="current-password" required />
+          <button type="submit" disabled={busy}>
+            {busy ? "Signing in…" : "Sign in"}
+          </button>
+        </form>
+      </div>
     </main>
   );
 }
@@ -123,7 +185,10 @@ export function App() {
   const [authError, setAuthError] = useState("");
   const [route, setRoute] = useState(pageFromHash);
   const [theme, setTheme] = useState<Theme>(() =>
-    localStorage.getItem("keepwell-theme") === "dark" ? "dark" : "light",
+    preferredTheme(
+      localStorage.getItem("keepwell-theme"),
+      window.matchMedia("(prefers-color-scheme: dark)").matches,
+    ),
   );
   const client = useMemo(() => api, []);
 
@@ -146,6 +211,10 @@ export function App() {
       active = false;
     };
   }, [client]);
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
 
   useEffect(() => {
     const update = () => setRoute(pageFromHash());
@@ -195,57 +264,71 @@ export function App() {
       <style>{themeStyles(theme)}</style>
       <div className="layout">
         <aside className="sidebar">
-          <a className="brand" href="#overview">
-            Keepwell
+          <a className="brand" href="#overview" aria-label="Keepwell home">
+            <span className="brand-name">
+              <Mark />
+              Keepwell
+            </span>
+            <span className="brand-sub">Retention ledger</span>
           </a>
           <nav aria-label="Main navigation" className="nav">
-            {NAV.map((item) => (
-              <a
-                key={item.id}
-                href={`#${item.id}`}
-                aria-current={activePage === item.id ? "page" : undefined}
-              >
-                {item.label}
-              </a>
+            {NAV.map((item, index) => (
+              <Fragment key={item.id}>
+                {NAV[index - 1]?.group !== item.group && <p className="nav-group">{item.group}</p>}
+                <a href={`#${item.id}`} aria-current={activePage === item.id ? "page" : undefined}>
+                  <Icon name={item.icon} />
+                  {item.label}
+                </a>
+              </Fragment>
             ))}
           </nav>
           <div className="sidebar-bottom">
-            <span className="muted">Merchant workspace</span>
             <button
               type="button"
-              className="secondary"
+              className="ghost"
               onClick={() => changeTheme(theme === "light" ? "dark" : "light")}
             >
-              Use {theme === "light" ? "dark" : "light"} theme
+              <Icon name={theme === "light" ? "moon" : "sun"} />
+              {theme === "light" ? "Dark" : "Light"} theme
             </button>
           </div>
         </aside>
         <div className="main-column">
           <header className="topbar">
-            <strong>{identity.merchant.name}</strong>
+            <span className="dateline">
+              <strong>{identity.merchant.name}</strong> ·{" "}
+              {new Date().toLocaleDateString(undefined, {
+                weekday: "long",
+                day: "numeric",
+                month: "long",
+                year: "numeric",
+              })}
+            </span>
             <div className="user-menu">
               <span>{identity.user.email}</span>
               <button className="secondary" onClick={() => void signOut()}>
+                <Icon name="logout" size={16} />
                 Sign out
               </button>
             </div>
           </header>
           <main className="content" id="main-content">
             {authError && <ErrorMessage message={authError} />}
-            {route.subscriptionId ? (
-              <SubscriberDetail api={client} id={route.subscriptionId} />
-            ) : (
-              <>
-                {activePage === "overview" && <Overview api={client} />}
-                {activePage === "subscribers" && <Subscribers api={client} />}
-                {activePage === "timeline" && <Timeline api={client} />}
-                {activePage === "audit" && <AuditExplorer api={client} />}
-                {activePage === "policies" && <PolicyEditor api={client} />}
-                {activePage === "onboarding" && <Onboarding api={client} />}
-                {activePage === "insights" && <InsightsPage api={client} />}
-                {activePage === "api-keys" && <ApiKeys api={client} />}
-              </>
-            )}
+            <>
+              {activePage === "overview" && <Overview api={client} />}
+              {activePage === "subscribers" && (
+                <Subscribers
+                  api={client}
+                  {...(route.subscriptionId && { selectedId: route.subscriptionId })}
+                />
+              )}
+              {activePage === "timeline" && <Timeline api={client} />}
+              {activePage === "audit" && <AuditExplorer api={client} />}
+              {activePage === "policies" && <PolicyEditor api={client} />}
+              {activePage === "onboarding" && <Onboarding api={client} />}
+              {activePage === "insights" && <InsightsPage api={client} />}
+              {activePage === "api-keys" && <ApiKeys api={client} />}
+            </>
           </main>
         </div>
       </div>
@@ -287,93 +370,152 @@ function Overview({ api: client }: { api: MerchantApi }) {
     };
   }, [client, range]);
 
+  const rate =
+    overview && overview.saveRate.eligibleSessions > 0
+      ? overview.saveRate.savedSessions / overview.saveRate.eligibleSessions
+      : null;
+  const outcomeTotal = overview ? overview.outcomesByOffer.reduce((sum, row) => sum + row.count, 0) : 0;
+  const reasonTotal = overview ? overview.outcomesByReason.reduce((sum, row) => sum + row.count, 0) : 0;
+  const kept = overview && Number(overview.mrrSaved.value) > 0;
   return (
     <>
-      <PageHeading title="Overview" subtitle="The last 30 days · figures from your Keepwell API" />
+      <PageHeading title="Overview" subtitle="What Keepwell did for you in the last 30 days" />
       {loading && <Loading label="Loading overview…" />}
       {error && <ErrorMessage message={error} />}
-      {overview && (
-        <>
-          <div className="kpi-grid">
-            <Metric title="MRR saved" value={`${overview.mrrSaved.value} ${overview.mrrSaved.currency}`} />
-            <Metric
-              title="Save rate"
-              value={`${overview.saveRate.savedSessions} / ${overview.saveRate.eligibleSessions} sessions`}
-            />
-            <Metric
-              title="Recovered revenue"
-              value={`${overview.recoveredRevenue.value} ${overview.recoveredRevenue.currency}`}
-            />
-          </div>
-          <div className="two-column">
-            <section className="panel">
-              <h2>Outcomes by offer</h2>
-              <OutcomeTable labels={overview.outcomesByOffer.map((row) => [row.offer, row.count])} />
+      <div className="daybook">
+        <div className="daybook-main">
+          {overview && (
+            <section className="statement reveal" aria-label="Statement of the period">
+              <p className="eyebrow">Statement of the period</p>
+              <p className="lede">
+                {kept ? (
+                  <>
+                    Keepwell kept <em>{formatMoney(overview.mrrSaved)}</em> a month.
+                  </>
+                ) : (
+                  <>Nothing to report yet.</>
+                )}
+              </p>
+              <p className="lede-sub">
+                {overview.saveRate.eligibleSessions === 0
+                  ? "No cancel conversations have finished in this period. When a subscriber tries to leave, what happens next is recorded here."
+                  : `${overview.saveRate.savedSessions} of ${overview.saveRate.eligibleSessions} subscribers who tried to leave stayed after an offer. Everyone who wanted to cancel could, in one click.`}
+              </p>
+              <ul className="account">
+                <li className="account-hero">
+                  <span>Monthly revenue kept</span>
+                  <strong>{formatMoney(overview.mrrSaved)}</strong>
+                </li>
+                <li>
+                  <span>Save rate</span>
+                  {overview.saveRate.eligibleSessions > 0 && (
+                    <small>
+                      {overview.saveRate.savedSessions} of {overview.saveRate.eligibleSessions}
+                    </small>
+                  )}
+                  <strong>{formatPercent(rate)}</strong>
+                </li>
+                <li>
+                  <span>Recovered from failed payments</span>
+                  <strong>{formatMoney(overview.recoveredRevenue)}</strong>
+                </li>
+              </ul>
             </section>
-            <section className="panel">
-              <h2>Outcomes by reason</h2>
-              <OutcomeTable labels={overview.outcomesByReason.map((row) => [row.reason, row.count])} />
+          )}
+          {overview && (
+            <section className="folio reveal" style={{ "--i": 1 } as CSSProperties}>
+              <h2>
+                How conversations ended <span className="folio-count">{outcomeTotal}</span>
+              </h2>
+              {outcomeTotal === 0 ? (
+                <EmptyState title="No conversations finished in this period." />
+              ) : (
+                <SegmentedBar
+                  label="How conversations ended"
+                  parts={[...overview.outcomesByOffer]
+                    .sort(
+                      (a, b) => Number(a.offer === "none") - Number(b.offer === "none") || b.count - a.count,
+                    )
+                    .map((row) => ({
+                      key: row.offer,
+                      label: OFFER_LABELS[row.offer] ?? row.offer,
+                      value: row.count,
+                      kind: row.offer === "none" ? "left" : "saved",
+                    }))}
+                />
+              )}
             </section>
+          )}
+          {overview && (
+            <section className="folio reveal" style={{ "--i": 2 } as CSSProperties}>
+              <h2>
+                Why people leave <span className="folio-count">{reasonTotal}</span>
+              </h2>
+              <RankedBars
+                unit="subscribers"
+                empty="No reasons recorded in this period."
+                rows={overview.outcomesByReason.map((row) => ({
+                  key: row.reason,
+                  label: REASON_LABELS[row.reason] ?? row.reason,
+                  value: row.count,
+                }))}
+              />
+            </section>
+          )}
+        </div>
+        <aside className="daybook-margin" aria-label="Day book">
+          <div className="reveal" style={{ "--i": 1 } as CSSProperties}>
+            <ChainSeal api={client} />
           </div>
-        </>
-      )}
-      <section className="panel feed-panel">
-        <h2>Live activity</h2>
-        {events.length === 0 ? (
-          <p className="muted">Waiting for domain events…</p>
-        ) : (
-          <ol className="feed-list">
-            {events.map((event) => (
-              <li key={event.id}>
-                <time dateTime={event.occurredAt}>{event.occurredAt}</time>
-                <strong>{event.type}</strong>
-                {event.simulated && <Badge>SIMULATED</Badge>}
-                <a href={`#audit?event=${encodeURIComponent(event.id)}`}>Audit trail</a>
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+          <section className="reveal" style={{ "--i": 2 } as CSSProperties}>
+            <h2 className="margin-title">Day book</h2>
+            {events.length === 0 ? (
+              <p className="muted margin-empty">Quiet so far. Events appear here the moment they happen.</p>
+            ) : (
+              <ol className="daybook-feed" aria-live="polite">
+                {events.map((event) => {
+                  const info = kindInfo(event.type);
+                  return (
+                    <li key={event.id} data-tone={info.tone}>
+                      <time dateTime={event.occurredAt} title={event.occurredAt}>
+                        {formatRelative(event.occurredAt)}
+                      </time>
+                      <span>
+                        <StatusBadge tone={info.tone}>{info.label}</StatusBadge>
+                        {event.simulated && <Badge>SIMULATED</Badge>}
+                      </span>
+                      <a href={`#audit?event=${encodeURIComponent(event.id)}`}>Audit trail</a>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
+        </aside>
+      </div>
     </>
   );
 }
 
-function Metric({ title, value }: { title: string; value: string }) {
-  return (
-    <section className="panel metric">
-      <h2>{title}</h2>
-      <p>{value}</p>
-    </section>
-  );
-}
+const STATUS_FILTERS: { value: string; label: string }[] = [
+  { value: "", label: "All" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "SUSPENDED", label: "Paused" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+const RISK_FILTERS: { value: string; label: string }[] = [
+  { value: "", label: "Any risk" },
+  { value: "high", label: "High" },
+  { value: "medium", label: "Medium" },
+  { value: "low", label: "Low" },
+];
 
-function OutcomeTable({ labels }: { labels: [string, number][] }) {
-  if (labels.length === 0) return <p className="muted">No outcomes for this period.</p>;
-  return (
-    <table>
-      <thead>
-        <tr>
-          <th>Category</th>
-          <th>Count</th>
-        </tr>
-      </thead>
-      <tbody>
-        {labels.map(([label, count]) => (
-          <tr key={label}>
-            <th scope="row">{label}</th>
-            <td>{count}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
-  );
-}
-
-function Subscribers({ api: client }: { api: MerchantApi }) {
+/** The register: everyone PayPal bills through the merchant, with one subscriber's folio beside it. */
+function Subscribers({ api: client, selectedId }: { api: MerchantApi; selectedId?: string }) {
   const [items, setItems] = useState<Awaited<ReturnType<MerchantApi["listSubscriptions"]>> | null>(null);
   const [query, setQuery] = useState("");
-  const [status, setStatus] = useState<MerchantSubscriptionListQuery["status"] | "">("");
-  const [risk, setRisk] = useState<MerchantSubscriptionListQuery["risk"] | "">("");
+  const [status, setStatus] = useState("");
+  const [risk, setRisk] = useState("");
   const [cursor, setCursor] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -384,8 +526,8 @@ function Subscribers({ api: client }: { api: MerchantApi }) {
     try {
       const result = await client.listSubscriptions({
         query,
-        ...(status && { status }),
-        ...(risk && { risk }),
+        ...(status && { status: status as MerchantSubscriptionListQuery["status"] }),
+        ...(risk && { risk: risk as MerchantSubscriptionListQuery["risk"] }),
         ...(nextCursor && { cursor: nextCursor }),
       });
       setItems(result);
@@ -397,109 +539,129 @@ function Subscribers({ api: client }: { api: MerchantApi }) {
     }
   }
 
+  // Filters apply as you choose them; typing waits a moment so each keystroke isn't a request.
   useEffect(() => {
-    void load(); /* initial query */
-  }, [client]);
+    const timer = window.setTimeout(() => void load(), query ? 250 : 0);
+    return () => window.clearTimeout(timer);
+  }, [client, query, status, risk]);
 
-  function search(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    void load();
-  }
   return (
     <>
-      <PageHeading title="Subscribers" subtitle="Search and filter PayPal subscriptions" />
-      <form className="filter-bar" onSubmit={search}>
-        <label>
-          Search
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.currentTarget.value)}
-            placeholder="Name or PayPal ID"
-          />
-        </label>
-        <label>
-          Status
-          <select value={status} onChange={(event) => setStatus(event.currentTarget.value as typeof status)}>
-            <option value="">Any status</option>
-            {["ACTIVE", "SUSPENDED", "CANCELLED", "EXPIRED", "APPROVED", "APPROVAL_PENDING"].map((value) => (
-              <option key={value}>{value}</option>
+      <PageHeading
+        title="Subscribers"
+        subtitle="Everyone PayPal bills through you, and what happened with each"
+      />
+      <div className="register">
+        <section className="roll-wrap" aria-label="Subscriber register">
+          <label className="find">
+            <span className="sr-only">Search subscribers</span>
+            <Icon name="subscribers" size={16} />
+            <input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="Find by name or PayPal ID"
+            />
+          </label>
+          <div className="toggles" role="group" aria-label="Filter by status">
+            {STATUS_FILTERS.map((filter) => (
+              <button
+                key={filter.label}
+                type="button"
+                className="toggle"
+                aria-pressed={status === filter.value}
+                onClick={() => setStatus(filter.value)}
+              >
+                {filter.label}
+              </button>
             ))}
-          </select>
-        </label>
-        <label>
-          Risk
-          <select value={risk} onChange={(event) => setRisk(event.currentTarget.value as typeof risk)}>
-            <option value="">Any risk</option>
-            <option value="low">Low</option>
-            <option value="medium">Medium</option>
-            <option value="high">High</option>
-          </select>
-        </label>
-        <button type="submit">Apply filters</button>
-      </form>
-      {loading && <Loading label="Loading subscribers…" />}
-      {error && <ErrorMessage message={error} />}
-      {items && (
-        <>
-          <div className="table-wrap">
-            <table>
-              <caption>PayPal subscriptions managed by Keepwell</caption>
-              <thead>
-                <tr>
-                  <th>Subscriber</th>
-                  <th>Plan</th>
-                  <th>Status</th>
-                  <th>Risk</th>
-                  <th>Price</th>
-                  <th>PayPal subscription</th>
-                </tr>
-              </thead>
-              <tbody>
-                {items.subscriptions.length === 0 ? (
-                  <tr>
-                    <td colSpan={6}>No subscribers match these filters.</td>
-                  </tr>
-                ) : (
-                  items.subscriptions.map(({ subscription, risk: score }) => (
-                    <tr key={subscription.id}>
-                      <td>
-                        <a href={`#subscribers/${encodeURIComponent(subscription.id)}`}>
-                          {subscription.subscriberFirstName ?? "Subscriber"}
-                        </a>
-                      </td>
-                      <td>{subscription.planName}</td>
-                      <td>{subscription.status}</td>
-                      <td>{score ? `${score.band} (${score.score}/100)` : "Not scored"}</td>
-                      <td>
-                        {(subscription.priceOverride ?? subscription.price).value}{" "}
-                        {(subscription.priceOverride ?? subscription.price).currency}
-                      </td>
-                      <td>
-                        <code>{subscription.paypalSubscriptionId}</code>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
           </div>
-          {items.nextCursor && (
-            <button className="secondary" onClick={() => void load(items.nextCursor ?? undefined)}>
-              Next page
-            </button>
+          <div className="toggles" role="group" aria-label="Filter by risk">
+            {RISK_FILTERS.map((filter) => (
+              <button
+                key={filter.label}
+                type="button"
+                className="toggle"
+                aria-pressed={risk === filter.value}
+                onClick={() => setRisk(filter.value)}
+              >
+                {filter.label}
+              </button>
+            ))}
+          </div>
+          {error && <ErrorMessage message={error} />}
+          {loading && !items && <Loading label="Loading subscribers…" />}
+          {items && (
+            <ol className="roll" aria-label="Subscribers">
+              {items.subscriptions.length === 0 ? (
+                <li>
+                  <EmptyState title="No subscribers match these filters" />
+                </li>
+              ) : (
+                items.subscriptions.map(({ subscription, risk: score }, index) => (
+                  <li
+                    key={subscription.id}
+                    className="reveal"
+                    style={{ "--i": Math.min(index, 8) } as CSSProperties}
+                  >
+                    <a
+                      className="roll-row"
+                      href={`#subscribers/${encodeURIComponent(subscription.id)}`}
+                      aria-current={selectedId === subscription.id ? "true" : undefined}
+                    >
+                      <span className="roll-name">{subscription.subscriberFirstName ?? "Subscriber"}</span>
+                      <span className="roll-plan">
+                        {subscription.planName} ·{" "}
+                        {formatMoney(subscription.priceOverride ?? subscription.price)}
+                      </span>
+                      <span className="roll-status">
+                        <StatusBadge tone={statusInfo(subscription.status).tone}>
+                          {statusInfo(subscription.status).label}
+                        </StatusBadge>
+                      </span>
+                      <span className="roll-risk">
+                        {score ? (
+                          <RiskStrip score={score.score} band={score.band} />
+                        ) : (
+                          <span className="muted">Not scored</span>
+                        )}
+                      </span>
+                    </a>
+                  </li>
+                ))
+              )}
+            </ol>
           )}
-          {cursor && (
-            <button className="secondary" onClick={() => void load()}>
-              Back to first page
-            </button>
+          <div className="button-row">
+            {cursor && (
+              <button className="secondary" onClick={() => void load()}>
+                First page
+              </button>
+            )}
+            {items?.nextCursor && (
+              <button className="secondary" onClick={() => void load(items.nextCursor ?? undefined)}>
+                Next page
+              </button>
+            )}
+          </div>
+        </section>
+        <section className="folio-pane" aria-label="Subscriber folio">
+          {selectedId ? (
+            <SubscriberFolio key={selectedId} api={client} id={selectedId} />
+          ) : (
+            <EmptyState title="Open a folio">
+              Choose a subscriber from the register to see their plan, every action on their subscription and
+              their cancel conversations.
+            </EmptyState>
           )}
-        </>
-      )}
+        </section>
+      </div>
     </>
   );
 }
 
-function SubscriberDetail({ api: client, id }: { api: MerchantApi; id: string }) {
+/** One subscriber's folio: the account, the actions taken on it, and the conversations held. */
+function SubscriberFolio({ api: client, id }: { api: MerchantApi; id: string }) {
   const [detail, setDetail] = useState<MerchantSubscriptionDetailResponse | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
@@ -517,75 +679,147 @@ function SubscriberDetail({ api: client, id }: { api: MerchantApi; id: string })
     };
   }, [client, id]);
   if (error) return <ErrorMessage message={error} />;
-  if (!detail) return <Loading label="Loading subscriber…" />;
+  if (!detail) return <Loading label="Opening the folio…" />;
   const { subscription } = detail;
+  const status = statusInfo(subscription.status);
   return (
-    <>
-      <a href="#subscribers">← Back to subscribers</a>
-      <PageHeading
-        title={subscription.subscriberFirstName ?? "Subscriber"}
-        subtitle={subscription.paypalSubscriptionId}
+    <article className="folio-sheet reveal">
+      <header className="folio-head">
+        <p className="eyebrow">Folio · {subscription.paypalSubscriptionId}</p>
+        <h2 className="folio-name">{subscription.subscriberFirstName ?? "Subscriber"}</h2>
+        <StatusBadge tone={status.tone}>{status.label}</StatusBadge>
+      </header>
+      <ul className="account">
+        <li>
+          <span>Plan</span>
+          <strong>{subscription.planName}</strong>
+        </li>
+        <li>
+          <span>Price</span>
+          <strong>{formatMoney(subscription.priceOverride ?? subscription.price)}</strong>
+        </li>
+        <li>
+          <span>Next billing</span>
+          <strong>
+            {subscription.nextBillingTime ? formatDate(subscription.nextBillingTime) : "Not scheduled"}
+          </strong>
+        </li>
+      </ul>
+      <h3 className="folio-section">Actions on the subscription</h3>
+      {detail.actions.length === 0 ? (
+        <p className="muted">Nothing has been changed on this subscription yet.</p>
+      ) : (
+        <ul className="minutes">
+          {detail.actions.map((action) => (
+            <li key={action.id}>
+              <span>
+                {humanize(action.type)}
+                {action.simulated && <Badge>SIMULATED</Badge>}
+              </span>
+              <StatusBadge tone={actionTone(action.state)}>{humanize(action.state)}</StatusBadge>
+              <a href={`#audit?subject=${encodeURIComponent(action.id)}`}>Audit</a>
+            </li>
+          ))}
+        </ul>
+      )}
+      <h3 className="folio-section">Conversations</h3>
+      {detail.sessions.length === 0 ? (
+        <p className="muted">This subscriber hasn't opened the cancel conversation.</p>
+      ) : (
+        detail.sessions.map((session) => (
+          <section key={session.id} className="minute-book">
+            <p className="minute-head">
+              <span>{humanize(session.channel)}</span>
+              <StatusBadge
+                tone={
+                  session.outcome?.startsWith("saved")
+                    ? "good"
+                    : session.outcome === "cancelled"
+                      ? "bad"
+                      : "neutral"
+                }
+              >
+                {session.outcome ? humanize(session.outcome) : "In progress"}
+              </StatusBadge>
+              {session.simulated && <Badge>SIMULATED</Badge>}
+            </p>
+            <ol className="transcript">
+              {condenseTranscript(session.events).map((line, index) => (
+                <li key={`${session.id}-${index}`} data-tone={line.tone}>
+                  <b>{line.who}</b>
+                  <span>{line.text}</span>
+                </li>
+              ))}
+            </ol>
+          </section>
+        ))
+      )}
+    </article>
+  );
+}
+type ChainState = {
+  head: string | null;
+  checked: number | null;
+  ok: boolean | null;
+  brokenAt: number | null;
+};
+
+/** The audit chain's seal: drawn from its head hash, and re-checked on demand. */
+function useChain(client: MerchantApi) {
+  const [chain, setChain] = useState<ChainState>({ head: null, checked: null, ok: null, brokenAt: null });
+  const [verifying, setVerifying] = useState(false);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    client
+      .audit({})
+      .then((page) => {
+        if (active) setChain((c) => ({ ...c, head: page.entries[0]?.hash ?? null }));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [client]);
+  async function verify() {
+    setVerifying(true);
+    setError("");
+    try {
+      const result = await client.verifyAudit();
+      setChain((c) => ({ ...c, ok: result.ok, checked: result.checked, brokenAt: result.brokenAtSeq }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not verify the audit chain.");
+    } finally {
+      setVerifying(false);
+    }
+  }
+  return { chain, verifying, error, verify };
+}
+
+function ChainVerdict({ chain }: { chain: ChainState }) {
+  if (chain.ok === null) return <StatusBadge tone="neutral">Not checked this visit</StatusBadge>;
+  if (chain.ok) return <StatusBadge tone="good">Chain intact · {chain.checked} entries checked</StatusBadge>;
+  return <StatusBadge tone="bad">Broken at entry {chain.brokenAt}</StatusBadge>;
+}
+
+/** On the overview: the seal and a link to the record behind it. */
+function ChainSeal({ api: client }: { api: MerchantApi }) {
+  const { chain, verifying, error, verify } = useChain(client);
+  if (!chain.head) return null;
+  return (
+    <aside className="chain-seal" aria-label="Audit chain">
+      <Seal
+        root={chain.head}
+        caption={`Audit chain${chain.checked ? ` · ${chain.checked} entries` : ""}`}
+        broken={chain.ok === false}
+        size={190}
       />
-      <section className="panel">
-        <dl className="details-grid">
-          <dt>Plan</dt>
-          <dd>{subscription.planName}</dd>
-          <dt>Status</dt>
-          <dd>{subscription.status}</dd>
-          <dt>Price</dt>
-          <dd>
-            {(subscription.priceOverride ?? subscription.price).value}{" "}
-            {(subscription.priceOverride ?? subscription.price).currency}
-          </dd>
-          <dt>Next billing</dt>
-          <dd>{subscription.nextBillingTime ?? "Not scheduled"}</dd>
-        </dl>
-      </section>
-      <section className="panel">
-        <h2>Actions</h2>
-        {detail.actions.length === 0 ? (
-          <p>No actions recorded.</p>
-        ) : (
-          <ul>
-            {detail.actions.map((action) => (
-              <li key={action.id}>
-                {action.type} · {action.state} {action.simulated && <Badge>SIMULATED</Badge>} ·{" "}
-                <a href={`#audit?subject=${encodeURIComponent(action.id)}`}>Audit entry</a> ·{" "}
-                <a href={`#paypal/${encodeURIComponent(subscription.paypalSubscriptionId)}`}>
-                  {subscription.paypalSubscriptionId}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-      <section className="panel">
-        <h2>Conversations</h2>
-        {detail.sessions.length === 0 ? (
-          <p>No sessions recorded.</p>
-        ) : (
-          <ul>
-            {detail.sessions.map((session) => (
-              <li key={session.id}>
-                <strong>
-                  {session.channel} · {session.state} · {session.outcome ?? "in progress"}{" "}
-                  {session.simulated && <Badge>SIMULATED</Badge>}
-                </strong>
-                {session.events.length > 0 && (
-                  <ol className="transcript">
-                    {session.events.map((event, index) => (
-                      <li key={`${session.id}-${index}`}>
-                        <strong>{event.type}</strong>: {describeSessionEvent(event)}
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </>
+      <ChainVerdict chain={chain} />
+      <button className="secondary" onClick={() => void verify()} disabled={verifying}>
+        {verifying ? "Checking…" : "Verify the chain"}
+      </button>
+      {error && <p className="muted">{error}</p>}
+    </aside>
   );
 }
 
@@ -593,9 +827,9 @@ function AuditExplorer({ api: client }: { api: MerchantApi }) {
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [kind, setKind] = useState("");
   const [subject, setSubject] = useState("");
-  const [verification, setVerification] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const { chain, verifying, error: verifyError, verify } = useChain(client);
   async function load() {
     setLoading(true);
     setError("");
@@ -610,22 +844,37 @@ function AuditExplorer({ api: client }: { api: MerchantApi }) {
   useEffect(() => {
     void load(); /* initial audit query */
   }, [client]);
-  async function verify() {
-    setVerification("Verifying the full chain…");
-    try {
-      const result = await client.verifyAudit();
-      setVerification(
-        result.ok ? `Verified ${result.checked} entries.` : `Chain break at sequence ${result.brokenAtSeq}.`,
-      );
-    } catch (cause) {
-      setVerification(cause instanceof Error ? cause.message : "Could not verify audit chain.");
-    }
-  }
   return (
     <>
-      <PageHeading title="Audit log" subtitle="Trace decisions to actions and PayPal subscriptions" />
+      <PageHeading title="Audit log" subtitle="Every decision, in an order nobody can quietly rewrite" />
+      <section className="panel chain-status">
+        {chain.head ? (
+          <Seal
+            root={chain.head}
+            caption={`Audit chain${chain.checked ? ` · ${chain.checked} entries` : ""}`}
+            broken={chain.ok === false}
+            size={168}
+          />
+        ) : (
+          <div />
+        )}
+        <div>
+          <h2>The record is a chain</h2>
+          <p>
+            Each entry carries the hash of the one before it. Change or remove any past entry and every later
+            hash stops matching, which is what verifying checks. The seal is drawn from the newest hash.
+          </p>
+          <div className="button-row">
+            <button onClick={() => void verify()} disabled={verifying}>
+              {verifying ? "Checking the chain…" : "Verify chain"}
+            </button>
+            <ChainVerdict chain={chain} />
+          </div>
+          {verifyError && <ErrorMessage message={verifyError} />}
+        </div>
+      </section>
       <form
-        className="filter-bar"
+        className="filter-bar panel"
         onSubmit={(event) => {
           event.preventDefault();
           void load();
@@ -633,59 +882,63 @@ function AuditExplorer({ api: client }: { api: MerchantApi }) {
       >
         <label>
           Event kind
-          <input value={kind} onChange={(event) => setKind(event.currentTarget.value)} />
+          <input
+            value={kind}
+            onChange={(event) => setKind(event.currentTarget.value)}
+            placeholder="offer.accepted"
+          />
         </label>
         <label>
           Subject ID
           <input value={subject} onChange={(event) => setSubject(event.currentTarget.value)} />
         </label>
         <button>Filter</button>
-        <button className="secondary" type="button" onClick={() => void verify()}>
-          Verify chain
-        </button>
       </form>
-      {verification && (
-        <p role="status" className="notice">
-          {verification}
-        </p>
-      )}
       {loading && <Loading label="Loading audit entries…" />}
       {error && <ErrorMessage message={error} />}
-      <ol className="audit-list">
-        {entries.map((entry) => (
-          <li key={`${entry.merchantId}-${entry.seq}`} className="panel">
-            <h2>
-              {entry.kind} {entry.simulated && <Badge>SIMULATED</Badge>}
-            </h2>
-            <time dateTime={entry.at}>{entry.at}</time>
-            <p>{explainAuditEntry(entry)}</p>
-            {typeof entry.payload.policyVersion === "number" && (
-              <p>Policy version {entry.payload.policyVersion}</p>
-            )}
-            {entry.subjectIds.paypalSubscriptionId && (
-              <p>
-                PayPal subscription:{" "}
-                <a href={`#paypal/${encodeURIComponent(entry.subjectIds.paypalSubscriptionId)}`}>
-                  {entry.subjectIds.paypalSubscriptionId}
-                </a>
-              </p>
-            )}
-            <p>
-              {Object.entries(entry.subjectIds).map(([label, value]) => (
-                <span key={label} className="subject-link">
-                  {label}: <a href={`#audit?subject=${encodeURIComponent(value)}`}>{value}</a>
-                </span>
-              ))}
-            </p>
-            <details>
-              <summary>Hash chain proof</summary>
-              <p>Sequence {entry.seq}</p>
-              <code>{entry.prevHash}</code>
-              <br />
-              <code>{entry.hash}</code>
-            </details>
-          </li>
-        ))}
+      {!loading && entries.length === 0 && !error && (
+        <EmptyState title="Nothing recorded yet">Decisions appear here as they happen.</EmptyState>
+      )}
+      <ol className="chain">
+        {entries.map((entry) => {
+          const info = kindInfo(entry.kind);
+          return (
+            <li key={`${entry.merchantId}-${entry.seq}`} className="chain-link" data-tone={info.tone}>
+              <div className="chain-seq">
+                <strong>#{entry.seq}</strong>
+                <time dateTime={entry.at} title={entry.at}>
+                  {formatDateTime(entry.at)}
+                </time>
+              </div>
+              <div className="chain-body">
+                <h3>
+                  {info.label}
+                  {entry.simulated && <Badge>SIMULATED</Badge>}
+                </h3>
+                <p>{explainAuditEntry(entry)}</p>
+                {typeof entry.payload.policyVersion === "number" && (
+                  <p>Policy version {entry.payload.policyVersion}</p>
+                )}
+                <div className="chain-subjects">
+                  {Object.entries(entry.subjectIds).map(([label, value]) => (
+                    <span key={label} className="subject-link">
+                      {label}: <a href={`#audit?subject=${encodeURIComponent(value)}`}>{value}</a>
+                    </span>
+                  ))}
+                </div>
+                <div className="chain-hash" title="Each entry holds the hash of the one before it">
+                  <span>
+                    <b>prev</b> {entry.prevHash.slice(0, 10)}…
+                  </span>
+                  <span>
+                    <b>hash</b> {entry.hash.slice(0, 10)}…
+                  </span>
+                  <span>{entry.kind}</span>
+                </div>
+              </div>
+            </li>
+          );
+        })}
       </ol>
     </>
   );
@@ -703,562 +956,41 @@ function Timeline({ api: client }: { api: MerchantApi }) {
       .catch((cause: unknown) => setError(cause instanceof Error ? cause.message : "Timeline unavailable."));
   }, [client]);
   const names = new Map((data?.resources ?? []).map((resource) => [resource.id, resource.name]));
-  const events = [...(data?.events ?? [])].sort((a, b) => a.startDate.localeCompare(b.startDate));
+  const events = [...(data?.events ?? [])].sort((a, b) => b.startDate.localeCompare(a.startDate));
   return (
     <>
-      <PageHeading title="Subscriber timeline" subtitle="Billing and retention events · 90 days" />
-      <p className="notice">
-        Bryntum Scheduler is not enabled until the team confirms a licence. This accessible event list is the
-        current fallback.
-      </p>
+      <PageHeading title="Timeline" subtitle="Each subscriber's story, in order · the last 90 days" />
       {error && <ErrorMessage message={error} />}
       {!data && !error && <Loading label="Loading timeline…" />}
-      {data &&
-        (events.length ? (
-          <ol className="timeline-list">
-            {events.map((event) => (
-              <li key={event.id}>
-                <time dateTime={event.startDate}>{event.startDate}</time>
-                <strong>
-                  {names.get(event.resourceId) ?? "Subscriber"}: {event.name}
-                </strong>
-                <span>
-                  {event.kind} {event.simulated && <Badge>SIMULATED</Badge>}
-                </span>
-                {event.auditSeq && <a href={`#audit?seq=${event.auditSeq}`}>Audit #{event.auditSeq}</a>}
-                <a
-                  href={`#subscribers/${encodeURIComponent(data.resources.find((resource) => resource.id === event.resourceId)?.subscriptionId ?? event.resourceId)}`}
-                >
-                  Subscriber
-                </a>
-                <a href={`#paypal/${encodeURIComponent(event.paypalSubscriptionId)}`}>
-                  {event.paypalSubscriptionId}
-                </a>
-              </li>
-            ))}
-          </ol>
-        ) : (
-          <p>No timeline events in this range.</p>
-        ))}
-    </>
-  );
-}
-
-function PolicyEditor({ api: client }: { api: MerchantApi }) {
-  const [stored, setStored] = useState<PolicyVersionResponse | null>(null);
-  const [draft, setDraft] = useState<PolicyDraftType | null>(null);
-  const [sampleIds, setSampleIds] = useState("");
-  const [changeNote, setChangeNote] = useState("");
-  const [dryRun, setDryRun] = useState<PolicyDryRunResponse | null>(null);
-  const [preview, setPreview] = useState<ReturnType<typeof previewPolicyDraft>>([]);
-  const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    let active = true;
-    client
-      .policies()
-      .then(async (list) => {
-        if (list.currentVersion === null) return;
-        const version = await client.policy(list.currentVersion);
-        if (!active) return;
-        setStored(version);
-        const { version: _version, ...policyDraft } = version.document;
-        setDraft(PolicyDraft.parse(policyDraft));
-      })
-      .catch((cause: unknown) => {
-        if (active) setError(cause instanceof Error ? cause.message : "Policy unavailable.");
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [client]);
-
-  function updateDraft(update: (current: PolicyDraftType) => unknown) {
-    if (!draft) return;
-    const parsed = PolicyDraft.safeParse(update(draft));
-    if (!parsed.success) {
-      setError("That value is invalid for the policy schema.");
-      return;
-    }
-    setDraft(parsed.data);
-    setDryRun(null);
-    setPreview([]);
-    setError("");
-  }
-
-  function updateJson(update: (current: PolicyDraftType, value: unknown) => unknown, text: string) {
-    try {
-      const value: unknown = JSON.parse(text);
-      updateDraft((current) => update(current, value));
-    } catch {
-      setError("Enter valid JSON for this field.");
-    }
-  }
-
-  async function runDryRun() {
-    setError("");
-    setMessage("");
-    setDryRun(null);
-    setPreview([]);
-    try {
-      if (!draft) throw new Error("A policy document is not loaded.");
-      const ids = sampleIds
-        .split(/[\s,]+/)
-        .map((value) => value.trim())
-        .filter(Boolean);
-      const result = await client.dryRun({ document: draft, sampleSubscriptionIds: ids });
-      setDryRun(result);
-      setPreview(
-        previewPolicyDraft(
-          draft,
-          result.samples.map((sample) => sample.context),
-        ),
-      );
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Policy dry-run failed.");
-    }
-  }
-  async function publish() {
-    setError("");
-    setMessage("");
-    try {
-      if (!draft) throw new Error("A policy document is not loaded.");
-      const result = await client.publishPolicy({
-        baseVersion: stored?.version ?? null,
-        document: draft,
-        ...(changeNote && { changeNote }),
-      });
-      setStored(result);
-      setMessage(`Published policy version ${result.version}.`);
-      setDryRun(null);
-      setPreview([]);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Policy could not be published.");
-    }
-  }
-  if (loading)
-    return (
-      <>
-        <PageHeading title="Policy editor" />
-        <Loading label="Loading policy…" />
-      </>
-    );
-  return (
-    <>
-      <PageHeading
-        title="Policy editor"
-        subtitle={
-          stored ? `Editing from immutable version ${stored.version}` : "Create the first policy version"
-        }
-      />
-      {error && <ErrorMessage message={error} />}
-      {message && (
-        <p role="status" className="notice">
-          {message}
-        </p>
-      )}
-      <section className="panel policy-form">
-        {!draft ? (
-          <p>No published policy is available yet. Publish an initial policy before editing.</p>
-        ) : (
-          <div className="policy-grid">
-            <fieldset>
-              <legend>Pause offer</legend>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.offers.pause.enabled}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        pause: { ...current.offers.pause, enabled: event.currentTarget.checked },
-                      },
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-              <label>
-                Maximum cycles
-                <input
-                  type="number"
-                  min={1}
-                  max={12}
-                  value={draft.offers.pause.maxCycles}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        pause: { ...current.offers.pause, maxCycles: Number(event.currentTarget.value) },
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Cooldown days
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.offers.pause.cooldownDays}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        pause: { ...current.offers.pause, cooldownDays: Number(event.currentTarget.value) },
-                      },
-                    }))
-                  }
-                />
-              </label>
-            </fieldset>
-            <fieldset>
-              <legend>Discount offer</legend>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.offers.discount.enabled}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        discount: { ...current.offers.discount, enabled: event.currentTarget.checked },
-                      },
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-              <label>
-                Maximum percent
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={draft.offers.discount.maxPercent}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        discount: {
-                          ...current.offers.discount,
-                          maxPercent: Number(event.currentTarget.value),
-                        },
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Maximum cycles
-                <input
-                  type="number"
-                  min={1}
-                  value={draft.offers.discount.maxCycles}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        discount: { ...current.offers, maxCycles: Number(event.currentTarget.value) },
-                      },
-                    }))
-                  }
-                />
-              </label>
-            </fieldset>
-            <fieldset>
-              <legend>Downgrade offer</legend>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.offers.downgrade.enabled}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        downgrade: { ...current.offers.downgrade, enabled: event.currentTarget.checked },
-                      },
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-              <label>
-                Plan targets (JSON)
-                <textarea
-                  rows={5}
-                  spellCheck={false}
-                  value={JSON.stringify(draft.offers.downgrade.targets, null, 2)}
-                  onChange={(event) =>
-                    updateJson(
-                      (current, value) => ({
-                        ...current,
-                        offers: {
-                          ...current.offers,
-                          downgrade: {
-                            ...current.offers.downgrade,
-                            targets: value as PolicyDraftType["offers"]["downgrade"]["targets"],
-                          },
-                        },
-                      }),
-                      event.currentTarget.value,
-                    )
-                  }
-                />
-              </label>
-            </fieldset>
-            <fieldset>
-              <legend>Switch to annual</legend>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.offers.switch_annual.enabled}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        switch_annual: {
-                          ...current.offers.switch_annual,
-                          enabled: event.currentTarget.checked,
-                        },
-                      },
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-              <label>
-                Monthly → annual plan IDs (JSON)
-                <textarea
-                  rows={5}
-                  spellCheck={false}
-                  value={JSON.stringify(draft.offers.switch_annual.targets, null, 2)}
-                  onChange={(event) =>
-                    updateJson(
-                      (current, value) => ({
-                        ...current,
-                        offers: {
-                          ...current.offers,
-                          switch_annual: {
-                            ...current.offers.switch_annual,
-                            targets: value as PolicyDraftType["offers"]["switch_annual"]["targets"],
-                          },
-                        },
-                      }),
-                      event.currentTarget.value,
-                    )
-                  }
-                />
-              </label>
-            </fieldset>
-            <fieldset>
-              <legend>Partial refund</legend>
-              <label>
-                <input
-                  type="checkbox"
-                  checked={draft.offers.refund_partial.enabled}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        refund_partial: {
-                          ...current.offers.refund_partial,
-                          enabled: event.currentTarget.checked,
-                        },
-                      },
-                    }))
-                  }
-                />
-                Enabled
-              </label>
-              <label>
-                Maximum percent of last payment
-                <input
-                  type="number"
-                  min={1}
-                  max={100}
-                  value={draft.offers.refund_partial.maxPercentOfLastPayment}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        refund_partial: {
-                          ...current.offers.refund_partial,
-                          maxPercentOfLastPayment: Number(event.currentTarget.value),
-                        },
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Monthly refund cap
-                <input
-                  value={draft.offers.refund_partial.maxPerMonth.value}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      offers: {
-                        ...current.offers,
-                        refund_partial: {
-                          ...current.offers.refund_partial,
-                          maxPerMonth: {
-                            ...current.offers.refund_partial.maxPerMonth,
-                            value: event.currentTarget.value,
-                          },
-                        },
-                      },
-                    }))
-                  }
-                />
-              </label>
-            </fieldset>
-            <fieldset>
-              <legend>Eligibility and tone</legend>
-              <label>
-                Minimum tenure days for discount
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.eligibility.minTenureDaysForDiscount}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      eligibility: {
-                        ...current.eligibility,
-                        minTenureDaysForDiscount: Number(event.currentTarget.value),
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Maximum saves per subscriber / 365 days
-                <input
-                  type="number"
-                  min={0}
-                  value={draft.eligibility.maxSavesPerSubscriberPer365d}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      eligibility: {
-                        ...current.eligibility,
-                        maxSavesPerSubscriberPer365d: Number(event.currentTarget.value),
-                      },
-                    }))
-                  }
-                />
-              </label>
-              <label>
-                Tone
-                <select
-                  value={draft.tone}
-                  onChange={(event) =>
-                    updateDraft((current) => ({
-                      ...current,
-                      tone: event.currentTarget.value as PolicyDraftType["tone"],
-                    }))
-                  }
-                >
-                  <option value="warm">Warm</option>
-                  <option value="neutral">Neutral</option>
-                  <option value="brief">Brief</option>
-                </select>
-              </label>
-              <label>
-                Support contact
-                <input
-                  value={draft.supportContact}
-                  onChange={(event) =>
-                    updateDraft((current) => ({ ...current, supportContact: event.currentTarget.value }))
-                  }
-                />
-              </label>
-            </fieldset>
-            <fieldset className="reason-preferences">
-              <legend>Offer ordering by cancellation reason</legend>
-              <label>
-                Reason preferences (JSON)
-                <textarea
-                  rows={7}
-                  spellCheck={false}
-                  value={JSON.stringify(draft.reasonPreferences, null, 2)}
-                  onChange={(event) =>
-                    updateJson(
-                      (current, value) => ({
-                        ...current,
-                        reasonPreferences: value as PolicyDraftType["reasonPreferences"],
-                      }),
-                      event.currentTarget.value,
-                    )
-                  }
-                />
-              </label>
-            </fieldset>
-          </div>
-        )}
-        <label htmlFor="sample-ids">Sample subscriber IDs (comma or space separated)</label>
-        <input
-          id="sample-ids"
-          value={sampleIds}
-          onChange={(event) => setSampleIds(event.currentTarget.value)}
-        />
-        <label htmlFor="change-note">Change note</label>
-        <input
-          id="change-note"
-          value={changeNote}
-          onChange={(event) => setChangeNote(event.currentTarget.value)}
-          maxLength={280}
-        />
-        <div className="button-row">
-          <button type="button" onClick={() => void runDryRun()}>
-            Dry-run in browser
-          </button>
-          <button type="button" className="secondary" onClick={() => void publish()}>
-            Publish version
-          </button>
-        </div>
-      </section>
-      {dryRun && (
+      {data && (
         <section className="panel">
-          <h2>Dry-run results</h2>
-          {dryRun.problems.length > 0 && (
-            <ErrorMessage
-              message={dryRun.problems.map((problem) => `${problem.path}: ${problem.message}`).join(" · ")}
-            />
-          )}
-          {dryRun.missingSubscriptionIds.length > 0 && (
-            <p>Unknown subscriber IDs: {dryRun.missingSubscriptionIds.join(", ")}</p>
-          )}
-          {preview.map((menu, index) => (
-            <article key={dryRun.samples[index]?.subscriptionId}>
-              <h3>
-                {dryRun.samples[index]?.subscriberFirstName ?? "Subscriber"} ·{" "}
-                {dryRun.samples[index]?.planName}
-              </h3>
-              <p>
-                {menu.offers.length
-                  ? menu.offers.map((offer) => offer.kind).join(", ")
-                  : "No offer; cancel remains available."}
-              </p>
-            </article>
-          ))}
+          <TimelineChart data={data} />
         </section>
+      )}
+      {data && events.length > 0 && (
+        <details className="panel">
+          <summary>Show as a list ({events.length} events)</summary>
+          <ol className="timeline-list">
+            {events.map((event) => {
+              const info = kindInfo(event.kind);
+              return (
+                <li key={event.id}>
+                  <StatusBadge tone={info.tone}>{info.label}</StatusBadge>
+                  <span>
+                    {names.get(event.resourceId) ?? "Subscriber"}
+                    {event.simulated && <Badge>SIMULATED</Badge>}
+                  </span>
+                  <time dateTime={event.startDate}>{formatDateTime(event.startDate)}</time>
+                  {event.auditSeq ? (
+                    <a href={`#audit?seq=${event.auditSeq}`}>Audit #{event.auditSeq}</a>
+                  ) : (
+                    <span />
+                  )}
+                </li>
+              );
+            })}
+          </ol>
+        </details>
       )}
     </>
   );
@@ -1328,50 +1060,99 @@ function Onboarding({ api: client }: { api: MerchantApi }) {
           {message}
         </p>
       )}
-      <ol className="steps">
-        <li aria-current={!verified ? "step" : undefined}>
-          <h2>1. Verify credentials</h2>
-          <form
-            className="panel onboarding-form"
-            onSubmit={(event) => {
-              void saveCredentials(event);
-            }}
-          >
-            <label htmlFor="paypal-client-id">Sandbox client ID</label>
-            <input
-              id="paypal-client-id"
-              value={clientId}
-              onChange={(event) => setClientId(event.currentTarget.value)}
-              autoComplete="off"
-              required
-            />
-            <label htmlFor="paypal-client-secret">Sandbox secret</label>
-            <input
-              id="paypal-client-secret"
-              type="password"
-              value={secret}
-              onChange={(event) => setSecret(event.currentTarget.value)}
-              autoComplete="new-password"
-              required
-            />
-            <button disabled={busy}>{busy ? "Verifying…" : "Verify and store"}</button>
-          </form>
+      <ol className="entries">
+        <li className="entry" data-state={verified ? "done" : "current"}>
+          <span className="entry-num" aria-hidden="true">
+            1
+          </span>
+          <div className="entry-body">
+            <div className="entry-head">
+              <h2>Verify credentials</h2>
+              <StatusBadge tone={verified ? "good" : "info"}>{verified ? "Done" : "Next"}</StatusBadge>
+            </div>
+            <p className="muted">
+              Paste the sandbox app's client ID and secret. Keepwell checks them with PayPal and stores them
+              encrypted; the secret is never shown again.
+            </p>
+            <form
+              className="onboarding-form"
+              onSubmit={(event) => {
+                void saveCredentials(event);
+              }}
+            >
+              <label htmlFor="paypal-client-id">Sandbox client ID</label>
+              <input
+                id="paypal-client-id"
+                value={clientId}
+                onChange={(event) => setClientId(event.currentTarget.value)}
+                autoComplete="off"
+                required
+              />
+              <label htmlFor="paypal-client-secret">Sandbox secret</label>
+              <input
+                id="paypal-client-secret"
+                type="password"
+                value={secret}
+                onChange={(event) => setSecret(event.currentTarget.value)}
+                autoComplete="new-password"
+                required
+              />
+              <div className="button-row">
+                <button disabled={busy}>{busy ? "Verifying…" : "Verify and store"}</button>
+              </div>
+            </form>
+          </div>
         </li>
-        <li aria-current={verified && !webhook ? "step" : undefined}>
-          <h2>2. Register PayPal webhook</h2>
-          <button
-            type="button"
-            disabled={!verified || busy || webhook}
-            onClick={() => void registerWebhook()}
-          >
-            {webhook ? "Webhook registered" : "Register webhook"}
-          </button>
+        <li className="entry" data-state={webhook ? "done" : verified ? "current" : "locked"}>
+          <span className="entry-num" aria-hidden="true">
+            2
+          </span>
+          <div className="entry-body">
+            <div className="entry-head">
+              <h2>Register the PayPal webhook</h2>
+              <StatusBadge tone={webhook ? "good" : verified ? "info" : "neutral"}>
+                {webhook ? "Done" : verified ? "Next" : "Locked"}
+              </StatusBadge>
+            </div>
+            <p className="muted">
+              So PayPal tells Keepwell the moment a payment fails or a subscription changes, instead of
+              Keepwell having to ask.
+            </p>
+            <div className="button-row">
+              <button
+                type="button"
+                disabled={!verified || busy || webhook}
+                onClick={() => void registerWebhook()}
+              >
+                {webhook ? "Webhook registered" : "Register webhook"}
+              </button>
+            </div>
+          </div>
         </li>
-        <li aria-current={webhook && !backfillDone ? "step" : undefined}>
-          <h2>3. Import plans and subscriptions</h2>
-          <button type="button" disabled={!webhook || busy || backfillDone} onClick={() => void backfill()}>
-            {backfillDone ? "Backfill queued" : "Start backfill"}
-          </button>
+        <li className="entry" data-state={backfillDone ? "done" : webhook ? "current" : "locked"}>
+          <span className="entry-num" aria-hidden="true">
+            3
+          </span>
+          <div className="entry-body">
+            <div className="entry-head">
+              <h2>Import plans and subscriptions</h2>
+              <StatusBadge tone={backfillDone ? "good" : webhook ? "info" : "neutral"}>
+                {backfillDone ? "Done" : webhook ? "Next" : "Locked"}
+              </StatusBadge>
+            </div>
+            <p className="muted">
+              Pull in your existing plans and subscribers so they appear in the register.
+            </p>
+            <div className="button-row">
+              <button
+                type="button"
+                disabled={!webhook || busy || backfillDone}
+                onClick={() => void backfill()}
+              >
+                {backfillDone ? "Backfill queued" : "Start backfill"}
+              </button>
+            </div>
+          </div>
         </li>
       </ol>
       {backfillDone && (
@@ -1385,36 +1166,6 @@ function Onboarding({ api: client }: { api: MerchantApi }) {
   );
 }
 
-function PageHeading({ title, subtitle }: { title: string; subtitle?: string }) {
-  return (
-    <header className="page-heading">
-      <h1>{title}</h1>
-      {subtitle && <p>{subtitle}</p>}
-    </header>
-  );
-}
-
 function Badge({ children }: { children: string }) {
   return <span className="badge">{children}</span>;
-}
-
-function describeSessionEvent(event: SessionStreamEvent): string {
-  switch (event.type) {
-    case "agent.delta":
-      return event.text;
-    case "offer.presented":
-      return event.cardText;
-    case "reason.chips":
-      return event.reasons.join(", ");
-    case "fallback.changed":
-      return `Fallback changed to ${event.level}.`;
-    case "action.update":
-      return `Action ${event.actionId} is ${event.state}.`;
-    case "session.closed":
-      return event.summary;
-    case "agent.done":
-      return "Reply complete.";
-    case "error":
-      return `${event.code}: ${event.message}`;
-  }
 }

@@ -34,3 +34,30 @@ export function renderPolicyEditor(draft: PolicyDraftType): string {
 <button type="submit" name="intent" value="publish">Publish policy</button>
 </form><section aria-live="polite" aria-label="Policy preview results" id="policy-preview"></section>`;
 }
+
+/** An immutable update at a path: `setIn(draft, ["offers", "pause", "maxCycles"], 3)`. */
+export function setIn<T>(root: T, path: readonly (string | number)[], value: unknown): T {
+  const [head, ...rest] = path;
+  if (head === undefined) return value as T;
+  const base = (root ?? {}) as Record<string | number, unknown>;
+  const copy: Record<string | number, unknown> = Array.isArray(base)
+    ? ([...base] as unknown as Record<number, unknown>)
+    : { ...base };
+  copy[head] = setIn(base[head], rest, value);
+  return copy as T;
+}
+
+/** Whether two policy drafts say the same thing (key order does not matter). */
+export function samePolicy(a: unknown, b: unknown): boolean {
+  const canonical = (value: unknown): unknown =>
+    Array.isArray(value)
+      ? value.map(canonical)
+      : value && typeof value === "object"
+        ? Object.fromEntries(
+            Object.entries(value as Record<string, unknown>)
+              .sort(([x], [y]) => x.localeCompare(y))
+              .map(([key, inner]) => [key, canonical(inner)]),
+          )
+        : value;
+  return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
+}

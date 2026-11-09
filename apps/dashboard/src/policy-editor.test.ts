@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { PolicyDraft, type PolicyContext } from "@keepwell/contracts";
 import { PANTRY_PLAN, pantryPlanSubscription } from "@keepwell/contracts/fakes";
-import { parsePolicyDraft, previewPolicyDraft, renderPolicyEditor } from "./policy-editor.js";
+import {
+  parsePolicyDraft,
+  previewPolicyDraft,
+  renderPolicyEditor,
+  samePolicy,
+  setIn,
+} from "./policy-editor.js";
 
 const draft = PolicyDraft.parse({
   offers: PANTRY_PLAN.policy.offers,
@@ -51,5 +57,29 @@ describe("dashboard policy editor", () => {
     expect(html).toContain("&lt;script&gt;");
     expect(html).not.toContain("<script>");
     expect(html).toContain('aria-live="polite"');
+  });
+});
+
+describe("setIn and samePolicy", () => {
+  it("updates one path without touching the original or its siblings", () => {
+    const original = { offers: { pause: { maxCycles: 2, cooldownDays: 90 }, discount: { maxCycles: 3 } } };
+    const next = setIn(original, ["offers", "discount", "maxCycles"], 6);
+    expect(next.offers.discount.maxCycles).toBe(6);
+    expect(next.offers.pause).toBe(original.offers.pause);
+    expect(original.offers.discount.maxCycles).toBe(3);
+  });
+
+  it("keeps the other fields of the same object (the bug it replaces dropped them)", () => {
+    const next = setIn(
+      { offers: { discount: { enabled: true, maxPercent: 20, maxCycles: 3 } } },
+      ["offers", "discount", "maxCycles"],
+      4,
+    );
+    expect(next.offers.discount).toEqual({ enabled: true, maxPercent: 20, maxCycles: 4 });
+  });
+
+  it("compares policies regardless of key order", () => {
+    expect(samePolicy({ a: 1, b: { c: [1, 2] } }, { b: { c: [1, 2] }, a: 1 })).toBe(true);
+    expect(samePolicy({ a: 1 }, { a: 2 })).toBe(false);
   });
 });
