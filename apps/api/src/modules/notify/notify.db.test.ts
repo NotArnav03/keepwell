@@ -341,6 +341,31 @@ describe.skipIf(URL_ === undefined)("notify against Postgres", { timeout: 30_000
       now = new Date(start.getTime() + 3 * DAY);
     });
 
+    it("sends a sign-in link the subscriber asked for past the cap, and it doesn't use the cap up", async () => {
+      const to = email();
+      expect(await dispatcher.dispatch(await enqueue(to))).toEqual({ status: "sent" });
+      // The daily allowance is spent, yet a requested sign-in link still goes out.
+      expect(await dispatcher.dispatch(await enqueue(to, "portal.sign_in"))).toEqual({ status: "sent" });
+
+      const other = email();
+      expect(await dispatcher.dispatch(await enqueue(other, "portal.sign_in"))).toEqual({ status: "sent" });
+      // A sign-in link isn't counted: the next ordinary message is still the first of the day.
+      expect(await dispatcher.dispatch(await enqueue(other))).toEqual({ status: "sent" });
+    });
+
+    it("sends a sign-in link to an address that unsubscribed from emails, and still holds ordinary ones", async () => {
+      const to = email();
+      await testDb.ownerPool.query(
+        "INSERT INTO email_unsubscribes (merchant_id, email_hash) VALUES ($1, $2)",
+        [A, hashEmail(to)],
+      );
+      expect(await dispatcher.dispatch(await enqueue(to, "portal.sign_in"))).toEqual({ status: "sent" });
+      expect(await dispatcher.dispatch(await enqueue(to))).toEqual({
+        status: "suppressed",
+        reason: "unsubscribed",
+      });
+    });
+
     it("counts per address, not across addresses", async () => {
       const [a, b] = [email(), email()];
       expect(await dispatcher.dispatch(await enqueue(a))).toEqual({ status: "sent" });

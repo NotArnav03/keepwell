@@ -45,7 +45,10 @@ import { DbTimeMachine, judgeRoutes } from "./modules/demo/judge.js";
 import { demoStoreRoutes } from "./modules/demo/store-routes.js";
 import { subscriberMcpRoutes } from "./modules/mcp/subscriber.js";
 import { DelegationService } from "./modules/portal/delegations.js";
-import { PgDelegationStore, PgPortalDirectory } from "./modules/portal/pg.js";
+import { MagicLinkService } from "./modules/portal/magic-link.js";
+import { NotifyMagicLinkMailer } from "./modules/portal/notify-mailer.js";
+import { PgDelegationStore, PgMagicLinkStore, PgPortalDirectory } from "./modules/portal/pg.js";
+import { portalRoutes } from "./modules/portal/routes.js";
 import { PolicyApiPublisher, WinbackStartBatchSender } from "./modules/insights/actions/adapters.js";
 import { DeterministicEstimateProvider } from "./modules/insights/actions/estimate.js";
 import { insightActionRoutes } from "./modules/insights/actions/routes.js";
@@ -367,7 +370,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
       sessions,
       authenticate: sessionAuthenticator({
         widgetSecret: demoMerchantWidgetSecret(env.DEMO_MERCHANT_ID ?? "", env.WIDGET_TOKEN_SECRET),
-        // The portal isn't mounted yet, so no portal token exists; this key keeps the verifier honest.
+        // Signs the portal cookie and tokens (see portalRoutes below); a random key without a secret.
         portalSecret: env.MAGIC_LINK_SECRET ?? randomBytes(32).toString("hex"),
         ticketSecret,
         subscriptionByPayPalId: async (merchantId, paypalSubscriptionId) => {
@@ -389,15 +392,46 @@ export async function startPlatform(env: Env): Promise<Platform> {
       allowOrigin: () => true,
       rateLimits: defaultSessionRateLimits(),
     });
+    const portalDirectory = new PgPortalDirectory(db);
+    const delegations = new DelegationService({
+      store: new PgDelegationStore(db),
+      directory: portalDirectory,
+      audit,
+    });
+    // The hosted portal (#38): a subscriber asks for a sign-in link by email, signs in, cancels through
+    // the widget and manages the delegations their own agent uses. Off until the portal's address and
+    // the secret that signs its cookie are set.
+    if (env.PORTAL_URL && env.MAGIC_LINK_SECRET) {
+      const portalOrigin = new URL(env.PORTAL_URL).origin;
+      await app.register(portalRoutes, {
+        prefix: "/v1",
+        directory: portalDirectory,
+        magicLinks: new MagicLinkService({
+          directory: portalDirectory,
+          store: new PgMagicLinkStore(db),
+          mailer: new NotifyMagicLinkMailer({
+            db,
+            notifier: notify.notifier,
+            simulated: (merchantId) => merchantId === env.DEMO_MERCHANT_ID,
+          }),
+          // On the portal's own origin (its /v1 is proxied to the API), so the cookie is first-party.
+          verifyUrl: (token) => `${portalOrigin}/v1/portal/verify?token=${token}`,
+          audit,
+        }),
+        delegations,
+        signingSecret: env.MAGIC_LINK_SECRET,
+        portalUrl: env.PORTAL_URL,
+        allowOrigin: (origin) => origin === portalOrigin,
+        secureCookies: env.APP_ENV !== "local",
+      });
+    } else {
+      app.log.warn("The subscriber portal is disabled: configure PORTAL_URL and MAGIC_LINK_SECRET");
+    }
     // The subscriber's own agent (#41): MCP over streamable HTTP and its discovery document. Tools
-    // need a delegation token from the portal, so until the portal is mounted every call is a 401.
+    // need a delegation token from the portal, so without the portal every call is a 401.
     await app.register(subscriberMcpRoutes, {
       sessions,
-      delegations: new DelegationService({
-        store: new PgDelegationStore(db),
-        directory: new PgPortalDirectory(db),
-        audit,
-      }),
+      delegations,
       publicUrl: apiPublicUrl.replace(/\/$/, ""),
       portalUrl: env.PORTAL_URL ?? `${apiPublicUrl.replace(/\/$/, "")}/`,
     });

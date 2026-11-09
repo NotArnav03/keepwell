@@ -52,6 +52,13 @@ export const WinbackAskPayload = z.object({
   resubscribeUrl: z.url().nullable(),
 });
 
+// The hosted portal's sign-in link, asked for by the subscriber. Transactional: the notify module
+// sends it past the frequency cap and the marketing unsubscribe list.
+export const PortalSignInPayload = z.object({
+  signInUrl: z.url(),
+  expiresInMinutes: z.number().int().positive(),
+});
+
 export const NotificationContent = z.discriminatedUnion("template", [
   z.object({
     template: z.literal("dunning.update_payment_method"),
@@ -65,6 +72,7 @@ export const NotificationContent = z.discriminatedUnion("template", [
   z.object({ template: z.literal("dunning.generic"), payload: DunningGenericPayload }),
   z.object({ template: z.literal("dunning.reactivate"), payload: DunningReactivatePayload }),
   z.object({ template: z.literal("winback.ask"), payload: WinbackAskPayload }),
+  z.object({ template: z.literal("portal.sign_in"), payload: PortalSignInPayload }),
 ]);
 export type NotificationContent = z.infer<typeof NotificationContent>;
 
@@ -75,6 +83,7 @@ export const TemplateId = z.enum([
   "dunning.generic",
   "dunning.reactivate",
   "winback.ask",
+  "portal.sign_in",
 ]);
 export type TemplateId = z.infer<typeof TemplateId>;
 

@@ -460,6 +460,8 @@ interface Notifier {
 }
 // NotificationRequest = { merchantId, subscriptionId | null, to, content: NotificationContent, dueAt?, simulated (default false) }
 // NotificationContent = discriminated union on `template`; each payload holds facts only (amounts, dates, links).
+// Templates: dunning.* (5), winback.ask, portal.sign_in { signInUrl, expiresInMinutes }. portal.sign_in is sent past the
+// frequency cap and the unsubscribe list (the subscriber just asked for it) and doesn't count toward the cap.
 ```
 
 ---

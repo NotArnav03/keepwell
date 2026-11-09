@@ -57,4 +57,11 @@ export const CONTENT: Record<TemplateId, NotificationContent> = {
       resubscribeUrl: "https://pantryplan.example/resubscribe",
     },
   },
+  "portal.sign_in": {
+    template: "portal.sign_in",
+    payload: {
+      signInUrl: "https://portal.pantryplan.example/v1/portal/verify?token=abc",
+      expiresInMinutes: 15,
+    },
+  },
 };
