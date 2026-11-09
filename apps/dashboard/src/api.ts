@@ -63,7 +63,9 @@ export class MerchantApi {
 
   constructor(
     baseUrl = import.meta.env.VITE_API_BASE_URL || "/v1",
-    private readonly fetcher: Fetcher = fetch,
+    // Not `fetch` itself: called as `this.fetcher(...)` the browser's fetch would run with `this` set
+    // to this client and throw "Illegal invocation".
+    private readonly fetcher: Fetcher = (input, init) => globalThis.fetch(input, init),
   ) {
     this.base = new URL(baseUrl, globalThis.location?.origin ?? "http://localhost");
   }
