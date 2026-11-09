@@ -1,6 +1,6 @@
 # Devpost write-up (draft)
 
-Owner: Om (M5). Drafted 1 Nov 2026, status refreshed 7 Nov against `main`, and refreshed again after the freeze. Sections follow the Devpost form order. Each section ends with **Still TODO**, listing facts that must be confirmed before this text is pasted into the form. Anything marked `TODO(shipping by 8 Nov)` must be reworded or deleted if it misses the feature freeze. Do not paste test credentials into this file.
+Owner: Om (M5). Drafted 1 Nov 2026. Status refreshed 9 Nov 2026 against `main`, the day after the feature freeze. Sections follow the Devpost form order. Each section ends with **Still TODO**, listing facts that must be confirmed before this text is pasted into the form. A `TODO(shipping by 8 Nov)` that missed the freeze is rewritten as what the repo actually contains. Do not paste test credentials into this file.
 
 ---
 
@@ -30,9 +30,9 @@ On top of these: an insights pipeline turns every exit conversation into structu
 
 Every action is idempotent, reconciled against PayPal, and written to a hash-chained audit log.
 
-**State on `main` (7 Nov):** policy engine, agent runtime, claims checker, action engine, webhook pipeline, reconciler, audit log, widget, LLM budget guard, eval harness and scoreboard, notifications outbox, failed-payment recovery, sessions module (not yet mounted in the running API), Judge Mode API and page, portal. **Not yet on `main`:** win-back, insights, copilot, insight-to-action, MCP servers, dashboard, Pantry Plan store.
+**State on `main` (9 Nov):** the three moments above are in the repo and wired from `apps/api/src/platform.ts`, with the conditions in the README. Sessions mount when `SESSION_TICKET_SECRET` is set. Win-back records every PayPal-side cancellation, and queues its one template message only when the notifier, `PORTAL_URL` and `MAGIC_LINK_SECRET` are set (`POST /v1/winback/replies` in that case). Insights extraction runs on `session.closed`. Win-back reply text is not extracted (`noReplies` in `platform.ts`). With `SESSION_SECRET` and `DASHBOARD_URL`, the API serves `GET /v1/m/insights`, `GET /v1/m/overview`, insight-action approve/reject, and (with `ANTHROPIC_API_KEY`) `POST /v1/m/copilot/messages`. The dashboard is `apps/dashboard`, Insights page included. Subscriber MCP is `POST /mcp/subscriber` (mounted with sessions; a portal delegation token is required). Merchant MCP is `POST /mcp/merchant` (mounted with merchant sign-in). Pantry Plan is `apps/demo-store`, and `POST /v1/demo-store/subscriptions` mounts when `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` are set. The eval scoreboard handlers are not registered on the running server.
 
-**Still TODO:** rewrite each paragraph above in past/present tense according to what actually ships by 8 Nov. Remove any moment that does not run end to end.
+**Still TODO:** a sandbox browser run of each moment (subscribe, pause, resume, cancel, and a win-back message after a real cancel inside PayPal). Spike [Q5](../spikes/Q5.md) forced a real renewal failure. The recovery message and the later capture were not run. Do not describe a moment as proven end to end until that run exists. Hosted URLs stay `TODO(url)`.
 
 ## How we built it
 
@@ -40,26 +40,27 @@ Every action is idempotent, reconciled against PayPal, and written to a hash-cha
 - **API:** Fastify with zod at every boundary, Drizzle ORM on Postgres (Neon, free tier) with row-level security for tenant isolation, pg-boss for jobs on the same Postgres (no Redis), pino logging.
 - **PayPal layer:** a gateway that is the only code allowed to call PayPal (OAuth cache, retries, debug ids, rate limiting); an action engine with a state machine and a per-subscription lock; a verified webhook pipeline; a reconciler; and a fake PayPal server (`packages/paypal-mock`) so tests and offline work need no credentials.
 - **Brain:** a pure policy engine (`packages/policy`) with property-based tests; an agent runtime using Claude Haiku 5.5 to converse, classify and tag, with structured outputs validated by zod; a deterministic claims checker.
-- **Surfaces:** a Preact widget in Shadow DOM, server-sent events for streaming. `TODO(shipping by 8 Nov)`: React and Vite dashboard with Bryntum Scheduler; MCP servers with `@modelcontextprotocol/sdk`.
-- **Hosting:** Render and Neon free tiers, Resend for email `TODO(shipping by 8 Nov)`.
+- **Surfaces:** a Preact widget in Shadow DOM, with server-sent events for streaming. The dashboard is React and Vite (`apps/dashboard`). It has no Tailwind build and no Bryntum package. The subscriber timeline is an HTML event list (`apps/dashboard/src/views.ts`). The portal and Judge Mode are Preact. MCP servers use `@modelcontextprotocol/sdk` at `POST /mcp/subscriber` and `POST /mcp/merchant`.
+- **Hosting:** `render.yaml` defines Render free-tier services (they sleep after 15 idle minutes) and names Neon as the database. Resend is the email provider when `RESEND_API_KEY` is set (`apps/api/src/modules/notify/providers.ts`). With no key, sends go to a console provider. Simulated rows never call a provider. Sentry initialises only when `SENTRY_DSN` is set (`apps/api/src/index.ts`).
 - **Process:** five people, each with a vertical workstream, meeting only through typed contracts; every teammate works with Claude Code under shared repo rules.
 
-**Still TODO:** confirm the final hosting, email provider and dashboard stack against what is deployed on `prod-demo`.
+**Still TODO:** open `prod-demo` and confirm it matches this blueprint. `render.yaml` is the plan. This repo does not show that those hostnames answer. `TODO(url)`.
 
 ## How PayPal is central
 
 Keepwell has nothing to act on without a PayPal subscription, and PayPal stays the source of truth.
 
 - **Subscriptions API:** suspend, activate, cancel, revise (with PayPal's buyer approval page), price patch and capture of an outstanding balance. Pause is a suspend plus a scheduled activate.
-- **Plans API:** insight-to-action creates a new plan after merchant approval.
+- **Plans API:** after a merchant approves an insight action (`POST /v1/m/insight-actions/:id/approve`), a `create_plan` Action goes through the action engine. That route mounts with merchant sign-in.
 - **Refunds v2:** partial refunds via `POST /v2/payments/captures/{id}/refund`. We confirmed on the sandbox that subscription transaction ids are valid capture ids and that `PayPal-Request-Id` makes a replayed refund safe ([docs/spikes/Q1.md](../spikes/Q1.md)).
 - **Webhooks:** every event is verified with PayPal's verify-webhook-signature API on the raw body. Then it is treated as a hint: we re-fetch the subscription and diff it, so duplicate, late or missing webhooks cannot corrupt state. A reconciler sweeps for what webhooks miss.
-- **JS SDK:** the Pantry Plan demo store uses the subscribe button. `TODO(shipping by 8 Nov)`.
+- **JS SDK:** `apps/demo-store` loads `https://www.paypal.com/sdk/js` and only then asks `POST /v1/demo-store/subscriptions` to GET the subscription from PayPal. With no `PAYPAL_CLIENT_ID` the page badges `FAKE PAYPAL`. `render.yaml` leaves the hosted store's client id and plan ids unset until a person sets them.
+- **Price patch:** the gateway uses `.../pricing_scheme/fixed_price`. Spike [Q4](../spikes/Q4.md) showed that inside 10 days PayPal returns 204 and does not apply the price. The 8 Nov renewal still charged $1.00. The policy withholds that offer (`PRICE_CHANGE_MIN_DAYS` in `packages/policy`). A PATCH more than 10 days before billing was not run.
 - **Failure data:** recovery uses PayPal's own failure reason code and `next_payment_retry_time`.
 
 Everything runs on the PayPal sandbox.
 
-**Still TODO:** confirm which of these ran end to end on the sandbox (not only on the mock) before listing them as working. Add Agent Toolkit usage only if we really use it (`@paypal/agent-toolkit` is in the plan; the upstream PR X3 is on the cut list).
+**Still TODO:** a browser run on the sandbox (subscribe, pause, resume, cancel) before calling the product flow proven. Spikes [Q1](../spikes/Q1.md), [Q2](../spikes/Q2.md), [Q4](../spikes/Q4.md) and [Q5](../spikes/Q5.md) are sandbox API calls, not that browser flow. `@paypal/agent-toolkit` is not a dependency. Leave it off this form. The upstream PR stays on the cut list.
 
 ## How AI is used
 
@@ -71,9 +72,9 @@ Claude Haiku 5.5 runs the short conversation, classifies the cancel reason, tags
 - **Consent is a button.** It is never parsed from text.
 - **Hard limits.** Three subscriber messages, one clarifying question, one offer, an 8-second model deadline, and a daily budget guard. When any limit is hit, or Claude is unavailable, the session falls back to reason chips and template text, and cancel still works.
 - **Prompt injection.** The subscriber's text can only change which menu item the model picks.
-- **Merchant numbers come from SQL.** The copilot has read-only, parameterised tools, not free-form SQL. `TODO(shipping by 8 Nov)`.
+- **Merchant numbers come from SQL.** `POST /v1/m/copilot/messages` uses the copilot's read-only tools. It mounts when merchant sign-in and `ANTHROPIC_API_KEY` are set. The model is Claude Sonnet 5.5 (`apps/api/src/modules/agent/llm.ts`).
 
-**Still TODO:** eval results `TODO(results)`: policy violations, clicks-to-cancel, claims-checker catches, dark-pattern score. Do not state any of these until a full run exists.
+**Still TODO:** a real-model eval on the submitted commit. The committed adversarial file (`packages/evals/results/adversarial.json`, scripted jailbroken model, not Claude) records `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204 and `deniedPicks` 132 over 404 sessions. `darkPatternScore` is null. [CHAOS-REPORT.md](../CHAOS-REPORT.md) says the paid Haiku run is still to do. Do not paste a dark-pattern score, a latency, or a cost per session from a real model. The running API does not serve `/evals`: `platform.ts` does not register the handlers.
 
 ## Challenges we ran into
 
@@ -83,7 +84,8 @@ Facts from the repo so far (add more as they happen):
 - Subscription transaction ids and refund endpoints were unclear; spike Q1 resolved it on the sandbox.
 - The subscription's last payment amount came back as `"1.0"` while other endpoints use `"1.00"`, so the gateway normalises money before it reaches our schema.
 - Sandbox accounts created with country India fail at subscription approval; US accounts are needed.
-- A judge needs an already-approved subscription to test a cancel flow, and only a buyer can approve one. `TODO(shipping by 8 Nov)`: the pooled-subscription design for Judge Mode.
+- A judge needs an already-approved subscription, and only a buyer can approve one. The pool is on `main` (`apps/api/src/modules/pool`, `pnpm pool:refill`). Judge Mode leases one for 30 minutes when its env vars are set. Spike [Q10](../spikes/Q10.md) records 50 enrolled on staging on 3 Nov, and says approval stays manual. Today's pool size is not in the repo. `TODO(results)`.
+- A price PATCH inside 10 days can return 204 and leave the old price in place. Spike [Q4](../spikes/Q4.md) confirmed that on 8 Nov, when the renewal still charged $1.00. The policy therefore does not offer that discount. The outside-window control was not run.
 - Building with a free-tier budget and a small prepaid AI credit.
 
 **Still TODO:** team to add real challenges from the last week (e.g. webhook latency, Bryntum, sandbox limits). Do not invent any.
@@ -92,12 +94,12 @@ Facts from the repo so far (add more as they happen):
 
 Only list items that are true on the submitted commit:
 
-- Cancel is one click and does not depend on the AI. State on `main`: designed and tested at the policy and agent layers; end-to-end `TODO(results)`.
-- A policy engine with property-based tests. Coverage figure `TODO(results)`.
-- A webhook design that survives duplicate, late and missing events. Chaos-day result `TODO(results)`.
-- A hash-chained audit log with verification. On `main`.
-- Mock PayPal server that mirrors the sandbox, built from recorded spike responses. On `main`.
-- Eval scoreboard `TODO(results)`.
+- Cancel is one click and the cancel route does not call the agent (`POST /v1/sessions/:id/cancel`, mounted with sessions). A sessions test runs it with an agent that throws. A sandbox browser run is `TODO(results)`.
+- A policy engine with property-based tests, and a Vitest threshold of 100% branches (`packages/policy/vitest.config.ts`). No coverage number is committed. `TODO(results)`.
+- Webhook verification against real PayPal: spike [Q6](../spikes/Q6.md) records 30 of 30 VERIFIED on 3 Nov. The chaos-day rows for killing the API and dropping webhooks are still Open in [CHAOS-REPORT.md](../CHAOS-REPORT.md). `TODO(results)` for those.
+- A hash-chained audit log. `GET /v1/m/audit/verify` mounts with merchant sign-in.
+- A mock PayPal server that mirrors the sandbox, built from recorded spike responses. On `main`.
+- An adversarial eval result committed at `packages/evals/results/adversarial.json` (scripted model, gates passed, as cited above). The public scoreboard is not served. A real-model run is `TODO(results)`.
 
 **Still TODO:** every bullet depends on the verified results; see CHECKLIST.md "Facts we must not claim".
 
@@ -109,31 +111,32 @@ Draft points (team to edit): constrain the model with data and code, not with pr
 
 ## What's next
 
-- Multilingual and voice support beyond the English, Hindi and Spanish templates.
-- A churn-risk score from PayPal-only signals, shown with its factors.
-- Upstream tools for `paypal/agent-toolkit` (suspend, activate, revise, capture).
-- Onboarding more merchants by pasting sandbox credentials. `TODO(shipping by 8 Nov)` whether this ships.
+- Conversation quality in Hindi and Spanish beyond the fixed templates in `apps/api/src/modules/agent/i18n.ts` (locales `en`, `hi`, `es`). The widget can start the browser's Web Speech API (`packages/widget/src/speech.ts`). A recorded pass of either is `TODO(results)`.
+- Upstream tools for `paypal/agent-toolkit` (suspend, activate, revise, capture). The package is not a dependency.
+- The churn-risk list and merchant onboarding shipped, so they are not in this list. At-risk subscribers come from `listAtRisk` (PayPal-only signals, shown with factors) on `GET /v1/m/subscriptions` and the merchant MCP tool `list_at_risk`. Onboarding is `POST /v1/m/onboarding/credentials` when merchant sign-in is on, PayPal is not the mock, and `PAYPAL_CREDENTIALS_ENCRYPTION_KEY` is set.
 
-**Still TODO:** align with the cut list after feature freeze; remove anything that shipped, and anything we no longer plan.
+**Still TODO:** read the cut list once more before paste. Do not add a churn score or a credential form as future work. They are on `main` under the conditions above.
 
 ## Built with
 
-TypeScript, Node.js, Fastify, zod, Drizzle ORM, PostgreSQL (Neon), pg-boss, Preact, Vitest, fast-check, Turborepo, pnpm, GitHub Actions, Render, Claude (Anthropic API: Sonnet 5.5, Haiku 5.5), PayPal Subscriptions / Plans / Payments (Refunds v2) / Webhooks / JS SDK APIs, Model Context Protocol, Resend `TODO(shipping by 8 Nov)`, React, Vite, Tailwind CSS, Bryntum Scheduler `TODO(shipping by 8 Nov)`, Playwright `TODO(shipping by 8 Nov)`, Sentry `TODO(shipping by 8 Nov)`.
+TypeScript, Node.js, Fastify, zod, Drizzle ORM, PostgreSQL (Neon), pg-boss, Preact (widget, portal, Judge Mode), React, Vite (dashboard), Vitest, fast-check, Turborepo, pnpm, GitHub Actions, Render, Claude (Anthropic API: Haiku 5.5 for the subscriber agent and insight extraction, Sonnet 5.5 for the copilot), PayPal Subscriptions / Plans / Payments (Refunds v2) / Webhooks / JS SDK, Model Context Protocol (`@modelcontextprotocol/sdk`), Resend when `RESEND_API_KEY` is set, Sentry when `SENTRY_DSN` is set.
 
-**Still TODO:** trim to what is actually in the submitted commit.
+Not in this commit, so leave them off the form: Tailwind CSS, Bryntum Scheduler, Playwright, `@paypal/agent-toolkit`. Spike [Q10](../spikes/Q10.md) decided pool approvals stay manual. Spike [Q8](../spikes/Q8.md) says not to add Bryntum until a written licence exists.
+
+**Still TODO:** if a person later adds one of those, put it back. Until then this list matches `package.json` files and `render.yaml`.
 
 ## What's new since 1 October
 
-The whole project. The first commit on `main` is dated 28 Oct 2026; no code, design or data predates the hackathon period.
+The whole project, as far as this draft knows. An earlier draft said the first commit on `main` is 28 Oct 2026. This refresh did not re-run `git log`, so that date is not re-confirmed here.
 
-**Still TODO:** confirm the first-commit date is after 1 October 2026 and that no pre-existing code was reused. If any library was a prior project of a teammate, say so.
+**Still TODO:** `git log --reverse` on `main`, and a note if any library was a prior project of a teammate. Do not claim "nothing predates 1 October" until that command is recorded.
 
 ## Test credentials
 
 Go in the Devpost submission form only. Never in this repo.
 
-- Judge Mode URL: `TODO(url)`
-- Hosted demo URL: `TODO(url)`
+- Judge Mode URL: `TODO(url)`. `render.yaml` names `keepwell-judge-demo`. This repo does not show it is up.
+- Hosted demo URL: `TODO(url)`. The same file names `keepwell-api-demo`, `keepwell-dashboard-demo`, `keepwell-portal-demo` and `keepwell-store-demo`. Unchecked.
 - Sandbox merchant dashboard login: `TODO(in form)`
 - Sandbox buyer account (for the fully real subscribe-then-cancel path): `TODO(in form)`
 - Notes for judges: all data is fictional; the PayPal environment is the sandbox; Judge Mode leases a pre-approved subscription for 30 minutes.
@@ -144,12 +147,12 @@ Go in the Devpost submission form only. Never in this repo.
 
 - Public repository: https://github.com/NotArnav03/keepwell (MIT licence)
 - Demo video (public YouTube, under 3 minutes): `TODO(url)`
-- Eval scoreboard: `TODO(url)`
-- Chaos report: `TODO(url)`
+- Eval scoreboard: `TODO(url)`. The handlers exist and `platform.ts` does not register them, so there is no live page to link.
+- Chaos report: [docs/CHAOS-REPORT.md](../CHAOS-REPORT.md) in this repo (agent drills recorded, other rows Open). A public URL for the form is `TODO(url)`.
 
 ## Sponsor prize opt-ins
 
-- **Bryntum:** the subscriber timeline is built on Bryntum Scheduler (one row per subscriber; bars for billing periods, pauses and discounts; markers for failed payments, refunds and cancellations; click through to the audit entry). Owner: Ayush. `TODO(shipping by 8 Nov)`.
+- **Bryntum:** the dashboard timeline is an HTML event list, not Bryntum Scheduler (`apps/dashboard/src/views.ts` says the licensed Scheduler view is not enabled). Owner: Ayush. `TODO(licence)`.
 - Any others we qualify for: `TODO(confirm)`.
 
-**Still TODO:** read the Bryntum prize rules on the Devpost page and confirm the licence terms (spike Q8; no `docs/spikes/Q8.md` yet) and what proof the form needs. Opt in only if the timeline ships and is visible in the video.
+**Still TODO:** read the Bryntum prize rules on the Devpost page. Spike [Q8](../spikes/Q8.md) (3 Nov) says not to add the package until Bryntum confirms in writing that the hackathon licence covers this project, the developers, and the hosted demo. Opt in only if a licensed timeline is in the repo and visible in the video. The current event list is not that timeline.

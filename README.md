@@ -4,24 +4,24 @@ An honest AI retention agent for businesses that bill through **PayPal Subscript
 
 Subscription businesses lose revenue at three moments: when a subscriber goes to cancel, when a renewal payment fails, and when someone cancels inside PayPal and is never asked why. Keepwell handles all three on the real PayPal subscription, and it never makes cancelling harder.
 
-> **Status, 7 Nov 2026.** On `main`: the PayPal platform layer, policy engine, agent runtime (Claude Haiku 5.5), widget, the LLM budget guard, the eval harness and public scoreboard, the notification outbox (Resend, with a Demo Inbox API), the failed-payment recovery engine, the real sessions module, the Judge Mode API and page, and the hosted portal. The sessions and Judge Mode code is on `main` but not yet mounted in the running API, so nothing here is claimed as working end to end on the hosted demo yet. Win-back, insights, the dashboard and the MCP servers are in review or still being built. This README is written in present tense only for what is on `main` today. Everything else is marked `TODO(shipping by 8 Nov)` and is removed or reworded if it misses the feature freeze. The status and the "State on `main`" columns are refreshed again after the freeze.
+> **Status, 9 Nov 2026, the day after the feature freeze.** On `main`, composed in `apps/api/src/platform.ts`: the PayPal platform layer, policy engine, agent runtime (Claude Haiku 5.5), widget, LLM budget guard, notification outbox, failed-payment recovery, win-back, insights (extraction, SQL aggregates, copilot, insight-to-action), sessions, hosted portal, Judge Mode, Pantry Plan store backend, subscriber MCP, merchant MCP and API keys, and the dashboard in `apps/dashboard` (Insights page included). Several of those routes mount only when the env vars named below are set. The eval harness is on `main`. `GET /evals` and `GET /v1/evals` are not registered on the running server. `render.yaml` names the hosted services. Whether those URLs answer is `TODO(url)`. Present tense means the code is in this repo. A claim this repo cannot prove stays `TODO(...)`.
 
 ## See it in 2 minutes
 
-`TODO(url)`: Judge Mode link (hosted `prod-demo`). `TODO(url)`: demo video (under 3 minutes). `TODO(shipping by 8 Nov)`: Judge Mode itself.
+`TODO(url)`: hosted Judge Mode. `render.yaml` names the service `keepwell-judge-demo`. This repo does not show that the URL is up. `TODO(url)`: demo video (under 3 minutes).
 
-The plan for Judge Mode: open the link, get a pre-approved sandbox subscription on the fictional "Pantry Plan" store, and run three one-click scenarios (pause, downgrade, honest cancel). Test credentials go in the Devpost submission form, not in this repo. Until Judge Mode ships, you can run the platform locally (see [Run it locally](#run-it-locally)).
+Judge Mode is `apps/judge`. Three scenario cards (pause, cheaper plan, honest cancel) each lease a pre-approved sandbox subscription for 30 minutes (`POST /v1/demo/leases`) and tell you what to type. The agent decides the offer from that text. The API routes mount when `JUDGE_LEASE_SECRET`, `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` are set. Test credentials go in the Devpost submission form, not in this repo. Locally: `pnpm dev:fake-sessions`, then `pnpm dev:judge` at http://localhost:5180 (see [Run it locally](#run-it-locally)).
 
 ## What Keepwell does
 
 | Moment | What happens | State on `main` |
 |---|---|---|
-| **1. Honest cancel save** | Maya clicks cancel on Pantry Plan. The widget offers a short chat. If the merchant's policy allows a fair fix (pause, cheaper plan, discount, partial refund), the agent offers at most one, and she accepts with a button. Keepwell applies it to the real PayPal subscription. "Cancel now" is always one click. | Policy engine, agent runtime, claims checker, action engine, widget and session routes exist. The real sessions module is on `main` but not yet mounted in the running API (`TODO(shipping by 8 Nov)`); the widget runs against a fake sessions server until it is. |
-| **2. Failed-payment recovery** | When Raj's renewal fails, Keepwell reads PayPal's failure reason and next retry time, sends a reason-specific message about a day before the retry, and captures the outstanding balance once he has fixed his payment method. | The recovery engine is on `main` and tested against the mock. The spike [Q5](docs/spikes/Q5.md) forced a real renewal failure on the sandbox once; the whole recovery loop on a real failure has not been run end to end. |
-| **3. Win-back** | If a subscriber cancels inside PayPal, Keepwell sends one message (never a drip campaign) asking what happened. | `TODO(shipping by 8 Nov)`. Cancel-inside-PayPal detection (diffing fetched PayPal state) is in the webhook pipeline. |
-| **Insights and copilot** | Every exit conversation becomes structured reasons. Merchants ask questions in a copilot that uses read-only tools, and can approve a proposed action such as creating a new PayPal plan. All numbers come from SQL, not the model. | `TODO(shipping by 8 Nov)`. Contract types are on `main`. |
-| **MCP surfaces** | A subscriber's own AI assistant can read retention options and cancel through MCP, under the same rules. A merchant MCP lets an external agent propose actions (approval stays in the dashboard). | `TODO(shipping by 8 Nov)`. Cut-list items. |
-| **Merchant dashboard** | Results, live feed, audit log with chain verification, policy editor, and a Bryntum Scheduler subscriber timeline. | `TODO(shipping by 8 Nov)`. |
+| **1. Honest cancel save** | Maya clicks cancel on Pantry Plan. The widget offers a short chat. If the merchant's policy allows a fair fix (pause, cheaper plan, discount, partial refund), the agent offers at most one, and she accepts with a button. Keepwell applies it to the real PayPal subscription. "Cancel now" is always one click. | Policy engine, agent runtime, claims checker, action engine and widget are on `main`. Session routes (`POST /v1/sessions`, `GET /v1/sessions/:id/stream`, `POST /v1/sessions/:id/cancel`) mount when `SESSION_TICKET_SECRET` is set. Without it the API logs that sessions are disabled. `pnpm dev:fake-sessions` still serves the same routes from fakes. |
+| **2. Failed-payment recovery** | When Raj's renewal fails, Keepwell reads PayPal's failure reason and next retry time, sends a reason-specific message about a day before the retry, and captures the outstanding balance once he has fixed his payment method. | The recovery engine is on `main` (`mountRecovery` in `platform.ts`) and tested against the mock. Spike [Q5](docs/spikes/Q5.md) forced a real sandbox failure: 3 failed payments, $3.00 outstanding, and PayPal suspended the subscription. The message and the later capture, after funding is restored, were not run. `TODO(results)`. |
+| **3. Win-back** | If a subscriber cancels inside PayPal, Keepwell sends one message (never a drip campaign) asking what happened. | On `main`. `registerWinback` records every PayPal-side cancellation. The one message is queued only when the notifier, `PORTAL_URL` and `MAGIC_LINK_SECRET` are all set. Otherwise it records and does not send. Replies are `POST /v1/winback/replies` in that same case. The resubscribe link is omitted: the platform passes no invite-back policy. A sandbox cancel that produced the message is not in the repo. `TODO(results)`. |
+| **Insights and copilot** | Every exit conversation becomes structured reasons. Merchants ask questions in a copilot that uses read-only tools, and can approve a proposed action such as creating a new PayPal plan. All numbers come from SQL, not the model. | On `main`. Haiku extraction runs on `session.closed`. Win-back replies are not extracted: `platform.ts` passes `noReplies`. With `SESSION_SECRET` and `DASHBOARD_URL`: `GET /v1/m/insights`, `GET /v1/m/overview`, `GET` and approve/reject on `/v1/m/insight-actions`. `POST /v1/m/copilot/messages` also needs `ANTHROPIC_API_KEY` (Claude Sonnet 5.5). The dashboard page is `#insights`. |
+| **MCP surfaces** | A subscriber's own AI assistant can read retention options and cancel through MCP, under the same rules. A merchant MCP lets an external agent propose actions (approval stays in the dashboard). | On `main`, using `@modelcontextprotocol/sdk`. Subscriber: `POST /mcp/subscriber` and `GET /.well-known/keepwell-agent.json`, mounted with sessions. Calls need a portal delegation token, so without `PORTAL_URL` and `MAGIC_LINK_SECRET` they are 401. Merchant: `POST /mcp/merchant` with a `kwk_` key from `POST /v1/m/api-keys`, mounted with merchant sign-in. `propose_action` only inserts a proposed row. A recorded call from Claude Desktop is `TODO(results)`. |
+| **Merchant dashboard** | Results, live feed, audit log with chain verification, policy editor, subscriber timeline, and an Insights page (overview, at risk, copilot, action queue, Demo Inbox). | On `main`: `apps/dashboard` (React, Vite). Merchant routes, including `GET /v1/m/audit/verify` and `GET /v1/m/feed`, mount when `SESSION_SECRET` and `DASHBOARD_URL` are set. Onboarding (`POST /v1/m/onboarding/credentials`) also needs sandbox mode and `PAYPAL_CREDENTIALS_ENCRYPTION_KEY`. The timeline is an HTML event list. Bryntum Scheduler is not a dependency. `TODO(licence)`: written confirmation, see [docs/spikes/Q8.md](docs/spikes/Q8.md). |
 
 ## How PayPal is central
 
@@ -31,11 +31,11 @@ Keepwell does nothing without a PayPal subscription to act on. The PayPal sandbo
 |---|---|---|
 | Subscriptions: suspend, activate, cancel | Pause is suspend plus a scheduled activate. Cancel is cancel. Retries read the subscription first, so nothing is applied twice. | On `main` |
 | Subscriptions: revise | Plan changes (downgrade, switch to annual) go through PayPal's buyer approval page, then are confirmed by reading the subscription. | On `main` |
-| Subscriptions: price patch, capture | Time-limited discounts and recovering an outstanding balance. | On `main` |
-| Plans | Insight-to-action creates a new plan after the merchant approves. | Action type on `main`; the insight UI is `TODO(shipping by 8 Nov)` |
+| Subscriptions: price patch, capture | Time-limited discounts and recovering an outstanding balance. The patch path is `.../pricing_scheme/fixed_price`. The action confirms by reading the price back (`confirmsOnApply: false` in `apps/api/src/modules/actions/plans.ts`). | On `main`. Spike [Q4](docs/spikes/Q4.md): inside 10 days PayPal returned 204 and did not apply the new price. The 8 Nov renewal still charged $1.00. The policy withholds the offer when the next billing is under 10 days (`PRICE_CHANGE_MIN_DAYS` in `packages/policy/src/rules.ts`). A PATCH more than 10 days before billing was not run. |
+| Plans | Insight-to-action creates a new plan after the merchant approves (`POST /v1/m/insight-actions/:id/approve`, kind `create_plan`). The queue is the dashboard Insights page. | On `main`, with merchant sign-in |
 | Refunds v2 | Partial refunds use `POST /v2/payments/captures/{id}/refund` with `PayPal-Request-Id`. Spike Q1 confirmed that subscription transaction ids work as capture ids ([docs/spikes/Q1.md](docs/spikes/Q1.md)). | On `main` |
 | Webhooks | Verified through PayPal's verify-webhook-signature API on the raw body. A webhook is only a hint: Keepwell re-fetches the subscription, diffs it against the last snapshot and derives events from the diff. This makes duplicate, late and missing webhooks harmless. A reconciler sweeps for anything missed. | On `main` |
-| JS SDK | The Pantry Plan demo store uses the subscribe button. | `TODO(shipping by 8 Nov)` |
+| JS SDK | Pantry Plan (`apps/demo-store`) loads `https://www.paypal.com/sdk/js`. The browser then calls `POST /v1/demo-store/subscriptions`, which GETs the subscription from PayPal before it issues a shopper token. | On `main` when `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` are set. With no `PAYPAL_CLIENT_ID` the page badges `FAKE PAYPAL`. `render.yaml` leaves the store's client id and plan ids unset until a person sets them. A hosted sandbox subscribe is `TODO(results)`. |
 
 Everything runs against the PayPal **sandbox** only. Nothing in this project touches live PayPal.
 
@@ -99,7 +99,7 @@ flowchart LR
   J -. subscribe button .-> PP
 ```
 
-This is the target design. Today on `main`: the API, webhook ingest, agent runtime, policy engine, action engine, reconciler, job workers, audit log, notifications outbox, recovery engine, sessions module, portal and Judge Mode code. Not yet on `main`: the win-back and insights modules, MCP endpoints and the dashboard (`TODO(shipping by 8 Nov)`). Stack: TypeScript (strict), Fastify, Drizzle on Postgres (Neon) with row-level security, pg-boss, zod at every boundary, Preact widget in Shadow DOM, Vitest and fast-check.
+This is the target design. Today on `main`: the API, webhook ingest, agent runtime, policy engine, action engine, reconciler, job workers, audit log, notifications outbox, recovery, win-back, insights (copilot and insight actions included), sessions, portal, Judge Mode, Pantry Plan store, both MCP servers, and the dashboard. A route that needs a secret or a URL stays off until that variable is set (`platform.ts` logs which one). The eval scoreboard handlers are in the repo and are not registered on the server. Stack: TypeScript (strict), Fastify, Drizzle on Postgres (Neon) with row-level security, pg-boss, zod at every boundary, Preact widget in Shadow DOM, React and Vite for the dashboard, Preact for the portal and Judge Mode, Vitest and fast-check.
 
 Other safety properties: the audit log is hash-chained with a verify endpoint; tenant isolation is enforced by Postgres row-level security; the failure behaviour of each component is tabulated in [ARCHITECTURE.md section 9](docs/ARCHITECTURE.md#9-failure-mode-matrix).
 
@@ -144,21 +144,24 @@ ANTHROPIC_API_KEY=...       # optional; without it the session falls back to rea
 LLM_DAILY_BUDGET_USD=0.25
 ```
 
-Use sandbox credentials only. `pnpm seed` then creates the product, plans and demo merchant in your sandbox. `TODO(shipping by 8 Nov)`: the full browser flow (Pantry Plan, Judge Mode) once those apps land.
+Use sandbox credentials only. `pnpm seed` then creates the product, plans and demo merchant in your sandbox. The browser apps are on `main`: `pnpm dev:store` (http://localhost:5176), `pnpm dev:portal` (http://localhost:5178), `pnpm dev:judge` (http://localhost:5180), and `pnpm --filter @keepwell/dashboard dev` (Vite's default, http://localhost:5173). A full sandbox browser run (subscribe, pause, resume, cancel) with timestamps and debug ids is `TODO(results)`.
 
 ## Repo map
 
 | Path | What it is | State on `main` |
 |---|---|---|
-| `apps/api` | Fastify API, webhooks, workers, reconciler, audit. Modules: `paypal`, `webhooks`, `actions`, `reconcile`, `audit`, `jobs`, `agent`, `policy`, `sessions` | On `main` (sessions is routes plus fakes) |
-| `apps/dashboard`, `apps/portal`, `apps/judge`, `apps/demo-store` | Merchant dashboard, hosted portal, Judge Mode, Pantry Plan store | Scaffolds only, `TODO(shipping by 8 Nov)` |
+| `apps/api` | Fastify API, webhooks, workers, reconciler, audit. Modules include `paypal`, `webhooks`, `actions`, `reconcile`, `audit`, `jobs`, `agent`, `policy`, `sessions`, `recovery`, `winback`, `notify`, `insights`, `portal`, `mcp`, `demo`, `merchant`, `pool` | On `main`. Sessions, portal, Judge Mode, store, merchant and copilot routes mount only with the env vars named above |
+| `apps/dashboard` | Merchant dashboard, React and Vite, Insights page included | On `main`. Sign-in needs `SESSION_SECRET` and `DASHBOARD_URL` |
+| `apps/portal` | Hosted portal (magic link, widget, delegations), Preact | On `main`. API routes need sessions plus `PORTAL_URL` and `MAGIC_LINK_SECRET` |
+| `apps/judge` | Judge Mode page, Preact | On `main`. API routes need `JUDGE_LEASE_SECRET`, `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` |
+| `apps/demo-store` | Pantry Plan store and the PayPal JS SDK button | On `main`. Backend needs `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID`. No client id means `FAKE PAYPAL` |
 | `packages/contracts` | Every zod schema and shared type | On `main` |
 | `packages/policy` | Pure policy engine: `computeMenu`, `evaluate`, `explain` | On `main` |
 | `packages/widget` | Preact widget in Shadow DOM | On `main` |
 | `packages/paypal-mock` | Fake PayPal server for tests and offline work | On `main` |
 | `packages/db` | Drizzle schema and migrations | On `main` |
-| `packages/evals` | Red-team and quality eval harness | On `main` (harness, runner, public scoreboard) |
-| `packages/ui` | Shared design tokens | Placeholder |
+| `packages/evals` | Red-team and quality eval harness | On `main` (personas, harness, runner, committed adversarial results). Scoreboard routes are not registered in `platform.ts` |
+| `packages/ui` | Light and dark design tokens, used by the dashboard | On `main` |
 | `tools/seed`, `tools/pool-refill` | Demo merchant seed (`pnpm seed`), judge subscription pool refill | Seed and `pnpm pool:refill` on `main` |
 | `docs/` | Architecture, contracts, team plan, spikes, ADRs, submission drafts | See below |
 
@@ -169,25 +172,24 @@ pnpm typecheck && pnpm lint && pnpm test     # every package, via Turborepo
 pnpm check                                   # the above plus the Prettier check; what CI runs
 ```
 
-Unit tests never call real PayPal or the Anthropic API: they use `packages/paypal-mock` and a fake LLM. The policy engine has unit tests and property-based tests (fast-check), with 100% branch coverage as the target. CI also runs a secret scan and a database test job on Postgres 18.
+Unit tests never call real PayPal or the Anthropic API: they use `packages/paypal-mock` and a fake LLM. The policy engine has unit tests and property-based tests (fast-check). CI also runs a secret scan and a database test job on Postgres 18.
 
-`TODO(results)`: latest `pnpm check` result and policy coverage figure on the submitted commit. `TODO(results)`: sandbox end-to-end run (subscribe, pause, resume, cancel).
+The policy package's Vitest config sets a 100% branch, function, line and statement threshold (`packages/policy/vitest.config.ts`). No coverage report is committed, so this README does not quote a percentage. `TODO(results)`: latest `pnpm check` result and the coverage figure on the submitted commit. `TODO(results)`: sandbox end-to-end run (subscribe, pause, resume, cancel).
 
 ## Evals
 
-Every agent change is tested against 404 personas: 300 everyday subscribers in English, Hindi and Spanish, and 104 attackers. The hard gates are **0 policy violations** and **1 click to cancel when the persona wants to leave**. These are gates the harness enforces, not a claimed result: the numbers are whatever the latest run on the submitted commit shows, on the API's public `/evals` page (JSON at `/v1/evals`). How it works: [packages/evals](packages/evals/README.md). `TODO(results)`: scoreboard link and the numbers from a run on the submitted commit.
+The harness in [packages/evals](packages/evals/README.md) has 404 personas: 300 everyday subscribers in English, Hindi and Spanish, and 104 attackers. The hard gates are **0 policy violations** and **1 click to cancel when the persona wants to leave**. Those are gates the harness enforces. The committed adversarial run uses a scripted jailbroken model, not Claude. It passed both gates: `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204, `deniedPicks` 132, over 404 sessions (`packages/evals/results/adversarial.json`). [docs/CHAOS-REPORT.md](docs/CHAOS-REPORT.md) records those same adversarial figures for the prompt-injection drill, and says the paid Haiku run is still to do. `darkPatternScore` in that file is null. The handlers `GET /evals` and `GET /v1/evals` live in `apps/api/src/modules/agent/evals/routes.ts`. `startPlatform` does not register them, so the running API does not serve a scoreboard. `TODO(results)`: a real-model run on the submitted commit, and a scoreboard URL once those routes are mounted.
 
 ## Chaos testing
 
-Chaos day is planned for 9 Nov: each owner breaks their component on staging (kill the API mid-action, drop webhooks, return 500 from the mock PayPal, revoke the Anthropic key) and checks the behaviour against the failure-mode matrix.
-
-`TODO(results)`: link to the chaos report once it exists.
+Chaos day is 9 Nov. The report is [docs/CHAOS-REPORT.md](docs/CHAOS-REPORT.md). It records the agent drills (revoked Anthropic key, spent daily budget, prompt injection against a scripted jailbroken model). The API-kill, dropped-webhook, PayPal 5xx, widget, dashboard and email-provider rows in that file are Open. `TODO(results)`: those open sections. Quote only what the report records.
 
 ## What is simulated
 
-- **Time machine.** Pausing waits a number of billing cycles, which a judge cannot sit through. Judge Mode will let you trigger the scheduled resume now. That is a real PayPal `activate` call, labelled as a time shift. `TODO(shipping by 8 Nov)`.
-- **Failed payment.** A real renewal failure can be forced on the PayPal sandbox: spike [Q5](docs/spikes/Q5.md) did it once (a daily plan, a buyer with no working funding source; PayPal counted 3 failed payments and suspended the subscription itself). Forcing one takes days of real billing cycles, so Judge Mode injects a failed-payment event through the simulator path instead, and it is badged `SIMULATED` in the UI and the audit log. `TODO(results)`: confirm Judge Mode's wording once it is wired.
-- **Demo Inbox.** Sandbox buyers have no real inbox, so on the hosted demo outgoing emails are not sent: they show in the Demo Inbox (API on `main`, dashboard view `TODO(shipping by 8 Nov)`) so judges can read them.
+- **Time machine.** Pausing waits a number of billing cycles, which a judge cannot sit through. Judge Mode's "Resume now" calls `POST /v1/demo/time-machine/resume/:subscriptionId`. That makes the scheduled resume due now and creates a real PayPal `activate` Action. The response and the audit entry are `simulated: true`, labelled `TIME SHIFT` (`apps/api/src/modules/demo/judge.ts`, and the badge on `apps/judge`). The route exists when Judge Mode's three env vars are set.
+- **Failed payment.** A real renewal failure can be forced on the PayPal sandbox. Spike [Q5](docs/spikes/Q5.md) did it once: a daily plan, a buyer with no working funding source, 3 failed payments, $3.00 outstanding, and PayPal suspended the subscription itself. Failures are read from `billing_info`, not from the transactions list. Forcing one takes days of billing cycles. The Judge Mode page does not inject a failed payment. `sendDunningNow` in the recovery module can flag a message `simulated`, and it is not mounted as an HTTP route. Restoring funding and then capturing the outstanding balance was not run on the sandbox. `TODO(results)`.
+- **Price change inside 10 days.** Keepwell does not pretend one succeeded. Spike [Q4](docs/spikes/Q4.md) sent a price PATCH inside the 10-day window. PayPal returned 204, the stored price stayed $1.00, and the 8 Nov renewal charged $1.00. The policy leaves the discount off the menu in that window. The case of a PATCH more than 10 days before billing was not run, so that half rests on PayPal's documentation.
+- **Demo Inbox.** Sandbox buyers have no real inbox. `GET /v1/m/outbox` (mounted with merchant sign-in) and the dashboard Insights tab "Demo Inbox" show the outbox, with a `SIMULATED` badge on simulated rows. A simulated row never calls the email provider (`apps/api/src/modules/notify/dispatcher.ts`). Resend is used only when `RESEND_API_KEY` is set and the row is not simulated. `render.yaml` leaves that key blank on staging so sandbox addresses are not mailed. Delivery to a real inbox is `TODO(results)`. The demo merchant's portal sign-in mail is flagged simulated (`merchantId === DEMO_MERCHANT_ID`).
 - **Mock PayPal.** Local development and unit tests use `packages/paypal-mock`, not PayPal. The hosted demo uses the real PayPal sandbox.
 - **Data.** All data is sandbox or fictional (Pantry Plan, Maya, Raj).
 
@@ -226,7 +228,12 @@ If `corepack enable` fails with EPERM on Windows, run `corepack enable pnpm --in
 | `pnpm dev:paypal-mock` | Fake PayPal on http://localhost:4010 |
 | `pnpm dev:fake-sessions` | Sessions API on fakes, for building the widget |
 | `pnpm dev:widget` | Widget dev server |
+| `pnpm dev:store` | Pantry Plan on http://localhost:5176 |
+| `pnpm dev:portal` | Hosted portal on http://localhost:5178 |
+| `pnpm dev:judge` | Judge Mode on http://localhost:5180 |
+| `pnpm --filter @keepwell/dashboard dev` | Merchant dashboard (Vite, http://localhost:5173) |
 | `pnpm seed` | Set up the Pantry Plan demo merchant |
+| `pnpm pool:refill` | Create sandbox subscriptions for the judge pool. A person approves each one. See [docs/spikes/Q10.md](docs/spikes/Q10.md) |
 | `pnpm db:generate` / `pnpm db:migrate` | Drizzle migrations |
 | `pnpm typecheck` / `pnpm lint` / `pnpm test` | Every package, through Turborepo (cached) |
 | `pnpm check` | All of the above plus the Prettier check |
