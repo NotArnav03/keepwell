@@ -23,13 +23,25 @@ Never commit `.env`, share credentials in chat, or use live PayPal credentials.
 
 ## Integration status
 
-The shell and screens use the shared merchant contracts and typed API client. Merchant session
-authentication, owner provisioning, subscriber list/detail, audit list/verify, timeline fallback,
-credential/webhook/backfill routes, and persistent policy list/publish/dry-run routes are mounted.
-Domain events are streamed over SSE using PostgreSQL LISTEN/NOTIFY. The overview KPI SQL remains
-owned by M5; the dashboard shows an explicit API error until that endpoint is connected rather than
-fabricated values. The timeline remains an accessible event-list fallback until the Bryntum licence
-is confirmed.
+The shell and screens use the shared merchant contracts and typed API client. Everything the
+dashboard calls is served: merchant sign-in and owner provisioning, `GET /v1/m/overview` (the
+figures on the Overview), subscribers list and detail, audit list and verify, the timeline, the
+live feed (SSE over PostgreSQL LISTEN/NOTIFY), policy list, publish and dry-run, API keys
+(`/v1/m/api-keys`, which unlock the merchant MCP server), and the onboarding routes (credentials,
+webhook, backfill; these mount only in sandbox mode with `PAYPAL_CREDENTIALS_ENCRYPTION_KEY`, so
+they have not been run here against a real sandbox app).
+
+## The look
+
+A ledger, in PayPal's colours: warm paper, ink, a navy cloth menu with gold-foil lettering, ruled
+tables, stamped status words and a sealed record. Each page has its own layout: Overview is a day
+book, Subscribers a register with a folio beside it, Policies a rulebook of sentences with a live
+try-out, Audit the hash chain drawn with a seal that Verify re-checks, Timeline a swimlane (one lane
+per subscriber, shape and colour per kind, a list view for accessibility), Onboarding three numbered
+entries. Colours, spacing and fonts come from `packages/ui` (`--kw-*`); its tests check text
+contrast, and the chart colours were validated on both papers with the data-viz palette validator.
+The timeline is our own SVG, not Bryntum Scheduler: no Bryntum dependency is added until the licence
+is confirmed in writing (see `docs/spikes/Q8.md`).
 
 ## Insights
 
