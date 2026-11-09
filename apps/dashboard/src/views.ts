@@ -75,13 +75,29 @@ export function renderSubscriberDetail(detail: MerchantSubscriptionDetailRespons
 }
 
 const auditExplanations: Record<string, string> = {
-  "offer.presented": "A policy-approved retention offer was shown to the subscriber.",
-  "session.offer_accepted": "The subscriber explicitly accepted the displayed offer.",
-  "session.offer_declined": "The subscriber declined the displayed offer.",
-  "session.closed": "The retention session ended.",
+  "session.started": "A subscriber opened the cancel conversation.",
+  "session.closed": "The conversation ended.",
+  "session.cancel_requested":
+    "The subscriber asked to cancel. This is always allowed, with one click and no questions.",
+  "offer.presented":
+    "A retention offer your policy allows was shown to the subscriber, exactly as it is recorded here.",
+  "offer.accepted": "The subscriber accepted the offer they were shown.",
+  "offer.declined": "The subscriber declined the offer they were shown.",
+  "action.created": "A change to the PayPal subscription was queued.",
   "action.state_changed": "A PayPal action changed state; check its linked action and PayPal subscription.",
-  "action.confirmed": "PayPal state confirmed that the requested action took effect.",
-  "policy.published": "A merchant policy version was published.",
+  "action.confirmed": "PayPal confirmed that the change took effect.",
+  "notification.enqueued": "An email was queued.",
+  "notification.sent": "An email was sent.",
+  "notification.suppressed":
+    "An email was held back (the subscriber unsubscribed, or it would break the frequency cap).",
+  "portal.link_sent": "A sign-in link was emailed to the subscriber for the portal.",
+  "portal.signed_in": "The subscriber signed in to the portal with their link.",
+  "policy.published": "A new version of your policy was published. Earlier versions are never changed.",
+  "api_key.created": "An API key for the merchant MCP server was created.",
+  "api_key.revoked": "An API key was revoked and stopped working immediately.",
+  "insight_action.proposed": "An action was proposed. It waits in your queue until you approve or reject it.",
+  "insight.fallback_used":
+    "The AI model wasn't available, so the conversation continued with fixed reason chips. Cancelling was unaffected.",
 };
 
 export function explainAuditEntry(entry: AuditEntry): string {
