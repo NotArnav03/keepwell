@@ -485,3 +485,24 @@ code {
 textarea.ins-composer {
   min-height: calc(var(--kw-space-xl) * 3);
 }
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.scope-option {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-start;
+  margin: 0.45rem 0;
+}
+
+.scope-option input {
+  width: auto;
+  margin-top: 0.25rem;
+}
