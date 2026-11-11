@@ -112,3 +112,99 @@ describe("MerchantApi", () => {
     await expect(api.me()).rejects.toThrow();
   });
 });
+
+describe("MerchantApi.subscribeToFeed", () => {
+  // Enough of EventSource to drive the client: tests open, deliver and refuse streams by hand.
+  class FakeEventSource {
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSED = 2;
+    static opened: FakeEventSource[] = [];
+    readyState = FakeEventSource.CONNECTING;
+    onopen: (() => void) | null = null;
+    onmessage: ((message: { data: unknown; lastEventId: string }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    closed = false;
+    constructor(
+      readonly url: URL,
+      readonly init?: EventSourceInit,
+    ) {
+      FakeEventSource.opened.push(this);
+    }
+    close() {
+      this.closed = true;
+      this.readyState = FakeEventSource.CLOSED;
+    }
+  }
+
+  const ticketResponse = (n: number) =>
+    new Response(
+      JSON.stringify({
+        streamUrl: `https://api.keepwell.example/v1/m/feed?ticket=t${n}`,
+        expiresAt: "2026-11-12T01:00:00.000Z",
+      }),
+    );
+  const event = {
+    id: "0199a1b2-c3d4-7e5f-8a6b-000000000e01",
+    type: "subscription.status_changed",
+    merchantId: "0199a1b2-c3d4-7e5f-8a6b-7c8d9e0f1a2b",
+    occurredAt: "2026-11-12T00:00:00.000Z",
+    simulated: false,
+    payload: {},
+  };
+
+  it("opens the stream on the API's own host with a ticket, not through the rewrite or with the cookie", async () => {
+    FakeEventSource.opened = [];
+    vi.stubGlobal("EventSource", FakeEventSource);
+    const fetcher = vi.fn<typeof fetch>().mockResolvedValue(ticketResponse(1));
+    const api = new MerchantApi("https://dashboard.keepwell.example/v1", fetcher);
+    const stop = api.subscribeToFeed(() => {});
+    await vi.waitFor(() => expect(FakeEventSource.opened).toHaveLength(1));
+    const [url, init] = fetcher.mock.calls[0] ?? [];
+    expect(url instanceof URL ? url.href : url).toBe("https://dashboard.keepwell.example/v1/m/feed/ticket");
+    expect(init?.method).toBe("POST");
+    const source = FakeEventSource.opened[0];
+    expect(source?.url.href).toBe("https://api.keepwell.example/v1/m/feed?ticket=t1");
+    expect(source?.init?.withCredentials).toBeFalsy();
+    stop();
+    expect(source?.closed).toBe(true);
+  });
+
+  it("asks for a new ticket once the stream is refused, and resumes after the last event", async () => {
+    vi.useFakeTimers();
+    try {
+      FakeEventSource.opened = [];
+      vi.stubGlobal("EventSource", FakeEventSource);
+      const fetcher = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(ticketResponse(1))
+        .mockResolvedValueOnce(ticketResponse(2));
+      const api = new MerchantApi("https://dashboard.keepwell.example/v1", fetcher);
+      const seen: unknown[] = [];
+      const stop = api.subscribeToFeed((e) => seen.push(e));
+      await vi.waitFor(() => expect(FakeEventSource.opened).toHaveLength(1));
+      const first = FakeEventSource.opened[0];
+      first?.onmessage?.({ data: JSON.stringify(event), lastEventId: event.id });
+      expect(seen).toHaveLength(1);
+
+      // A network blip: EventSource is reconnecting by itself, so no new ticket.
+      if (first) first.readyState = FakeEventSource.CONNECTING;
+      first?.onerror?.();
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetcher).toHaveBeenCalledTimes(1);
+
+      // Refused (an expired ticket): EventSource gives up, so the client asks again and resumes.
+      if (first) first.readyState = FakeEventSource.CLOSED;
+      first?.onerror?.();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await vi.waitFor(() => expect(FakeEventSource.opened).toHaveLength(2));
+      expect(fetcher).toHaveBeenCalledTimes(2);
+      expect(FakeEventSource.opened[1]?.url.href).toBe(
+        `https://api.keepwell.example/v1/m/feed?ticket=t2&after=${event.id}`,
+      );
+      stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});

@@ -98,6 +98,17 @@ export type MerchantAuditVerifyResponse = z.infer<typeof MerchantAuditVerifyResp
 export const MerchantFeedEvent = DomainEventEnvelope;
 export type MerchantFeedEvent = z.infer<typeof MerchantFeedEvent>;
 
+/**
+ * POST /v1/m/feed/ticket: where to open the live feed. An absolute URL on the API's own host with a
+ * read-only ticket, because a proxy in front of the dashboard (Render's static-site rewrite) can
+ * buffer a stream. Use it as is, never log it, and ask again once the stream is refused.
+ */
+export const MerchantFeedTicketResponse = z.strictObject({
+  streamUrl: z.url({ protocol: /^https?$/ }),
+  expiresAt: IsoDateTime,
+});
+export type MerchantFeedTicketResponse = z.infer<typeof MerchantFeedTicketResponse>;
+
 export const MerchantTimelineQuery = z
   .strictObject({
     from: IsoDateTime,

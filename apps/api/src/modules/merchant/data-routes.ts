@@ -1,5 +1,6 @@
 import { and, asc, eq, gt, gte, inArray, lte, sql } from "drizzle-orm";
 import type { FastifyPluginCallback, FastifyReply, FastifyRequest } from "fastify";
+import { z } from "zod";
 import {
   Action,
   DomainEventEnvelope,
@@ -7,6 +8,7 @@ import {
   Id,
   MerchantAuditQuery,
   MerchantAuditResponse,
+  MerchantFeedTicketResponse,
   MerchantSubscriptionDetailResponse,
   MerchantSubscriptionListQuery,
   MerchantSubscriptionListResponse,
@@ -30,6 +32,10 @@ import { MerchantAuthError, type MerchantAuthenticator } from "./auth.js";
 import { listAtRisk } from "../insights/risk/query.js";
 
 const PAGE_SIZE = 50;
+const FeedQuery = z.object({
+  ticket: z.string().min(1).max(2048).optional(),
+  after: z.string().max(64).optional(),
+});
 const FIRST_EVENT_ID = "00000000-0000-0000-0000-000000000000";
 const ClientError = new Map<number, string>([
   [400, "invalid_request"],
@@ -40,6 +46,8 @@ const ClientError = new Map<number, string>([
 
 export interface MerchantDataRoutesOptions {
   db: Db;
+  /** This API's public origin (API_PUBLIC_URL): feed stream URLs point here, not at the dashboard. */
+  apiPublicUrl: string;
   /** One shared LISTEN connection (feed-hub.ts); streams only register a callback with it. */
   feed: FeedHub;
   audit: Pick<DbAudit, "list">;
@@ -223,15 +231,45 @@ export const merchantDataRoutes: FastifyPluginCallback<MerchantDataRoutesOptions
     return reply.send(MerchantTimelineResponse.parse({ resources: [...resources.values()], events }));
   });
 
+  // Where the dashboard opens the feed: on this API's own host, because the static site's /v1/*
+  // rewrite buffers a stream until it ends. A POST, so the cookie and CSRF token are both checked.
+  app.post("/feed/ticket", async (request, reply) => {
+    const principal = await options.authenticator.authenticate(request, true);
+    const { ticket, expiresAt } = options.authenticator.feedTicket(principal);
+    const streamUrl = new URL("/v1/m/feed", options.apiPublicUrl);
+    streamUrl.searchParams.set("ticket", ticket);
+    return reply.header("cache-control", "no-store").send(
+      MerchantFeedTicketResponse.parse({
+        streamUrl: streamUrl.toString(),
+        expiresAt: expiresAt.toISOString(),
+      }),
+    );
+  });
+
   app.get("/feed", async (request, reply) => {
-    const principal = await options.authenticator.authenticate(request);
-    const lastEventHeader = request.headers["last-event-id"];
+    const query = FeedQuery.safeParse(request.query);
+    if (!query.success) return sendError(request, reply, 400, "Invalid feed query.");
+    // The ticket (from POST /feed/ticket) on the API's own host; the cookie through the rewrite.
+    const principal = query.data.ticket
+      ? await options.authenticator.authenticateFeedTicket(query.data.ticket)
+      : await options.authenticator.authenticate(request);
+    // EventSource sends Last-Event-ID when it reconnects by itself; a fresh ticket's new stream
+    // passes the same cursor as ?after=, so nothing in between is skipped.
+    const lastEventHeader = request.headers["last-event-id"] ?? query.data.after;
     const lastEventId = typeof lastEventHeader === "string" ? Id.safeParse(lastEventHeader) : null;
     if (lastEventHeader && !lastEventId?.success) {
       return sendError(request, reply, 400, "Invalid event cursor.");
     }
+    // Headers set by hooks so far (x-request-id, and the dashboard-origin CORS headers that let
+    // the dashboard open this stream on the API's own host): hijack() would otherwise drop them.
+    const hookHeaders = Object.fromEntries(
+      Object.entries(reply.getHeaders()).filter(
+        (entry): entry is [string, string | number | string[]] => entry[1] !== undefined,
+      ),
+    );
     reply.hijack();
     reply.raw.writeHead(200, {
+      ...hookHeaders,
       "content-type": "text/event-stream; charset=utf-8",
       "cache-control": "no-cache, no-transform",
       connection: "keep-alive",

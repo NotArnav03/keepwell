@@ -276,7 +276,14 @@ export async function startPlatform(env: Env): Promise<Platform> {
     // One LISTEN connection for every open dashboard, not one per tab (the pool is shared with the workers).
     feedHub = new PgFeedHub(pool, app.log);
     await feedHub.start();
-    await app.register(merchantDataRoutes, { prefix: "/v1/m", db, feed: feedHub, audit, authenticator });
+    await app.register(merchantDataRoutes, {
+      prefix: "/v1/m",
+      db,
+      apiPublicUrl: env.API_PUBLIC_URL ?? `http://localhost:${env.PORT}`,
+      feed: feedHub,
+      audit,
+      authenticator,
+    });
     await app.register(auditRoutes, {
       prefix: "/v1/m",
       audit,
