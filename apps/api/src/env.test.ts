@@ -16,6 +16,7 @@ describe("loadEnv", () => {
       TRUST_PROXY_HOPS: 0,
       RESEND_API_BASE: "https://api.resend.com",
       LLM_DAILY_BUDGET_USD: 0.25,
+      LLM_PROVIDER: "anthropic",
     });
   });
 
@@ -23,6 +24,12 @@ describe("loadEnv", () => {
     expect(loadEnv({ LLM_DAILY_BUDGET_USD: "0.02" })).toMatchObject({ LLM_DAILY_BUDGET_USD: 0.02 });
     expect(loadEnv({ LLM_DAILY_BUDGET_USD: "" })).toMatchObject({ LLM_DAILY_BUDGET_USD: 0.25 });
     expect(() => loadEnv({ LLM_DAILY_BUDGET_USD: "-1" })).toThrow();
+  });
+
+  it("picks the model provider, anthropic unless set, and rejects an unknown one", () => {
+    expect(loadEnv({ LLM_PROVIDER: "groq" })).toMatchObject({ LLM_PROVIDER: "groq" });
+    expect(loadEnv({ LLM_PROVIDER: "" })).toMatchObject({ LLM_PROVIDER: "anthropic" });
+    expect(() => loadEnv({ LLM_PROVIDER: "openai" })).toThrow();
   });
 
   describe("PayPal", () => {
