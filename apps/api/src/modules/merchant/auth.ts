@@ -163,6 +163,23 @@ interface SessionClaims {
   expiresAt: number;
 }
 
+/**
+ * A read-only ticket for the live feed's stream URL. Render's static-site rewrite buffers streaming
+ * responses, so the dashboard opens the feed on the API's own host, where the SameSite session
+ * cookie isn't sent; EventSource can't send headers either, so the URL carries this ticket, as
+ * session streams do. `kind` keeps it from ever parsing as a session cookie, and the reverse.
+ */
+const FeedTicketClaims = z.object({
+  kind: z.literal("feed"),
+  merchantId: z.uuid(),
+  userId: z.uuid(),
+  expiresAt: z.number().int().positive(),
+});
+type FeedTicketClaims = z.infer<typeof FeedTicketClaims>;
+
+/** How long a feed URL works. EventSource reconnects reuse it; the dashboard asks again once it fails. */
+export const FEED_TICKET_TTL_SECONDS = 60 * 60;
+
 const Claims = z.object({
   merchantId: z.uuid(),
   userId: z.uuid(),
@@ -170,13 +187,22 @@ const Claims = z.object({
   expiresAt: z.number().int().positive(),
 });
 
-function signClaims(claims: SessionClaims, secret: string): string {
+function signClaims(claims: SessionClaims | FeedTicketClaims, secret: string): string {
   const encoded = Buffer.from(JSON.stringify(claims)).toString("base64url");
   const signature = createHmac("sha256", secret).update(encoded).digest("base64url");
   return `${encoded}.${signature}`;
 }
 
 function readClaims(token: string | undefined, secret: string, nowSeconds: number): SessionClaims {
+  const parsed = Claims.safeParse(verifiedPayload(token, secret));
+  if (!parsed.success || parsed.data.expiresAt <= nowSeconds) {
+    throw new MerchantAuthError(401, "Sign in required.");
+  }
+  return parsed.data;
+}
+
+/** The payload of a token signClaims made, once its HMAC checks out (constant time). */
+function verifiedPayload(token: string | undefined, secret: string): unknown {
   if (!token) throw new MerchantAuthError(401, "Sign in required.");
   const [encoded, signature, extra] = token.split(".");
   if (!encoded || !signature || extra !== undefined) throw new MerchantAuthError(401, "Sign in required.");
@@ -190,17 +216,11 @@ function readClaims(token: string | undefined, secret: string, nowSeconds: numbe
   if (actual.length !== expected.length || !timingSafeEqual(actual, expected)) {
     throw new MerchantAuthError(401, "Sign in required.");
   }
-  let payload: unknown;
   try {
-    payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
+    return JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as unknown;
   } catch {
     throw new MerchantAuthError(401, "Sign in required.");
   }
-  const parsed = Claims.safeParse(payload);
-  if (!parsed.success || parsed.data.expiresAt <= nowSeconds) {
-    throw new MerchantAuthError(401, "Sign in required.");
-  }
-  return parsed.data;
 }
 
 function cookieFromRequest(request: FastifyRequest): string | undefined {
@@ -246,6 +266,32 @@ export class MerchantAuthenticator {
       if (!timingSafeEqual(expected, actual)) throw new MerchantAuthError(403, "CSRF check failed.");
     }
     return this.auth.current(claims);
+  }
+
+  /** A stream URL ticket for this signed-in user's merchant (see FeedTicketClaims). */
+  feedTicket(principal: Pick<MerchantPrincipal, "merchantId" | "userId">): {
+    ticket: string;
+    expiresAt: Date;
+  } {
+    const expiresAt = Math.floor(this.now() / 1000) + FEED_TICKET_TTL_SECONDS;
+    const claims: FeedTicketClaims = {
+      kind: "feed",
+      merchantId: principal.merchantId,
+      userId: principal.userId,
+      expiresAt,
+    };
+    return { ticket: signClaims(claims, this.secret), expiresAt: new Date(expiresAt * 1000) };
+  }
+
+  /** The user a feed ticket was issued to, while it is unexpired and the user still exists. */
+  async authenticateFeedTicket(ticket: string): Promise<MerchantPrincipal> {
+    const parsed = FeedTicketClaims.safeParse(verifiedPayload(ticket, this.secret));
+    if (!parsed.success || parsed.data.expiresAt <= Math.floor(this.now() / 1000)) {
+      throw new MerchantAuthError(401, "Sign in required.");
+    }
+    const { merchantId, userId, expiresAt } = parsed.data;
+    // Read-only: the stream takes no writes, so the CSRF token is never checked on this path.
+    return this.auth.current({ merchantId, userId, expiresAt, csrfToken: "" });
   }
 
   async login(

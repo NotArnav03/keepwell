@@ -336,7 +336,8 @@ never placed in a cookie accessible to JavaScript.
 |---|---|---|
 | `POST /m/auth/login`, `POST /m/auth/logout`, `GET /m/me` | – / MER | Session |
 | `GET /m/overview?from&to` | MER | KPIs (owner of the SQL: M5) |
-| `GET /m/feed` | MER | SSE live feed of domain events |
+| `POST /m/feed/ticket` | MER (+CSRF) | `MerchantFeedTicketResponse`: the feed's stream URL on the API's own host, with a read-only ticket for 1 h. The dashboard opens the feed there, because Render's static-site rewrite buffers streams |
+| `GET /m/feed` | MER, or `?ticket=` | SSE live feed of domain events. `?after=<event id>` (or `Last-Event-ID`) resumes after that event |
 | `GET /m/subscriptions?query&status&cursor` | MER | List |
 | `GET /m/subscriptions/:id` | MER | Snapshot + sessions + actions |
 | `GET /m/subscriptions/:id/timeline` | MER | Bryntum-ready `{ resources[], events[] }` |

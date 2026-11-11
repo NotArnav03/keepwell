@@ -5,6 +5,7 @@ import {
   MerchantAuditResponse,
   MerchantAuditVerifyResponse,
   MerchantFeedEvent,
+  MerchantFeedTicketResponse,
   MerchantLoginRequest,
   MerchantMeResponse,
   MerchantOverviewQuery,
@@ -203,22 +204,71 @@ export class MerchantApi {
     await this.request(`/m/api-keys/${encodeURIComponent(id)}`, { method: "DELETE" });
   }
 
+  /**
+   * The live feed. It opens on the API's own host with a read-only ticket, not through this site's
+   * /v1 rewrite: Render's static-site rewrite buffers a stream until it ends, so nothing would show.
+   * EventSource reconnects by itself after a network blip; once the stream is refused (the ticket
+   * expired, or the session ended) it stops, so this asks for a new ticket and resumes after the
+   * last event it saw.
+   */
   subscribeToFeed(onEvent: (event: MerchantFeedEventType) => void, onError?: () => void): () => void {
-    const url = new URL("m/feed", `${this.base.href.replace(/\/$/, "")}/`);
-    const source = new EventSource(url, { withCredentials: true });
-    source.onmessage = (message) => {
-      try {
-        const data: unknown = message.data;
-        if (typeof data !== "string") throw new TypeError("SSE data was not text");
-        const payload: unknown = JSON.parse(data);
-        onEvent(MerchantFeedEvent.parse(payload));
-      } catch {
-        // Keep the stream open for later frames, but let the view know a frame could not be read.
-        onError?.();
-      }
+    let stopped = false;
+    let source: EventSource | null = null;
+    let lastEventId: string | null = null;
+    let failures = 0;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
+    const retry = () => {
+      if (stopped) return;
+      failures++;
+      retryTimer = setTimeout(() => void open(), Math.min(30_000, 1000 * 2 ** Math.min(failures, 5)));
     };
-    source.onerror = () => onError?.();
-    return () => source.close();
+    const open = async () => {
+      let streamUrl: string;
+      try {
+        ({ streamUrl } = await this.request(
+          "/m/feed/ticket",
+          { method: "POST" },
+          MerchantFeedTicketResponse,
+        ));
+      } catch {
+        onError?.();
+        retry();
+        return;
+      }
+      if (stopped) return;
+      const url = new URL(streamUrl);
+      if (lastEventId) url.searchParams.set("after", lastEventId);
+      const current = new EventSource(url);
+      source = current;
+      current.onopen = () => {
+        failures = 0;
+      };
+      current.onmessage = (message) => {
+        if (message.lastEventId) lastEventId = message.lastEventId;
+        try {
+          const data: unknown = message.data;
+          if (typeof data !== "string") throw new TypeError("SSE data was not text");
+          const payload: unknown = JSON.parse(data);
+          onEvent(MerchantFeedEvent.parse(payload));
+        } catch {
+          // Keep the stream open for later frames, but let the view know a frame could not be read.
+          onError?.();
+        }
+      };
+      current.onerror = () => {
+        onError?.();
+        if (current.readyState === EventSource.CLOSED) {
+          current.close();
+          retry();
+        }
+      };
+    };
+    void open();
+    return () => {
+      stopped = true;
+      clearTimeout(retryTimer);
+      source?.close();
+    };
   }
 
   /**
