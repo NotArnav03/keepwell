@@ -149,7 +149,13 @@ export async function startPlatform(env: Env): Promise<Platform> {
     store: new PgLlmUsageStore(db),
     dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
   });
-  const llm = createLlmClient({ anthropicApiKey: env.ANTHROPIC_API_KEY, budget: llmBudget, log: app.log });
+  const llm = createLlmClient({
+    provider: env.LLM_PROVIDER,
+    anthropicApiKey: env.ANTHROPIC_API_KEY,
+    groqApiKey: env.GROQ_API_KEY,
+    budget: llmBudget,
+    log: app.log,
+  });
   const extractor = new InsightExtractor({
     llm,
     sessions: new DrizzleSessionReader(db),
@@ -174,6 +180,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
           dailyBudgetUsd: env.LLM_DAILY_BUDGET_USD,
           usageStore: new PgLlmUsageStore(db),
           budget: llmBudget,
+          llm,
           events,
           audit,
           log: app.log,
@@ -354,7 +361,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
         authenticate: (request) => authenticator.authenticate(request, request.method !== "GET"),
       });
     } else {
-      app.log.warn("The copilot is disabled: ANTHROPIC_API_KEY is not set");
+      app.log.warn("The copilot is disabled: no model API key is set for LLM_PROVIDER");
     }
     if (!env.PAYPAL_USE_MOCK && env.PAYPAL_CREDENTIALS_ENCRYPTION_KEY) {
       await app.register(merchantOnboardingRoutes, {

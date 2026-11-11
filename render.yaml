@@ -38,6 +38,11 @@ services:
       # Read by the agent once it's wired in; blank until then.
       - key: ANTHROPIC_API_KEY
         sync: false
+      # Groq's free plan while there is no working Anthropic key (ADR 0002). Set it to anthropic to switch back.
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
+        sync: false
       # The whole AI budget is a $5 prepaid credit that must last until judging ends (21 Dec).
       - key: LLM_DAILY_BUDGET_USD
         value: "0.10"
@@ -275,6 +280,11 @@ services:
       - key: PAYPAL_CLIENT_SECRET
         sync: false
       - key: ANTHROPIC_API_KEY
+        sync: false
+      # Groq's free plan while there is no working Anthropic key (ADR 0002). Set it to anthropic to switch back.
+      - key: LLM_PROVIDER
+        value: groq
+      - key: GROQ_API_KEY
         sync: false
       # Shares the $5 credit with staging. From 1 Dec, staging's cap drops so judging gets the rest.
       - key: LLM_DAILY_BUDGET_USD
