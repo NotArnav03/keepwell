@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { PayPalGatewayError } from "@keepwell/contracts";
+import { Id, PayPalGatewayError } from "@keepwell/contracts";
 import type { Db } from "@keepwell/db";
+import { PLATFORM_APP_ID } from "../paypal/credentials.js";
 import {
   DbCredentialSource,
   decryptPayPalSecret,
@@ -44,6 +45,21 @@ describe("DbCredentialSource", () => {
     const secretEnc = encryptPayPalSecret("s3cret", KEY, M1);
     const source = new DbCredentialSource(dbWith({ clientId: "id", secretEnc }), key);
     await expect(source.forMerchant(M1)).resolves.toEqual({ clientId: "id", clientSecret: "s3cret" });
+  });
+
+  it("serves the platform app for /status's key, which no merchant has", async () => {
+    // Like the real forMerchant, this parses the id first: the old "status" key threw here, so
+    // /status showed PayPal as down whenever merchant credentials were stored in the database.
+    const db = {
+      forMerchant: (merchantId: string) => {
+        Id.parse(merchantId);
+        return Promise.resolve([]);
+      },
+    } as unknown as Db;
+    const platformApp = { clientId: "platform-id", clientSecret: "platform-secret" };
+    const source = new DbCredentialSource(db, key, platformApp);
+    await expect(source.forMerchant(PLATFORM_APP_ID)).resolves.toEqual(platformApp);
+    await expect(source.forMerchant("status")).rejects.toThrow();
   });
 
   it("fails with a non-retryable error when the secret cannot be decrypted", async () => {

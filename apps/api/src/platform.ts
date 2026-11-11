@@ -69,7 +69,7 @@ import { insightsRoutes } from "./modules/insights/routes.js";
 import { createNotify, notifyConfigFromEnv, notifyRoutes, wireNotify } from "./modules/notify/index.js";
 import { mountRecovery } from "./modules/recovery/mount.js";
 import { PayPalClient } from "./modules/paypal/client.js";
-import { MOCK_CREDENTIALS, singleAppCredentials } from "./modules/paypal/credentials.js";
+import { MOCK_CREDENTIALS, PLATFORM_APP_ID, singleAppCredentials } from "./modules/paypal/credentials.js";
 import { DbJudgePool } from "./modules/pool/pool.js";
 import { opsRoutes } from "./modules/reconcile/ops.js";
 import { Reconciler } from "./modules/reconcile/reconciler.js";
@@ -490,7 +490,7 @@ export async function startPlatform(env: Env): Promise<Platform> {
   }
   await app.register(opsRoutes, {
     db,
-    paypalCheck: () => paypal.checkAuth("status"),
+    paypalCheck: () => paypal.checkAuth(PLATFORM_APP_ID),
     ...(env.OPS_TOKEN && { opsToken: env.OPS_TOKEN }),
   });
   app.addHook("onClose", async () => {
