@@ -11,7 +11,7 @@ import {
 } from "@keepwell/evals";
 import type { InMemoryLlmUsageStore } from "../budget.js";
 import { checkClaims } from "../claims.js";
-import { LlmError, MODEL_FOR, type AgentLogger, type LlmClient } from "../llm.js";
+import { LlmError, MODEL_FOR, type AgentLogger, type LlmClient, type LlmPurpose } from "../llm.js";
 import { PROMPT_VERSION } from "../prompts.js";
 import { AgentRuntime } from "../runtime.js";
 import { AdversaryLlm } from "./adversary.js";
@@ -28,7 +28,7 @@ export interface RunEvalsOptions {
   /** The clock the sessions see. Fixed in tests, so menus and results are reproducible. */
   now: Date;
   /** Real mode only: the budget-guarded client and the usage it records. */
-  real?: { llm: LlmClient; usage: InMemoryLlmUsageStore };
+  real?: { llm: LlmClient; usage: InMemoryLlmUsageStore; models?: Record<LlmPurpose, string> };
   log?: AgentLogger;
   /** Called after each session, for progress output. */
   onSession?: (done: number, total: number, record: SessionRecord) => void;
@@ -90,7 +90,7 @@ export async function runEvals(options: RunEvalsOptions): Promise<EvalResults> {
     promptVersion: PROMPT_VERSION,
     models:
       mode === "real"
-        ? { ...MODEL_FOR }
+        ? { ...(options.real?.models ?? MODEL_FOR) }
         : { classify: "adversary (honest)", converse: "adversary (jailbroken)" },
     textCheck: (text, offer) => checkClaims(text, offer).map((v) => `${v.kind}: ${v.match}`),
     runs,
