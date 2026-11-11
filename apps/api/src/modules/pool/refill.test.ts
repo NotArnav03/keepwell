@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { PayPalGatewayError, type PayPalSubscription } from "@keepwell/contracts";
-import { checkApproval } from "./refill.js";
+import { checkApproval, parseRefillArgs } from "./refill.js";
 
 // What `pnpm pool:refill` does with each subscription still waiting for a judge-pool approver.
 
@@ -52,5 +52,25 @@ describe("checkApproval", () => {
     await expect(checkApproval(gateway(error("unauthorized", 401)), M, "I-A")).rejects.toBeInstanceOf(
       PayPalGatewayError,
     );
+  });
+});
+
+describe("parseRefillArgs", () => {
+  it("reads a count given on its own (it used to be read as 0)", () => {
+    expect(parseRefillArgs(["10"])).toEqual({ count: 10, wait: 60 });
+  });
+
+  it("reads the count before or after --wait", () => {
+    expect(parseRefillArgs(["10", "--wait", "5"])).toEqual({ count: 10, wait: 5 });
+    expect(parseRefillArgs(["--wait", "5", "10"])).toEqual({ count: 10, wait: 5 });
+  });
+
+  it("never takes the --wait value as the count", () => {
+    expect(parseRefillArgs(["--wait", "5"])).toEqual({ count: 0, wait: 5 });
+  });
+
+  it("defaults to enrolling only, and caps a run at 50", () => {
+    expect(parseRefillArgs([])).toEqual({ count: 0, wait: 60 });
+    expect(() => parseRefillArgs(["51"])).toThrow();
   });
 });
