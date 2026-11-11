@@ -14,8 +14,8 @@ Deadline: submit by **12 Nov 2026, 20:00 IST** (real deadline 13 Nov 01:30 IST).
 | 4 | README: what it is, problem | Om | done | README "What Keepwell does" matches `apps/api/src/platform.ts` as of 9 Nov. Hosted proof is a different row |
 | 5 | README: architecture diagram | Om | done | Mermaid diagram in README (adapted from ARCHITECTURE.md section 3). The "Today on main" paragraph under it was refreshed 9 Nov |
 | 6 | README: how to run locally, mock and sandbox | Om | in progress | Commands match root `package.json` (`dev:api`, `dev:paypal-mock`, `dev:fake-sessions`, `dev:widget`, `dev:store`, `dev:portal`, `dev:judge`, `seed`, `pool:refill`) and `pnpm --filter @keepwell/dashboard dev`. A second person has not followed them on a clean clone |
-| 7 | README: hosted demo URL | Arnav | TODO | `TODO(url)`. `render.yaml` names `keepwell-*-demo`. This repo does not show those hosts answer |
-| 8 | README: Judge Mode link | Aditya | TODO | Page and API are on `main` (`apps/judge`, `POST /v1/demo/leases` when `JUDGE_LEASE_SECRET`, `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` are set). The hosted link is still `TODO(url)` |
+| 7 | README: hosted demo URL | Arnav | Done | prod-demo URLs in README "See it in 2 minutes", checked 11 to 12 Nov on `430c646` |
+| 8 | README: Judge Mode link | Aditya | Done | https://keepwell-judge-demo.onrender.com, pool of 10 on 11 Nov |
 | 9 | README: eval results | Ishan | in progress | Harness and `packages/evals/results/adversarial.json` are on `main` (scripted model). README cites that file. No real-model run is committed. `platform.ts` does not register `GET /evals` |
 | 10 | README: chaos report | Arnav | in progress | [CHAOS-REPORT.md](../CHAOS-REPORT.md) exists (9 Nov). Agent and notification (M5) drills are written. API, widget and dashboard rows are Open |
 | 11 | README: honest note on anything simulated | Om | done | "What is simulated" matches Q4, Q5, the Judge Mode time machine (`POST /v1/demo/time-machine/resume/:subscriptionId`), and the Demo Inbox rule that simulated mail is not sent |

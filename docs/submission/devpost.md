@@ -1,6 +1,6 @@
 # Devpost write-up (draft)
 
-Owner: Om (M5). Drafted 1 Nov 2026. Status refreshed 9 Nov 2026 against `main`, the day after the feature freeze. Sections follow the Devpost form order. Each section ends with **Still TODO**, listing facts that must be confirmed before this text is pasted into the form. A `TODO(shipping by 8 Nov)` that missed the freeze is rewritten as what the repo actually contains. Do not paste test credentials into this file.
+Owner: Om (M5). Drafted 1 Nov 2026. Status refreshed 9 Nov 2026 against `main`, the day after the feature freeze, and again on 12 Nov after prod-demo was brought up (commit `430c646`). Sections follow the Devpost form order. Each section ends with **Still TODO**, listing facts that must be confirmed before this text is pasted into the form. A `TODO(shipping by 8 Nov)` that missed the freeze is rewritten as what the repo actually contains. Do not paste test credentials into this file.
 
 ---
 
@@ -32,19 +32,19 @@ Every action is idempotent, reconciled against PayPal, and written to a hash-cha
 
 **State on `main` (9 Nov):** the three moments above are in the repo and wired from `apps/api/src/platform.ts`, with the conditions in the README. Sessions mount when `SESSION_TICKET_SECRET` is set. Win-back records every PayPal-side cancellation, and queues its one template message only when the notifier, `PORTAL_URL` and `MAGIC_LINK_SECRET` are set (`POST /v1/winback/replies` in that case). Insights extraction runs on `session.closed`. Win-back reply text is not extracted (`noReplies` in `platform.ts`). With `SESSION_SECRET` and `DASHBOARD_URL`, the API serves `GET /v1/m/insights`, `GET /v1/m/overview`, insight-action approve/reject, and (with `ANTHROPIC_API_KEY`) `POST /v1/m/copilot/messages`. The dashboard is `apps/dashboard`, Insights page included. Subscriber MCP is `POST /mcp/subscriber` (mounted with sessions; a portal delegation token is required). Merchant MCP is `POST /mcp/merchant` (mounted with merchant sign-in). Pantry Plan is `apps/demo-store`, and `POST /v1/demo-store/subscriptions` mounts when `WIDGET_TOKEN_SECRET` and `DEMO_MERCHANT_ID` are set. The eval scoreboard handlers are not registered on the running server.
 
-**Still TODO:** a sandbox browser run of each moment (subscribe, pause, resume, cancel, and a win-back message after a real cancel inside PayPal). Spike [Q5](../spikes/Q5.md) forced a real renewal failure. The recovery message and the later capture were not run. Do not describe a moment as proven end to end until that run exists. Hosted URLs stay `TODO(url)`.
+**Still TODO:** a sandbox browser run of each moment (subscribe, pause, resume, cancel, and a win-back message after a real cancel inside PayPal). Spike [Q5](../spikes/Q5.md) forced a real renewal failure. The recovery message and the later capture were not run. Do not describe a moment as proven end to end until that run exists. Checked on prod-demo, 11 to 12 Nov: a pause in Judge Mode in a browser (the `suspend` CONFIRMED against PayPal 14 s after it was applied), the agent offering a pause from the policy's menu on Groq, and the dashboard's sign-in, overview, audit log and live feed. Still unchecked there: a subscribe through the store, a portal sign-in, the copilot, and a cheaper-plan revise.
 
 ## How we built it
 
 - **Monorepo:** pnpm and Turborepo, TypeScript (strict), CI on Linux and Windows with a secret scan.
 - **API:** Fastify with zod at every boundary, Drizzle ORM on Postgres (Neon, free tier) with row-level security for tenant isolation, pg-boss for jobs on the same Postgres (no Redis), pino logging.
 - **PayPal layer:** a gateway that is the only code allowed to call PayPal (OAuth cache, retries, debug ids, rate limiting); an action engine with a state machine and a per-subscription lock; a verified webhook pipeline; a reconciler; and a fake PayPal server (`packages/paypal-mock`) so tests and offline work need no credentials.
-- **Brain:** a pure policy engine (`packages/policy`) with property-based tests; an agent runtime using Claude Haiku 5.5 to converse, classify and tag, with structured outputs validated by zod; a deterministic claims checker.
+- **Brain:** a pure policy engine (`packages/policy`) with property-based tests; an agent runtime that converses, classifies and tags through one `LlmClient` interface (Claude Haiku 5.5, or Groq's `openai/gpt-oss-20b`), with structured outputs validated by zod; a deterministic claims checker.
 - **Surfaces:** a Preact widget in Shadow DOM, with server-sent events for streaming. The dashboard is React and Vite (`apps/dashboard`). It has no Tailwind build and no Bryntum package. The subscriber timeline is an HTML event list (`apps/dashboard/src/views.ts`). The portal and Judge Mode are Preact. MCP servers use `@modelcontextprotocol/sdk` at `POST /mcp/subscriber` and `POST /mcp/merchant`.
 - **Hosting:** `render.yaml` defines Render free-tier services (they sleep after 15 idle minutes) and names Neon as the database. Resend is the email provider when `RESEND_API_KEY` is set (`apps/api/src/modules/notify/providers.ts`). With no key, sends go to a console provider. Simulated rows never call a provider. Sentry initialises only when `SENTRY_DSN` is set (`apps/api/src/index.ts`).
 - **Process:** five people, each with a vertical workstream, meeting only through typed contracts; every teammate works with Claude Code under shared repo rules.
 
-**Still TODO:** open `prod-demo` and confirm it matches this blueprint. `render.yaml` is the plan. This repo does not show that those hostnames answer. `TODO(url)`.
+**prod-demo:** the five `keepwell-*-demo` services in `render.yaml` answer (checked 11 to 12 Nov). The API was deployed by hand from `v1.0.0`. The agent runs on Groq's free plan (see How AI is used).
 
 ## How PayPal is central
 
@@ -64,17 +64,17 @@ Everything runs on the PayPal sandbox.
 
 ## How AI is used
 
-Claude Haiku 5.5 runs the short conversation, classifies the cancel reason, tags insights and checks text. Claude Sonnet 5.5 powers the merchant copilot. Recovery and win-back emails are fixed templates, not model text. The design constrains the model rather than trusting it:
+A small, fast model runs the short conversation, classifies the cancel reason and tags insights; a larger one powers the merchant copilot. With Anthropic those are Claude Haiku 5.5 and Claude Sonnet 5.5. The hosted demo runs on **Groq's free plan** (`openai/gpt-oss-20b` and `openai/gpt-oss-120b`), because the team had no working Anthropic key on submission day. Both sit behind one `LlmClient` interface, so the rules below hold whichever model answers ([ADR 0002](../adr/0002-groq-as-a-second-model-provider.md)). Recovery and win-back emails are fixed templates, not model text. The design constrains the model rather than trusting it:
 
 - **Cancel never touches the LLM.** No model call, no agent step.
 - **The AI picks from a menu; the policy decides.** The policy engine computes what may be offered, the model chooses at most one, and the policy re-checks the pick, and checks again when the subscriber accepts.
 - **Terms come from data.** Offer cards are rendered from the offer object. A deterministic claims checker rejects model text that contains figures, dates, durations, promises or pressure language.
 - **Consent is a button.** It is never parsed from text.
-- **Hard limits.** Three subscriber messages, one clarifying question, one offer, an 8-second model deadline, and a daily budget guard. When any limit is hit, or Claude is unavailable, the session falls back to reason chips and template text, and cancel still works.
+- **Hard limits.** Three subscriber messages, one clarifying question, one offer, an 8-second model deadline, and a daily budget guard. When any limit is hit, or the model is unavailable, the session falls back to reason chips and template text, and cancel still works.
 - **Prompt injection.** The subscriber's text can only change which menu item the model picks.
-- **Merchant numbers come from SQL.** `POST /v1/m/copilot/messages` uses the copilot's read-only tools. It mounts when merchant sign-in and `ANTHROPIC_API_KEY` are set. The model is Claude Sonnet 5.5 (`apps/api/src/modules/agent/llm.ts`).
+- **Merchant numbers come from SQL.** `POST /v1/m/copilot/messages` uses the copilot's read-only tools. It mounts when merchant sign-in and a model key are set. The model is Claude Sonnet 5.5 (`apps/api/src/modules/agent/llm.ts`), or `openai/gpt-oss-120b` on Groq (`agent/groq.ts`). The copilot on Groq is not yet checked on prod-demo.
 
-**Still TODO:** a real-model eval on the submitted commit. The committed adversarial file (`packages/evals/results/adversarial.json`, scripted jailbroken model, not Claude) records `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204 and `deniedPicks` 132 over 404 sessions. `darkPatternScore` is null. [CHAOS-REPORT.md](../CHAOS-REPORT.md) says the paid Haiku run is still to do. Do not paste a dark-pattern score, a latency, or a cost per session from a real model. The running API does not serve `/evals`: `platform.ts` does not register the handlers.
+**Still TODO:** a real-model eval on the submitted commit. The committed adversarial file (`packages/evals/results/adversarial.json`, scripted jailbroken model, not a real one) records `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204 and `deniedPicks` 132 over 404 sessions. `darkPatternScore` is null. [CHAOS-REPORT.md](../CHAOS-REPORT.md) says the paid Haiku run is still to do. Do not paste a dark-pattern score, a latency, or a cost per session from a real model. The running API does not serve `/evals`: `platform.ts` does not register the handlers.
 
 ## Challenges we ran into
 
@@ -84,9 +84,10 @@ Facts from the repo so far (add more as they happen):
 - Subscription transaction ids and refund endpoints were unclear; spike Q1 resolved it on the sandbox.
 - The subscription's last payment amount came back as `"1.0"` while other endpoints use `"1.00"`, so the gateway normalises money before it reaches our schema.
 - Sandbox accounts created with country India fail at subscription approval; US accounts are needed.
-- A judge needs an already-approved subscription, and only a buyer can approve one. The pool is on `main` (`apps/api/src/modules/pool`, `pnpm pool:refill`). Judge Mode leases one for 30 minutes when its env vars are set. Spike [Q10](../spikes/Q10.md) records 50 enrolled on staging on 3 Nov, and says approval stays manual. Today's pool size is not in the repo. `TODO(results)`.
+- A judge needs an already-approved subscription, and only a buyer can approve one. The pool is on `main` (`apps/api/src/modules/pool`, `pnpm pool:refill`). Judge Mode leases one for 30 minutes when its env vars are set. Spike [Q10](../spikes/Q10.md) records 50 enrolled on staging on 3 Nov, and says approval stays manual. prod-demo's pool had 10 on 11 Nov; the target is 150 by 1 Dec (#15).
 - A price PATCH inside 10 days can return 204 and leave the old price in place. Spike [Q4](../spikes/Q4.md) confirmed that on 8 Nov, when the renewal still charged $1.00. The policy therefore does not offer that discount. The outside-window control was not run.
-- Building with a free-tier budget and a small prepaid AI credit.
+- Building with a free-tier budget and a small prepaid AI credit. On submission day the team had no working Anthropic key, so prod-demo moved to Groq's free plan behind the same model interface (ADR 0002); the agent had already been built to degrade to reason chips without a model, and did so until then.
+- Render's static-site rewrite (`/v1/*` to the API) buffers streaming responses until they end, so the dashboard's live feed showed nothing through it. Session streams already used an absolute URL on the API host with a ticket; the feed now does the same (`POST /v1/m/feed/ticket`).
 
 **Still TODO:** team to add real challenges from the last week (e.g. webhook latency, Bryntum, sandbox limits). Do not invent any.
 
@@ -119,7 +120,7 @@ Draft points (team to edit): constrain the model with data and code, not with pr
 
 ## Built with
 
-TypeScript, Node.js, Fastify, zod, Drizzle ORM, PostgreSQL (Neon), pg-boss, Preact (widget, portal, Judge Mode), React, Vite (dashboard), Vitest, fast-check, Turborepo, pnpm, GitHub Actions, Render, Claude (Anthropic API: Haiku 5.5 for the subscriber agent and insight extraction, Sonnet 5.5 for the copilot), PayPal Subscriptions / Plans / Payments (Refunds v2) / Webhooks / JS SDK, Model Context Protocol (`@modelcontextprotocol/sdk`), Resend when `RESEND_API_KEY` is set, Sentry when `SENTRY_DSN` is set.
+TypeScript, Node.js, Fastify, zod, Drizzle ORM, PostgreSQL (Neon), pg-boss, Preact (widget, portal, Judge Mode), React, Vite (dashboard), Vitest, fast-check, Turborepo, pnpm, GitHub Actions, Render, Groq (free plan, OpenAI-compatible API: `openai/gpt-oss-20b` for the subscriber agent and insight extraction, `openai/gpt-oss-120b` for the copilot; what the hosted demo runs on), Claude (Anthropic API: Haiku 5.5 and Sonnet 5.5, the default provider), PayPal Subscriptions / Plans / Payments (Refunds v2) / Webhooks / JS SDK, Model Context Protocol (`@modelcontextprotocol/sdk`), Resend when `RESEND_API_KEY` is set, Sentry when `SENTRY_DSN` is set.
 
 Not in this commit, so leave them off the form: Tailwind CSS, Bryntum Scheduler, Playwright, `@paypal/agent-toolkit`. Spike [Q10](../spikes/Q10.md) decided pool approvals stay manual. Spike [Q8](../spikes/Q8.md) says not to add Bryntum until a written licence exists.
 
@@ -135,8 +136,8 @@ The whole project, as far as this draft knows. An earlier draft said the first c
 
 Go in the Devpost submission form only. Never in this repo.
 
-- Judge Mode URL: `TODO(url)`. `render.yaml` names `keepwell-judge-demo`. This repo does not show it is up.
-- Hosted demo URL: `TODO(url)`. The same file names `keepwell-api-demo`, `keepwell-dashboard-demo`, `keepwell-portal-demo` and `keepwell-store-demo`. Unchecked.
+- Judge Mode URL: https://keepwell-judge-demo.onrender.com
+- Hosted demo: dashboard https://keepwell-dashboard-demo.onrender.com, store https://keepwell-store-demo.onrender.com, portal https://keepwell-portal-demo.onrender.com, API status https://keepwell-api-demo.onrender.com/status
 - Sandbox merchant dashboard login: `TODO(in form)`
 - Sandbox buyer account (for the fully real subscribe-then-cancel path): `TODO(in form)`
 - Notes for judges: all data is fictional; the PayPal environment is the sandbox; Judge Mode leases a pre-approved subscription for 30 minutes.
