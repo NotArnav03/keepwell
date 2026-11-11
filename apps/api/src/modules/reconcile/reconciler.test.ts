@@ -174,8 +174,15 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
   });
 
   it("turns due work into jobs, sweeping and drift-checking by age so a sleeping server catches up", async () => {
-    // Days after the last sweep, as after Render's free plan slept: everything is overdue.
-    now = new Date("2026-11-10T03:00:00Z");
+    // Days after the last sweep, as after Render's free plan slept: everything is overdue. The
+    // earlier tests swept at the real time, so "days later" must be relative to it: a fixed date
+    // passed on 11 Nov 2026 and turned this test red.
+    const day = new Date();
+    day.setUTCDate(day.getUTCDate() + 2);
+    day.setUTCHours(3, 0, 0, 0);
+    const at = (hours: number, minutes: number) =>
+      new Date(day.getTime() + (hours - 3) * 3_600_000 + minutes * 60_000);
+    now = at(3, 0);
     let ran = 0;
     reconciler.registerDueWork("test.ok", () => Promise.resolve(void ran++));
     reconciler.registerDueWork("test.broken", () => Promise.reject(new Error("broken")));
@@ -193,13 +200,13 @@ describe.skipIf(TEST_DATABASE_URL === undefined)("Reconciler", { timeout: 120_00
     await reconciler.sweep(M);
     await reconciler.drift(M);
     sent = [];
-    now = new Date("2026-11-10T03:07:00Z");
+    now = at(3, 7);
     await reconciler.dueSweep();
     expect(sent.map((s) => s.name).filter((n) => n.startsWith("reconcile."))).toEqual([]);
 
     // The next day before 03:00: a sweep is due again, the drift report not yet.
     sent = [];
-    now = new Date("2026-11-11T02:01:00Z");
+    now = at(24 + 2, 1);
     await reconciler.dueSweep();
     const early = sent.map((s) => s.name);
     expect(early).toContain("reconcile.sweep");

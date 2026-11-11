@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { PayPalGatewayError, type PayPalGateway } from "@keepwell/contracts";
 
 /** Where a subscription made by `pnpm pool:refill` stands with its approver. */
@@ -25,4 +26,31 @@ export async function checkApproval(
     if (err instanceof PayPalGatewayError && err.retryable) return { kind: "waiting" };
     throw err;
   }
+}
+
+export const MAX_PER_RUN = 50;
+
+const RefillArgs = z.object({
+  count: z.coerce.number().int().min(0).max(MAX_PER_RUN).default(0),
+  wait: z.coerce
+    .number()
+    .int()
+    .min(0)
+    .max(24 * 60)
+    .default(60),
+});
+export type RefillArgs = z.infer<typeof RefillArgs>;
+
+/**
+ * `[count] [--wait <minutes>]`, in either order. The count is the first argument that is neither a
+ * flag nor the value after `--wait`; without `--wait` nothing is skipped, so a count given first
+ * still counts (it used to be read as 0, which made `pool:refill 10` create nothing).
+ */
+export function parseRefillArgs(argv: readonly string[]): RefillArgs {
+  const waitAt = argv.indexOf("--wait");
+  const waitValueAt = waitAt === -1 ? -1 : waitAt + 1;
+  return RefillArgs.parse({
+    count: argv.find((a, i) => !a.startsWith("--") && i !== waitValueAt),
+    wait: waitAt === -1 ? undefined : argv[waitValueAt],
+  });
 }

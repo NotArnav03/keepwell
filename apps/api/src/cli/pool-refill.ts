@@ -5,7 +5,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { z } from "zod";
 import { PANTRY_PLAN } from "@keepwell/contracts/fakes";
 import { databaseUrl, loadEnv } from "../env.js";
-import { checkApproval } from "../modules/pool/refill.js";
+import { checkApproval, parseRefillArgs } from "../modules/pool/refill.js";
 import { createCore } from "../platform.js";
 
 // `pnpm pool:refill [count] [--wait <minutes>]`: tops up the judge pool (#15, ARCHITECTURE.md
@@ -18,26 +18,11 @@ import { createCore } from "../platform.js";
 // nothing: the next run (with or without a count) picks the unapproved ones up again.
 // Bulk creation, so only when M1 or the user asks (tools/CLAUDE.md), and at most 50 a run.
 
-const MAX_PER_RUN = 50;
 const POLL_MS = 30_000;
 const ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 const DIR = join(ROOT, ".pool-refill");
 
-const Args = z.object({
-  count: z.coerce.number().int().min(0).max(MAX_PER_RUN).default(0),
-  wait: z.coerce
-    .number()
-    .int()
-    .min(0)
-    .max(24 * 60)
-    .default(60),
-});
-const argv = process.argv.slice(2);
-const waitAt = argv.indexOf("--wait");
-const { count, wait } = Args.parse({
-  count: argv.find((a, i) => !a.startsWith("--") && i !== waitAt + 1),
-  wait: waitAt === -1 ? undefined : argv[waitAt + 1],
-});
+const { count, wait } = parseRefillArgs(process.argv.slice(2));
 
 const env = loadEnv();
 const url = databaseUrl(env);
