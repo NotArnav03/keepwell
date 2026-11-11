@@ -15,6 +15,10 @@ const PRICES: Record<string, { input: number; output: number; cacheRead: number;
   // $2 / $10 per MTok, cache reads 0.05× input = $0.10 (platform.claude.com pricing page, checked 2026-11-06).
   // Not used by the agent; the copilot (M5) runs on it through this client.
   "claude-sonnet-5-5": { input: 2_000, output: 10_000, cacheRead: 100, cacheWrite: 2_500 },
+  // Groq's free plan (ADR 0002): no charge, so zero here. Groq's own per-minute and per-day limits
+  // are the cap, and a 429 drops the session to L1. Price these before moving to a paid Groq plan.
+  "openai/gpt-oss-20b": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  "openai/gpt-oss-120b": { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 };
 
 export interface TokenUsage {
