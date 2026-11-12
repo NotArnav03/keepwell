@@ -23,6 +23,15 @@ import { runEvals } from "./run.js";
 
 const Provider = z.enum(["anthropic", "groq"]);
 
+// Groq's free plan limits each model separately (8,000 tokens a minute each). The simulated
+// subscriber and the judge go to 120b, so they don't use up the agent's 20b quota and push its
+// calls into 429s, which would show as L1 fallbacks that production wouldn't have.
+const EVAL_GROQ_MODELS: Record<LlmPurpose, string> = {
+  ...GROQ_MODEL_FOR,
+  simulate: "openai/gpt-oss-120b",
+  judge: "openai/gpt-oss-120b",
+};
+
 const write = (line: string) => process.stderr.write(`${line}\n`);
 const log: AgentLogger = {
   info: () => {},
@@ -78,13 +87,13 @@ async function main(): Promise<void> {
       if (!apiKey) throw new Error("GROQ_API_KEY is not set");
       const minIntervalMs = Number(values["pace-ms"] ?? "2500");
       if (!(minIntervalMs >= 0)) throw new Error("--pace-ms must be a number of milliseconds");
-      const llm = new PacedLlmClient(new GroqLlmClient({ apiKey, log, budget }), {
+      const llm = new PacedLlmClient(new GroqLlmClient({ apiKey, log, budget, models: EVAL_GROQ_MODELS }), {
         minIntervalMs,
         retryPurposes: new Set<LlmPurpose>(["simulate", "judge"]),
         retryWaitsMs: [20_000, 40_000, 60_000],
         retryDeadlineMs: 20_000,
       });
-      real = { llm, usage, models: { ...GROQ_MODEL_FOR } };
+      real = { llm, usage, models: { ...EVAL_GROQ_MODELS } };
     } else {
       const apiKey = process.env.ANTHROPIC_API_KEY;
       if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
@@ -113,6 +122,17 @@ async function main(): Promise<void> {
   if (real) {
     const spent = real.usage.entries.reduce((sum, e) => sum + e.costNanoUsd, 0) / 1e9;
     write(`spent $${spent.toFixed(4)}`);
+    const byPurpose = new Map<string, { calls: number; tokens: number }>();
+    for (const e of real.usage.entries) {
+      const key = `${e.purpose} (${e.model})`;
+      const row = byPurpose.get(key) ?? { calls: 0, tokens: 0 };
+      row.calls += 1;
+      row.tokens += e.inputTokens + e.outputTokens;
+      byPurpose.set(key, row);
+    }
+    for (const [key, { calls, tokens }] of byPurpose) {
+      write(`  ${key}: ${calls} calls, ${Math.round(tokens / Math.max(calls, 1))} tokens per call`);
+    }
   }
   write(`gates ${results.gates.passed ? "PASSED" : "FAILED"}: ${JSON.stringify(results.gates)}`);
   write(`wrote ${typeof out === "string" ? out : out.pathname}`);

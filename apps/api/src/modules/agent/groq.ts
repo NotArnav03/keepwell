@@ -56,6 +56,8 @@ export interface GroqLlmClientOptions {
   log: AgentLogger;
   /** The budget guard. null only in tests that aren't about spending. */
   budget: LlmBudget | null;
+  /** The model for each purpose; GROQ_MODEL_FOR unless the evals move their own roles elsewhere. */
+  models?: Readonly<Record<LlmPurpose, string>>;
   /** Injected in tests; global fetch otherwise. */
   fetch?: typeof fetch;
   /** Monotonic milliseconds, for model time. */
@@ -66,6 +68,7 @@ export class GroqLlmClient implements LlmClient {
   private readonly apiKey: string;
   private readonly log: AgentLogger;
   private readonly budget: LlmBudget | null;
+  private readonly models: Readonly<Record<LlmPurpose, string>>;
   private readonly fetch: typeof fetch;
   private readonly now: () => number;
 
@@ -73,12 +76,13 @@ export class GroqLlmClient implements LlmClient {
     this.apiKey = options.apiKey;
     this.log = options.log;
     this.budget = options.budget;
+    this.models = options.models ?? GROQ_MODEL_FOR;
     this.fetch = options.fetch ?? ((input, init) => fetch(input, init));
     this.now = options.now ?? (() => performance.now());
   }
 
   async structured<S extends z.ZodType>(call: StructuredCall<S>): Promise<z.infer<S>> {
-    const model = GROQ_MODEL_FOR[call.purpose];
+    const model = this.models[call.purpose];
     // Best-effort mode (strict: false): strict mode needs every property required, and our schemas
     // have optional fields. The output is validated below either way, as on Anthropic.
     const schema = z.toJSONSchema(call.schema, { target: "draft-7", io: "output" });

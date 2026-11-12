@@ -32,7 +32,7 @@ const completion = (content: string | null, finishReason = "stop", refusal: stri
 
 function clientReturning(
   responses: ({ status: number; body: unknown } | Error)[],
-  options: { budget?: LlmBudget | null; log?: AgentLogger } = {},
+  options: { budget?: LlmBudget | null; log?: AgentLogger; models?: Record<LlmPurpose, string> } = {},
 ) {
   const requests: { url: string; headers: Record<string, string>; body: Record<string, unknown> }[] = [];
   const fetch = (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
@@ -51,6 +51,7 @@ function clientReturning(
     apiKey: "gsk_test",
     log: options.log ?? logger().log,
     budget: options.budget ?? null,
+    ...(options.models && { models: options.models }),
     fetch,
   });
   return { client, requests };
@@ -92,6 +93,20 @@ describe("GroqLlmClient", () => {
     const { client, requests } = clientReturning([{ status: 200, body: completion('{"answer":"no"}') }]);
     await client.structured(call("copilot"));
     expect(requests[0]?.body.model).toBe("openai/gpt-oss-120b");
+  });
+
+  it("takes a model per purpose when given one, so the evals can move their own roles", async () => {
+    const models = { ...GROQ_MODEL_FOR, judge: "openai/gpt-oss-120b" };
+    const { client, requests } = clientReturning(
+      [
+        { status: 200, body: completion('{"answer":"no"}') },
+        { status: 200, body: completion('{"answer":"no"}') },
+      ],
+      { models },
+    );
+    await client.structured(call("judge"));
+    await client.structured(call("converse"));
+    expect(requests.map((r) => r.body.model)).toEqual(["openai/gpt-oss-120b", "openai/gpt-oss-20b"]);
   });
 
   it("is unavailable on a rate limit, a bad key or a 5xx, so the session goes to L1", async () => {
