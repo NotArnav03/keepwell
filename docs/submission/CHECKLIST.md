@@ -22,7 +22,7 @@ Deadline: submit by **12 Nov 2026, 20:00 IST** (real deadline 13 Nov 01:30 IST).
 | 12 | Hosted demo on `prod-demo` working from a clean browser | Arnav | TODO | Test in a fresh profile, also with the API asleep (cold start) |
 | 13 | Judge Mode tested by someone outside the team | Aditya | TODO | Planned 10 Nov |
 | 14 | Test credentials (sandbox merchant dashboard login and sandbox buyer account) in the submission form | Arnav | TODO | Dedicated sandbox accounts, never committed. Only in the form |
-| 15 | Public YouTube video under 3 minutes | Ayush | TODO | Record 11 Nov; check it is public and under 3:00 |
+| 15 | Public YouTube video under 3 minutes | Ayush | Done | https://youtu.be/p8TMMUEiFrg (2:44), uploaded 12 Nov |
 | 16 | Devpost text: problem, solution, how PayPal is central, how AI is used, what is new since 1 October, built with | Om | in progress | Draft in [devpost.md](devpost.md), refreshed 9 Nov. Still TODO before paste: sandbox browser run, real-model eval, hosted URLs, `git log --reverse` for the 1 October claim |
 | 17 | All five members registered on Devpost | Everyone | TODO | Each person confirms; not verifiable from the repo |
 | 18 | All five members added to the Devpost submission | Arnav | TODO | Representative adds them in the form |

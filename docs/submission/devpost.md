@@ -147,7 +147,7 @@ Go in the Devpost submission form only. Never in this repo.
 ## Links
 
 - Public repository: https://github.com/NotArnav03/keepwell (MIT licence)
-- Demo video (public YouTube, under 3 minutes): `TODO(url)`
+- Demo video (YouTube, 2:44): https://youtu.be/p8TMMUEiFrg
 - Eval scoreboard: `TODO(url)`. The handlers exist and `platform.ts` does not register them, so there is no live page to link.
 - Chaos report: [docs/CHAOS-REPORT.md](../CHAOS-REPORT.md) in this repo (agent drills recorded, other rows Open). A public URL for the form is `TODO(url)`.
 
