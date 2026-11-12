@@ -1,0 +1,84 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/billing/subscriptions/I-B8CYE4CFF4GH",
+    "headers": {},
+    "body": null
+  },
+  "response": {
+    "status": 200,
+    "debugId": "f340080b03968",
+    "body": {
+      "status": "ACTIVE",
+      "status_update_time": "2026-11-12T06:48:12Z",
+      "id": "I-B8CYE4CFF4GH",
+      "plan_id": "P-0RV456230L274172RNLRYXYQ",
+      "start_time": "2026-11-12T06:44:36Z",
+      "quantity": "1",
+      "shipping_amount": {
+        "currency_code": "USD",
+        "value": "0.0"
+      },
+      "subscriber": {
+        "redacted": "personal details removed"
+      },
+      "billing_info": {
+        "outstanding_balance": {
+          "currency_code": "USD",
+          "value": "0.0"
+        },
+        "current_cycle_sequence": 1,
+        "cycle_executions": [
+          {
+            "tenure_type": "REGULAR",
+            "sequence": 1,
+            "cycles_completed": 1,
+            "cycles_remaining": 0,
+            "current_pricing_scheme_version": 1,
+            "total_cycles": 0
+          }
+        ],
+        "last_payment": {
+          "amount": {
+            "currency_code": "USD",
+            "value": "1.0"
+          },
+          "time": "2026-11-12T06:48:12Z"
+        },
+        "next_billing_time": "2026-11-13T10:00:00Z",
+        "failed_payments_count": 0
+      },
+      "create_time": "2026-11-12T06:48:11Z",
+      "update_time": "2026-11-12T06:48:12Z",
+      "custom_id": "spike-q3",
+      "plan_overridden": false,
+      "links": [
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-B8CYE4CFF4GH/cancel",
+          "rel": "cancel",
+          "method": "POST"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-B8CYE4CFF4GH",
+          "rel": "edit",
+          "method": "PATCH"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-B8CYE4CFF4GH",
+          "rel": "self",
+          "method": "GET"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-B8CYE4CFF4GH/suspend",
+          "rel": "suspend",
+          "method": "POST"
+        },
+        {
+          "href": "https://api.sandbox.paypal.com/v1/billing/subscriptions/I-B8CYE4CFF4GH/capture",
+          "rel": "capture",
+          "method": "POST"
+        }
+      ]
+    }
+  }
+}

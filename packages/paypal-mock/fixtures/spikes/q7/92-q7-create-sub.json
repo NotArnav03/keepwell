@@ -1,0 +1,52 @@
+{
+  "request": {
+    "method": "POST",
+    "path": "/v1/billing/subscriptions",
+    "headers": {},
+    "body": {
+      "plan_id": "P-0RV456230L274172RNLRYXYQ",
+      "custom_id": "spike-q7",
+      "application_context": {
+        "brand_name": "Pantry Plan (spike)",
+        "user_action": "SUBSCRIBE_NOW",
+        "return_url": "https://example.com/return",
+        "cancel_url": "https://example.com/cancel"
+      }
+    }
+  },
+  "response": {
+    "status": 201,
+    "debugId": "f235648735201",
+    "body": {
+      "status": "APPROVAL_PENDING",
+      "status_update_time": "2026-11-12T06:52:32Z",
+      "id": "I-8YW2JDESV2VT",
+      "plan_id": "P-0RV456230L274172RNLRYXYQ",
+      "start_time": "2026-11-12T06:52:32Z",
+      "quantity": "1",
+      "subscriber": {
+        "redacted": "personal details removed"
+      },
+      "create_time": "2026-11-12T06:52:32Z",
+      "custom_id": "spike-q7",
+      "plan_overridden": false,
+      "links": [
+        {
+          "href": "https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=BA-REDACTED",
+          "rel": "approve",
+          "method": "GET"
+        },
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-8YW2JDESV2VT",
+          "rel": "edit",
+          "method": "PATCH"
+        },
+        {
+          "href": "https://api-m.sandbox.paypal.com/v1/billing/subscriptions/I-8YW2JDESV2VT",
+          "rel": "self",
+          "method": "GET"
+        }
+      ]
+    }
+  }
+}
