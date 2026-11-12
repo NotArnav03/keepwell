@@ -30,6 +30,27 @@ const log: AgentLogger = {
   error: (obj: unknown, msg?: string) => write(`error: ${msg ?? ""} ${JSON.stringify(obj)}`),
 } as AgentLogger;
 
+// One small call before the run. Without it a bad key or an exhausted quota turns every session
+// into an L1 fallback and every judgement into "unjudged", and the run still reports the gates as
+// passed (L1 never breaks policy), which reads like a result when it is none.
+async function preflight(llm: LlmClient, provider: string): Promise<void> {
+  try {
+    await llm.structured({
+      purpose: "classify", // not retried by PacedLlmClient, so a bad key fails at once
+      sessionId: null,
+      system: 'Answer with JSON: {"ok": true}.',
+      input: "ping",
+      schema: z.object({ ok: z.boolean() }),
+      maxTokens: 64,
+      signal: AbortSignal.timeout(30_000),
+    });
+  } catch (err) {
+    throw new Error(`${provider} preflight call failed; check the API key and quota before a real run`, {
+      cause: err,
+    });
+  }
+}
+
 async function main(): Promise<void> {
   const { values } = parseArgs({
     // `pnpm eval -- --mode real` passes the "--" through.
@@ -73,6 +94,7 @@ async function main(): Promise<void> {
         models: { ...MODEL_FOR },
       };
     }
+    await preflight(real.llm, provider);
     write(`real run on ${provider}: ${personas.length} personas, budget ${dailyBudgetUsd.toFixed(2)}`);
   }
 
