@@ -19,7 +19,8 @@ import { runEvals } from "./run.js";
 // ANTHROPIC_API_KEY (or GROQ_API_KEY with --provider groq, which defaults to LLM_PROVIDER) from
 // the environment or the repo's .env, and stops spending at EVAL_BUDGET_USD (default 1.00):
 // sessions after that fall to L1, as they would in production. On Groq, calls are spaced
-// --pace-ms apart (default 2500) to stay under the free plan's per-minute limits.
+// holding the eval's own calls --pace-ms after the last call (default 15000), which keeps the agent under
+// the free plan's 8,000 tokens a minute per model without ever delaying an agent call (paced.ts).
 
 const Provider = z.enum(["anthropic", "groq"]);
 
@@ -85,7 +86,7 @@ async function main(): Promise<void> {
     if (provider === "groq") {
       const apiKey = process.env.GROQ_API_KEY;
       if (!apiKey) throw new Error("GROQ_API_KEY is not set");
-      const minIntervalMs = Number(values["pace-ms"] ?? "2500");
+      const minIntervalMs = Number(values["pace-ms"] ?? "15000");
       if (!(minIntervalMs >= 0)) throw new Error("--pace-ms must be a number of milliseconds");
       const llm = new PacedLlmClient(new GroqLlmClient({ apiKey, log, budget, models: EVAL_GROQ_MODELS }), {
         minIntervalMs,

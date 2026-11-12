@@ -51,14 +51,18 @@ const options = (clock: ReturnType<typeof fakeClock>) => ({
 });
 
 describe("PacedLlmClient", () => {
-  it("starts calls at least minIntervalMs apart", async () => {
+  it("holds the eval's own calls back until minIntervalMs after the last call, and never the agent's", async () => {
     const clock = fakeClock();
     const { llm } = innerFailing(0);
     const paced = new PacedLlmClient(llm, options(clock));
-    await paced.structured(call("classify"));
+    await paced.structured(call("simulate")); // first call: no wait
+    await paced.structured(call("classify")); // agent: no wait, but it counts as the last call
     await paced.structured(call("converse"));
+    expect(clock.sleeps).toEqual([]);
+    clock.sleeps.length = 0;
+    await clock.sleep(500); // the agent's reply took 500 ms
     await paced.structured(call("judge"));
-    expect(clock.sleeps).toEqual([2000, 2000]);
+    expect(clock.sleeps).toEqual([500, 1500]);
   });
 
   it("lets the eval's own roles wait out a rate limit, with a fresh deadline", async () => {
