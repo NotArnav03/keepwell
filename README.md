@@ -8,7 +8,7 @@ Subscription businesses lose revenue at three moments: when a subscriber goes to
 
 ## See it in 2 minutes
 
-**Judge Mode: https://keepwell-judge-demo.onrender.com** · `TODO(url)`: demo video (under 3 minutes).
+**Judge Mode: https://keepwell-judge-demo.onrender.com** · **Demo video (2:44): https://youtu.be/p8TMMUEiFrg**
 
 | prod-demo | URL |
 |---|---|
