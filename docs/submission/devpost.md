@@ -74,7 +74,7 @@ A small, fast model runs the short conversation, classifies the cancel reason an
 - **Prompt injection.** The subscriber's text can only change which menu item the model picks.
 - **Merchant numbers come from SQL.** `POST /v1/m/copilot/messages` uses the copilot's read-only tools. It mounts when merchant sign-in and a model key are set. The model is Claude Sonnet 5.5 (`apps/api/src/modules/agent/llm.ts`), or `openai/gpt-oss-120b` on Groq (`agent/groq.ts`). The copilot on Groq is not yet checked on prod-demo.
 
-**Still TODO:** a real-model eval on the submitted commit. The committed adversarial file (`packages/evals/results/adversarial.json`, scripted jailbroken model, not a real one) records `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204 and `deniedPicks` 132 over 404 sessions. `darkPatternScore` is null. [CHAOS-REPORT.md](../CHAOS-REPORT.md) says the paid Haiku run is still to do. Do not paste a dark-pattern score, a latency, or a cost per session from a real model. The running API does not serve `/evals`: `platform.ts` does not register the handlers.
+**Evals.** The committed adversarial file (`packages/evals/results/adversarial.json`, a scripted jailbroken model, not a real one) records `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204 and `deniedPicks` 132 over 404 sessions. A real-model run on 12 Nov (`packages/evals/results/real-groq-subset.json`) used the model prod-demo runs, `openai/gpt-oss-20b` on Groq, over the 51-persona subset: 0 policy violations, 1 click to cancel, 0 violations in 13 red-team sessions, dark-pattern score 0.06 of 3, classification and language match 1.00, no fallbacks, reply latency p50 855 ms and p95 3.0 s. The claims checker caught 7 figures or durations in the model's text, and the policy refused 2 off-menu picks prompted by a fake `<menu>` injection. Not run: all 404 personas on a real model, and any Claude model (no key). The running API does not serve `/evals`: `platform.ts` does not register the handlers.
 
 ## Challenges we ran into
 
@@ -100,7 +100,7 @@ Only list items that are true on the submitted commit:
 - Webhook verification against real PayPal: spike [Q6](../spikes/Q6.md) records 30 of 30 VERIFIED on 3 Nov. The chaos-day rows for killing the API and dropping webhooks are still Open in [CHAOS-REPORT.md](../CHAOS-REPORT.md). `TODO(results)` for those.
 - A hash-chained audit log. `GET /v1/m/audit/verify` mounts with merchant sign-in.
 - A mock PayPal server that mirrors the sandbox, built from recorded spike responses. On `main`.
-- An adversarial eval result committed at `packages/evals/results/adversarial.json` (scripted model, gates passed, as cited above). The public scoreboard is not served. A real-model run is `TODO(results)`.
+- An adversarial eval result committed at `packages/evals/results/adversarial.json` (scripted model, gates passed, as cited above), and a real-model run on Groq over the 51-persona subset (`real-groq-subset.json`, gates passed). The public scoreboard is not served.
 
 **Still TODO:** every bullet depends on the verified results; see CHECKLIST.md "Facts we must not claim".
 

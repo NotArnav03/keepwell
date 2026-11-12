@@ -69,7 +69,7 @@ This matches the committed `packages/evals/results/adversarial.json`.
 
 ### What this does not cover
 
-- No real Haiku or Sonnet output: all three drills run without a working key. The real run (#30, about $1 of the $5 credit) is still to do and is the only evidence on tone, language and dark patterns.
+- No real Haiku or Sonnet output: all three drills run without a working key. A real-model run did happen on 12 Nov on Groq's `openai/gpt-oss-20b`, the model prod-demo runs (ADR 0002), over the 51-persona subset: 0 policy violations, 0 red-team violations, dark-pattern score 0.06 of 3. See the README's Evals section and `packages/evals/results/real-groq-subset.json`.
 - A live staging drill (revoke the key in Render, watch a Judge Mode session): the same code path, but it needs access to Render. Arnav, if you run it, add what you see here.
 
 ## M5: notifications and recovery (Om)

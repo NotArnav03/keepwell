@@ -198,7 +198,28 @@ The policy package's Vitest config sets a 100% branch, function, line and statem
 
 ## Evals
 
-The harness in [packages/evals](packages/evals/README.md) has 404 personas: 300 everyday subscribers in English, Hindi and Spanish, and 104 attackers. The hard gates are **0 policy violations** and **1 click to cancel when the persona wants to leave**. Those are gates the harness enforces. The committed adversarial run uses a scripted jailbroken model, not a real one. It passed both gates: `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204, `deniedPicks` 132, over 404 sessions (`packages/evals/results/adversarial.json`). [docs/CHAOS-REPORT.md](docs/CHAOS-REPORT.md) records those same adversarial figures for the prompt-injection drill, and says the paid Haiku run is still to do. `darkPatternScore` in that file is null. The handlers `GET /evals` and `GET /v1/evals` live in `apps/api/src/modules/agent/evals/routes.ts`. `startPlatform` does not register them, so the running API does not serve a scoreboard. `TODO(results)`: a real-model run on the submitted commit, and a scoreboard URL once those routes are mounted.
+The harness in [packages/evals](packages/evals/README.md) has 404 personas: 300 everyday subscribers in English, Hindi and Spanish, and 104 attackers. The hard gates are **0 policy violations** and **1 click to cancel when the persona wants to leave**. Those are gates the harness enforces. The committed adversarial run uses a scripted jailbroken model, not a real one. It passed both gates: `policyViolations` 0, `maxClicksToCancel` 1, `claimsCaught` 204, `deniedPicks` 132, over 404 sessions (`packages/evals/results/adversarial.json`). [docs/CHAOS-REPORT.md](docs/CHAOS-REPORT.md) records those same adversarial figures for the prompt-injection drill.
+
+**Real-model run (12 Nov, Groq, 51-persona PR subset).** There is no working Anthropic key, so the real run used the model prod-demo runs (ADR 0002): `openai/gpt-oss-20b` as the agent, with the simulated subscriber and the judge on `openai/gpt-oss-120b`. The agent's prompts, runtime and policy are the ones tagged `v1.0.0`. Results are in `packages/evals/results/real-groq-subset.json`:
+
+| | |
+|---|---|
+| Sessions | 51 (38 everyday, 13 red team) |
+| Policy violations | **0** |
+| Clicks to cancel (max) | **1** |
+| Red-team violations | 0 of 13 sessions |
+| Classification accuracy | 1.00 |
+| "No" means no | 1.00 |
+| Language match (en, hi, es) | 1.00 |
+| Offer fit | 0.86 (6 of 7 offers fitted the persona's reason) |
+| Dark-pattern score (judge, 0 to 3, lower is better) | 0.06 |
+| Invented claims the claims checker caught | 7 |
+| Off-menu picks the policy refused | 2 |
+| Fallback to L1 | 0 |
+| Reply latency p50 / p95 | 855 ms / 3.0 s |
+| Cost | $0 (Groq free plan) |
+
+What it found, and what stopped it, is in [packages/evals/README.md](packages/evals/README.md#real-run-on-groq-12-nov). It is the subset, not all 404 personas, and the judge is a model of the same family. `TODO(results)`: a Claude Haiku run, which needs a key. The handlers `GET /evals` and `GET /v1/evals` live in `apps/api/src/modules/agent/evals/routes.ts`; `startPlatform` does not register them, so the running API does not serve a scoreboard.
 
 ## Chaos testing
 
